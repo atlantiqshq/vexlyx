@@ -76,7 +76,9 @@ For every provisioned database, Vexlyx generates two types of connection URIs:
    - MySQL: `mysql://u_app_1234:password@localhost:3306/app_production`
 
 3. **Adminer Web GUI**:
-   - Pre-filled deep link: `http://localhost:8088/?pgsql=vexlyx-postgres&username=u_app_1234&db=app_production`
+   - Development defaults to a pre-filled deep link at `http://localhost:8088`.
+   - Production is disabled by default, matching the Compose `debug` profile. The dashboard hides database-specific actions and shows the page-level action as unavailable.
+   - To enable production access, set `ADMINER_URL` to a protected HTTPS endpoint. The API rejects HTTP and localhost production values. Put Adminer behind authentication and network/IP restrictions; Adminer itself provides direct database access.
 
 ---
 
@@ -84,26 +86,28 @@ For every provisioned database, Vexlyx generates two types of connection URIs:
 
 When a database is linked to a project with `autoInjectEnv = true`, the following variables are automatically encrypted and inserted into the project's environment variables:
 
-| Variable | Description | Example |
-|----------|-------------|---------|
+| Variable       | Description             | Example                                             |
+| -------------- | ----------------------- | --------------------------------------------------- |
 | `DATABASE_URL` | Internal connection URI | `postgresql://u_app:pw@vexlyx-postgres:5432/app_db` |
-| `DB_TYPE` | Database engine type | `POSTGRESQL` or `MYSQL` |
-| `DB_HOST` | Internal Docker host | `vexlyx-postgres` or `vexlyx-mysql` |
-| `DB_PORT` | Port number | `5432` or `3306` |
-| `DB_NAME` | Database name | `app_db` |
-| `DB_USER` | Scoped username | `u_app_9a2f` |
-| `DB_PASSWORD` | Plaintext password | `••••••••••••••••••••••••` |
+| `DB_TYPE`      | Database engine type    | `POSTGRESQL` or `MYSQL`                             |
+| `DB_HOST`      | Internal Docker host    | `vexlyx-postgres` or `vexlyx-mysql`                 |
+| `DB_PORT`      | Port number             | `5432` or `3306`                                    |
+| `DB_NAME`      | Database name           | `app_db`                                            |
+| `DB_USER`      | Scoped username         | `u_app_9a2f`                                        |
+| `DB_PASSWORD`  | Plaintext password      | `••••••••••••••••••••••••`                          |
 
 ---
 
 ## API Endpoints
 
 ### 1. List Databases
+
 ```http
 GET /api/databases?projectId=cm123&type=POSTGRESQL&search=app&page=1&limit=20
 ```
 
 ### 2. Provision Database
+
 ```http
 POST /api/databases
 Content-Type: application/json
@@ -117,16 +121,19 @@ Content-Type: application/json
 ```
 
 ### 3. Get Database & Credentials
+
 ```http
 GET /api/databases/:id
 ```
 
 ### 4. Test Connectivity
+
 ```http
 POST /api/databases/:id/test
 ```
 
 ### 5. Drop Database & User
+
 ```http
 DELETE /api/databases/:id
 ```
@@ -142,6 +149,7 @@ python tests/test_database_provisioning.py
 ```
 
 Expected output:
+
 ```
 =================================================================
 Running Vexlyx Database Provisioning Test Suite (F2.6)

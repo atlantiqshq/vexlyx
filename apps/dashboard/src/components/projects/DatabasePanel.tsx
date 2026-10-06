@@ -21,7 +21,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -34,7 +40,10 @@ import {
 } from "@/components/ui/dialog";
 import { fetchAPI, ApiRequestError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useRefreshAnimation, refreshIconClassName } from "@/hooks/useRefreshAnimation";
+import {
+  useRefreshAnimation,
+  refreshIconClassName,
+} from "@/hooks/useRefreshAnimation";
 import type { DatabaseDetail, DatabaseType, Project } from "@vexlyx/shared";
 
 interface DatabasePanelProps {
@@ -42,7 +51,10 @@ interface DatabasePanelProps {
   onProjectUpdate?: () => void;
 }
 
-export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) {
+export function DatabasePanel({
+  project,
+  onProjectUpdate,
+}: DatabasePanelProps) {
   const [databases, setDatabases] = useState<DatabaseDetail[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { isRefreshing, refresh } = useRefreshAnimation();
@@ -77,22 +89,27 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
   // Data Fetching
   // ---------------------------------------------------------------------------
 
-  const fetchDatabases = useCallback(async (quiet = false) => {
-    if (!quiet) setIsLoading(true);
+  const fetchDatabases = useCallback(
+    async (quiet = false) => {
+      if (!quiet) setIsLoading(true);
 
-    try {
-      const res = await fetchAPI<{ databases: DatabaseDetail[] }>(
-        `/api/databases?projectId=${project.id}`,
-      );
-      setDatabases(res.databases ?? []);
-    } catch (err) {
-      toast.error(
-        err instanceof ApiRequestError ? err.message : "Failed to load project databases",
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  }, [project.id]);
+      try {
+        const res = await fetchAPI<{ databases: DatabaseDetail[] }>(
+          `/api/databases?projectId=${project.id}`,
+        );
+        setDatabases(res.databases ?? []);
+      } catch (err) {
+        toast.error(
+          err instanceof ApiRequestError
+            ? err.message
+            : "Failed to load project databases",
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [project.id],
+  );
 
   const handleRefresh = () =>
     refresh(async () => {
@@ -150,7 +167,9 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
       setCredentialsModalOpen(true);
     } catch (err) {
       toast.error(
-        err instanceof ApiRequestError ? err.message : "Failed to provision database",
+        err instanceof ApiRequestError
+          ? err.message
+          : "Failed to provision database",
       );
     } finally {
       setIsCreating(false);
@@ -187,7 +206,8 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
         toast.error(`Connection failed: ${res.error ?? "Unknown error"}`);
       }
     } catch (err) {
-      const msg = err instanceof ApiRequestError ? err.message : "Connection test failed";
+      const msg =
+        err instanceof ApiRequestError ? err.message : "Connection test failed";
       setTestResult({
         id: db.id,
         connected: false,
@@ -217,7 +237,9 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
       onProjectUpdate?.();
     } catch (err) {
       toast.error(
-        err instanceof ApiRequestError ? err.message : "Failed to delete database",
+        err instanceof ApiRequestError
+          ? err.message
+          : "Failed to delete database",
       );
     } finally {
       setIsDeleting(false);
@@ -246,14 +268,20 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
             aria-label="Refresh project databases"
             className="h-8 w-8 text-muted-foreground hover:text-foreground"
           >
-            <RefreshCw className={refreshIconClassName(isRefreshing, "h-3.5 w-3.5")} />
+            <RefreshCw
+              className={refreshIconClassName(isRefreshing, "h-3.5 w-3.5")}
+            />
           </Button>
 
           <Button
             id="add-project-db-btn"
             size="sm"
             onClick={() => {
-              const defaultName = `${project.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_db`.slice(0, 30);
+              const defaultName =
+                `${project.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_db`.slice(
+                  0,
+                  30,
+                );
               setCreateName(defaultName);
               setCreateModalOpen(true);
             }}
@@ -274,15 +302,22 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
         ) : databases.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border/80 p-6 text-center">
             <Database className="mx-auto h-8 w-8 text-muted-foreground/60 mb-2" />
-            <p className="text-sm font-medium text-foreground">No databases attached yet</p>
+            <p className="text-sm font-medium text-foreground">
+              No databases attached yet
+            </p>
             <p className="text-xs text-muted-foreground mt-0.5 max-w-sm mx-auto">
-              Provision a database for this project to automatically inject connection credentials.
+              Provision a database for this project to automatically inject
+              connection credentials.
             </p>
             <Button
               variant="outline"
               size="sm"
               onClick={() => {
-                const defaultName = `${project.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_db`.slice(0, 30);
+                const defaultName =
+                  `${project.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_db`.slice(
+                    0,
+                    30,
+                  );
                 setCreateName(defaultName);
                 setCreateModalOpen(true);
               }}
@@ -324,7 +359,9 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
                         <span
                           className={cn(
                             "flex items-center gap-1 text-[11px] font-medium",
-                            test.connected ? "text-emerald-500" : "text-rose-500",
+                            test.connected
+                              ? "text-emerald-500"
+                              : "text-rose-500",
                           )}
                         >
                           {test.connected ? (
@@ -357,7 +394,9 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
                       variant="outline"
                       size="sm"
                       className="text-xs h-7 px-2 border-border hover:bg-muted"
-                      onClick={() => handleCopy(db.internalConnectionString, `uri_${db.id}`)}
+                      onClick={() =>
+                        handleCopy(db.internalConnectionString, `uri_${db.id}`)
+                      }
                     >
                       {copiedField === `uri_${db.id}` ? (
                         <Check className="mr-1 h-3 w-3 text-emerald-500" />
@@ -395,17 +434,23 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
                       )}
                     </Button>
 
-                    <Button
-                      asChild
-                      variant="outline"
-                      size="icon"
-                      className="h-7 w-7 border-border hover:bg-muted"
-                      title="Open in Adminer"
-                    >
-                      <a href={db.adminerUrl} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="h-3 w-3 text-muted-foreground hover:text-foreground" />
-                      </a>
-                    </Button>
+                    {db.adminerUrl && (
+                      <Button
+                        asChild
+                        variant="outline"
+                        size="icon"
+                        className="h-7 w-7 border-border hover:bg-muted"
+                        title="Open in Adminer"
+                      >
+                        <a
+                          href={db.adminerUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <ExternalLink className="h-3 w-3 text-muted-foreground hover:text-foreground" />
+                        </a>
+                      </Button>
+                    )}
 
                     <Button
                       variant="outline"
@@ -434,7 +479,8 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
                 Add Project Database
               </DialogTitle>
               <DialogDescription>
-                Provisions an isolated database for &ldquo;{project.name}&rdquo;.
+                Provisions an isolated database for &ldquo;{project.name}
+                &rdquo;.
               </DialogDescription>
             </DialogHeader>
 
@@ -454,8 +500,12 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
                         : "border-border bg-card hover:bg-muted/50 text-muted-foreground",
                     )}
                   >
-                    <div className="font-semibold text-sm text-foreground">PostgreSQL</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">Port 5432</div>
+                    <div className="font-semibold text-sm text-foreground">
+                      PostgreSQL
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      Port 5432
+                    </div>
                   </div>
 
                   <div
@@ -467,15 +517,22 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
                         : "border-border bg-card hover:bg-muted/50 text-muted-foreground",
                     )}
                   >
-                    <div className="font-semibold text-sm text-foreground">MySQL</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">Port 3306</div>
+                    <div className="font-semibold text-sm text-foreground">
+                      MySQL
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      Port 3306
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Database Name */}
               <div className="space-y-1.5">
-                <Label htmlFor="project-db-name" className="text-xs font-medium text-foreground">
+                <Label
+                  htmlFor="project-db-name"
+                  className="text-xs font-medium text-foreground"
+                >
                   Database Name
                 </Label>
                 <Input
@@ -497,9 +554,19 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
                   onChange={(e) => setCreateAutoInject(e.target.checked)}
                   className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
                 />
-                <Label htmlFor="project-auto-inject-env" className="text-xs leading-relaxed text-foreground cursor-pointer">
-                  <span className="font-semibold block">Auto-inject environment variables</span>
-                  Sets <code className="text-primary font-mono text-[11px]">DATABASE_URL</code> and DB credentials into this project&apos;s environment configuration.
+                <Label
+                  htmlFor="project-auto-inject-env"
+                  className="text-xs leading-relaxed text-foreground cursor-pointer"
+                >
+                  <span className="font-semibold block">
+                    Auto-inject environment variables
+                  </span>
+                  Sets{" "}
+                  <code className="text-primary font-mono text-[11px]">
+                    DATABASE_URL
+                  </code>{" "}
+                  and DB credentials into this project&apos;s environment
+                  configuration.
                 </Label>
               </div>
             </div>
@@ -514,7 +581,9 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
                 Cancel
               </Button>
               <Button type="submit" disabled={isCreating}>
-                {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isCreating && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
                 Provision
               </Button>
             </DialogFooter>
@@ -523,7 +592,10 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
       </Dialog>
 
       {/* ── Credentials Dialog ────────────────────────────────────────────── */}
-      <Dialog open={credentialsModalOpen} onOpenChange={setCredentialsModalOpen}>
+      <Dialog
+        open={credentialsModalOpen}
+        onOpenChange={setCredentialsModalOpen}
+      >
         <DialogContent className="sm:max-w-xl">
           {selectedDb && (
             <>
@@ -547,7 +619,12 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
                       Internal Docker Connection String
                     </Label>
                     <button
-                      onClick={() => handleCopy(selectedDb.internalConnectionString, "modal_internal_uri")}
+                      onClick={() =>
+                        handleCopy(
+                          selectedDb.internalConnectionString,
+                          "modal_internal_uri",
+                        )
+                      }
                       className="flex items-center gap-1 text-xs text-primary hover:underline"
                     >
                       {copiedField === "modal_internal_uri" ? (
@@ -566,29 +643,43 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
                 <div className="rounded-lg border border-border divide-y divide-border bg-card">
                   <div className="flex items-center justify-between p-2.5 text-xs">
                     <span className="text-muted-foreground">Username</span>
-                    <span className="font-mono text-foreground font-medium">{selectedDb.dbUser}</span>
+                    <span className="font-mono text-foreground font-medium">
+                      {selectedDb.dbUser}
+                    </span>
                   </div>
 
                   <div className="flex items-center justify-between p-2.5 text-xs">
                     <span className="text-muted-foreground">Password</span>
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-foreground font-medium">
-                        {showPassword ? (selectedDb.dbPassword ?? "••••••••") : "••••••••••••••••••••••••"}
+                        {showPassword
+                          ? (selectedDb.dbPassword ?? "••••••••")
+                          : "••••••••••••••••••••••••"}
                       </span>
                       <button
                         onClick={() => setShowPassword(!showPassword)}
                         className="text-muted-foreground hover:text-foreground mr-1"
                         title={showPassword ? "Hide password" : "Show password"}
                       >
-                        {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        {showPassword ? (
+                          <EyeOff className="h-3.5 w-3.5" />
+                        ) : (
+                          <Eye className="h-3.5 w-3.5" />
+                        )}
                       </button>
                       {selectedDb.dbPassword && (
                         <button
-                          onClick={() => handleCopy(selectedDb.dbPassword!, "modal_pw")}
+                          onClick={() =>
+                            handleCopy(selectedDb.dbPassword!, "modal_pw")
+                          }
                           className="text-muted-foreground hover:text-foreground"
                           title="Copy password"
                         >
-                          {copiedField === "modal_pw" ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                          {copiedField === "modal_pw" ? (
+                            <Check className="h-3.5 w-3.5 text-emerald-500" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
                         </button>
                       )}
                     </div>
@@ -597,19 +688,28 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
               </div>
 
               <DialogFooter className="flex sm:justify-between items-center gap-2">
-                <Button
-                  asChild
-                  variant="outline"
-                  size="sm"
-                  className="border-border text-foreground hover:bg-muted"
-                >
-                  <a href={selectedDb.adminerUrl} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
-                    Open in Adminer
-                  </a>
-                </Button>
+                {selectedDb.adminerUrl && (
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    className="border-border text-foreground hover:bg-muted"
+                  >
+                    <a
+                      href={selectedDb.adminerUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                      Open in Adminer
+                    </a>
+                  </Button>
+                )}
 
-                <Button size="sm" onClick={() => setCredentialsModalOpen(false)}>
+                <Button
+                  size="sm"
+                  onClick={() => setCredentialsModalOpen(false)}
+                >
                   Done
                 </Button>
               </DialogFooter>
@@ -619,7 +719,10 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
       </Dialog>
 
       {/* ── Delete Modal ──────────────────────────────────────────────────── */}
-      <Dialog open={!!deleteDb} onOpenChange={(open) => !open && setDeleteDb(null)}>
+      <Dialog
+        open={!!deleteDb}
+        onOpenChange={(open) => !open && setDeleteDb(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="text-destructive flex items-center gap-2">
@@ -627,7 +730,11 @@ export function DatabasePanel({ project, onProjectUpdate }: DatabasePanelProps) 
               Delete Database &ldquo;{deleteDb?.name}&rdquo;?
             </DialogTitle>
             <DialogDescription>
-              This will drop the database and remove the user <code className="font-mono text-foreground">{deleteDb?.dbUser}</code> from {deleteDb?.type}. Data will be permanently lost.
+              This will drop the database and remove the user{" "}
+              <code className="font-mono text-foreground">
+                {deleteDb?.dbUser}
+              </code>{" "}
+              from {deleteDb?.type}. Data will be permanently lost.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

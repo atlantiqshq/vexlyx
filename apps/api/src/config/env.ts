@@ -4,126 +4,152 @@ import { z } from "zod";
  * Zod schema defining all required environment variables for the API server.
  * Validates types and provides sensible defaults for local development.
  */
-const envSchema = z.object({
-  PORT: z.coerce.number().int().positive().default(5000),
-  HOST: z.string().min(1).default("0.0.0.0"),
-  NODE_ENV: z
-    .enum(["development", "production", "test"])
-    .default("development"),
-  CORS_ORIGIN: z.string().url().default("http://localhost:3000"),
-  DATABASE_URL: z.string().url(),
-  REDIS_URL: z.string().default("redis://localhost:6379"),
-  SESSION_SECRET: z.string().min(32),
-  ENCRYPTION_KEY: z.string().min(32).optional(),
-  // Session cookie Domain attribute (F5.1). Needed whenever the dashboard
-  // and API are served from different subdomains (e.g. panel.example.com /
-  // api.panel.example.com) — without it, the cookie defaults to a host-only
-  // scope on whichever origin set it, so the other subdomain's server-side
-  // auth check never sees it. Leave unset for local dev (dashboard/api both
-  // on localhost, where a Domain attribute doesn't apply the same way).
-  COOKIE_DOMAIN: z.string().min(1).optional(),
-  // Public self-registration is off by default (F5.8) — a fresh install is a
-  // closed panel where the first admin (created by create-admin.ts/seed.ts)
-  // provisions everyone else from /users. Flip to "true" to allow it.
-  ALLOW_REGISTRATION: z
-    .enum(["true", "false"])
-    .default("false")
-    .transform((v) => v === "true"),
-  REQUIRE_ADMIN_2FA: z
-    .enum(["true", "false"])
-    .default("false")
-    .transform((v) => v === "true"),
-  // Git integration (F1.3)
-  PROJECTS_DIR: z.string().min(1).default("./workspaces/projects"),
-  SSH_KEYS_DIR: z.string().min(1).default("./workspaces/keys"),
-  API_BASE_URL: z.string().url().default("http://localhost:5000"),
-  // Build integration (F1.4)
-  NIXPACKS_IMAGE_PREFIX: z.string().min(1).default("vexlyx"),
-  BUILD_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(5),
-  // Deploy integration (F1.5)
-  // Base domain used to generate per-project Traefik hostnames: {name}.{BASE_DOMAIN}
-  BASE_DOMAIN: z.string().min(1).default("vexlyx.localhost"),
-  // Default memory limit passed to Docker (e.g. 128m, 256m, 512m)
-  DEPLOY_MEMORY_LIMIT: z.string().min(1).default("128m"),
-  // Dynamic host-port range used when no project.port is set
-  DEPLOY_PORT_RANGE_START: z.coerce.number().int().min(1024).default(8100),
-  DEPLOY_PORT_RANGE_END: z.coerce.number().int().max(65535).default(8999),
-  // Database Provisioning (F2.6)
-  POSTGRES_CONTAINER_NAME: z.string().min(1).default("vexlyx-postgres"),
-  POSTGRES_HOST: z.string().min(1).default("localhost"),
-  POSTGRES_PORT: z.coerce.number().int().default(5432),
-  POSTGRES_USER: z.string().min(1).default("vexlyx"),
-  POSTGRES_PASSWORD: z.string().min(1).default("vexlyx_dev"),
-  MYSQL_CONTAINER_NAME: z.string().min(1).default("vexlyx-mysql"),
-  MYSQL_HOST: z.string().min(1).default("localhost"),
-  MYSQL_PORT: z.coerce.number().int().default(3306),
-  MYSQL_ROOT_USER: z.string().min(1).default("root"),
-  MYSQL_ROOT_PASSWORD: z.string().min(1).default("vexlyx_mysql_root"),
-  ADMINER_URL: z.string().default("http://localhost:8088"),
-  // Custom Domain Mock DNS (F3.1)
-  VEXLYX_MOCK_DNS: z.string().optional(),
-  // Email — Dovecot IMAP Server (F4.2)
-  IMAP_HOST: z.string().min(1).default("127.0.0.1"),
-  IMAP_PORT: z.coerce.number().int().default(143),
-  IMAPS_PORT: z.coerce.number().int().default(993),
-  // Webmail — Roundcube (F4.4)
-  WEBMAIL_URL: z.string().default("http://localhost:8089"),
-  WEBMAIL_PORT: z.coerce.number().int().default(8089),
-  WEBMAIL_CONTAINER_NAME: z.string().min(1).default("vexlyx-roundcube"),
-  // File Manager & SFTP (F2.8)
-  FILE_UPLOAD_MAX_MB: z.coerce.number().int().min(1).max(1000).default(1000),
-  SFTP_HOST: z.string().min(1).default("0.0.0.0"),
-  SFTP_PORT: z.coerce.number().int().default(22),
-  // Backup System (F5.3) — these are only first-boot defaults for the
-  // BackupSettings singleton row; once created, the DB row is authoritative.
-  BACKUPS_DIR: z.string().min(1).default("./workspaces/backups"),
-  BACKUP_SCHEDULE_CRON: z.string().min(1).default("0 3 * * *"),
-  BACKUP_RETENTION_DAILY: z.coerce.number().int().min(1).default(7),
-  BACKUP_RETENTION_WEEKLY: z.coerce.number().int().min(0).default(4),
-  // Firewall management (F5.4). Ports that add_rule/delete_rule/
-  // set_default_policy in firewall_manager.py refuse to lock out — see
-  // system/scripts/install/steps/15-firewall.sh for the installer's own
-  // (one-time) SSH-lockout guard this mirrors at runtime.
-  FIREWALL_SSH_PORT: z.coerce.number().int().min(1).max(65535).default(22),
-  FIREWALL_HELPER_IMAGE: z.string().min(1).default("vexlyx-ufw-helper:latest"),
-  // No-build PHP hosting (F5.21) — fixed PHP-FPM image (common extensions
-  // baked in, see docker/php-fpm/Dockerfile) that composer-less PHP projects
-  // deploy against instead of a per-project Nixpacks build.
-  PHP_FPM_IMAGE: z.string().min(1).default("vexlyx-php-fpm:8.3"),
-  // Service Status Dashboard (F5.6) — container names for the managed
-  // services. POSTGRES_CONTAINER_NAME already exists above (F2.6); the rest
-  // follow the same "configurable via env, sane default" convention.
-  POSTFIX_CONTAINER_NAME: z.string().min(1).default("vexlyx-postfix"),
-  DOVECOT_CONTAINER_NAME: z.string().min(1).default("vexlyx-dovecot"),
-  COREDNS_CONTAINER_NAME: z.string().min(1).default("vexlyx-coredns"),
-  REDIS_CONTAINER_NAME: z.string().min(1).default("vexlyx-redis"),
-  // DNS Records & Public IP Onboarding (F5.9) — set by the installer in
-  // production (docker-compose.prod.yml). PANEL_DOMAIN is VEXLYX_DOMAIN;
-  // PUBLIC_IP is auto-detected by the installer and may be absent if
-  // detection failed, in which case docker-compose.prod.yml still sets the
-  // env var but to an empty string — coerce that to undefined rather than
-  // failing validation. Both unset in local dev, where DNS onboarding is moot.
-  PANEL_DOMAIN: z.string().min(1).optional(),
-  PUBLIC_IP: z
-    .string()
-    .optional()
-    .transform((v) => (v ? v : undefined)),
-  // Nameservers users delegate to when opting into "Managed" DNS (F5.23).
-  DNS_NAMESERVERS: z
-    .string()
-    .default("ns1.vexlyx.com,ns2.vexlyx.com")
-    .transform((v) =>
-      v
-        .split(",")
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean),
-    ),
-  // Python interpreter used to spawn system/python/*.py scripts (F5.14).
-  // Defaults to "python" on win32 / "python3" elsewhere when unset — only
-  // set this to override that default (e.g. a venv interpreter, or a
-  // non-standard binary name/path on the host).
-  PYTHON_BIN: z.string().min(1).optional(),
-});
+const envSchema = z
+  .object({
+    PORT: z.coerce.number().int().positive().default(5000),
+    HOST: z.string().min(1).default("0.0.0.0"),
+    NODE_ENV: z
+      .enum(["development", "production", "test"])
+      .default("development"),
+    CORS_ORIGIN: z.string().url().default("http://localhost:3000"),
+    DATABASE_URL: z.string().url(),
+    REDIS_URL: z.string().default("redis://localhost:6379"),
+    SESSION_SECRET: z.string().min(32),
+    ENCRYPTION_KEY: z.string().min(32).optional(),
+    // Session cookie Domain attribute (F5.1). Needed whenever the dashboard
+    // and API are served from different subdomains (e.g. panel.example.com /
+    // api.panel.example.com) — without it, the cookie defaults to a host-only
+    // scope on whichever origin set it, so the other subdomain's server-side
+    // auth check never sees it. Leave unset for local dev (dashboard/api both
+    // on localhost, where a Domain attribute doesn't apply the same way).
+    COOKIE_DOMAIN: z.string().min(1).optional(),
+    // Public self-registration is off by default (F5.8) — a fresh install is a
+    // closed panel where the first admin (created by create-admin.ts/seed.ts)
+    // provisions everyone else from /users. Flip to "true" to allow it.
+    ALLOW_REGISTRATION: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
+    REQUIRE_ADMIN_2FA: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
+    // Git integration (F1.3)
+    PROJECTS_DIR: z.string().min(1).default("./workspaces/projects"),
+    SSH_KEYS_DIR: z.string().min(1).default("./workspaces/keys"),
+    API_BASE_URL: z.string().url().default("http://localhost:5000"),
+    // Build integration (F1.4)
+    NIXPACKS_IMAGE_PREFIX: z.string().min(1).default("vexlyx"),
+    BUILD_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(5),
+    // Deploy integration (F1.5)
+    // Base domain used to generate per-project Traefik hostnames: {name}.{BASE_DOMAIN}
+    BASE_DOMAIN: z.string().min(1).default("vexlyx.localhost"),
+    // Default memory limit passed to Docker (e.g. 128m, 256m, 512m)
+    DEPLOY_MEMORY_LIMIT: z.string().min(1).default("128m"),
+    // Dynamic host-port range used when no project.port is set
+    DEPLOY_PORT_RANGE_START: z.coerce.number().int().min(1024).default(8100),
+    DEPLOY_PORT_RANGE_END: z.coerce.number().int().max(65535).default(8999),
+    // Database Provisioning (F2.6)
+    POSTGRES_CONTAINER_NAME: z.string().min(1).default("vexlyx-postgres"),
+    POSTGRES_HOST: z.string().min(1).default("localhost"),
+    POSTGRES_PORT: z.coerce.number().int().default(5432),
+    POSTGRES_USER: z.string().min(1).default("vexlyx"),
+    POSTGRES_PASSWORD: z.string().min(1).default("vexlyx_dev"),
+    MYSQL_CONTAINER_NAME: z.string().min(1).default("vexlyx-mysql"),
+    MYSQL_HOST: z.string().min(1).default("localhost"),
+    MYSQL_PORT: z.coerce.number().int().default(3306),
+    MYSQL_ROOT_USER: z.string().min(1).default("root"),
+    MYSQL_ROOT_PASSWORD: z.string().min(1).default("vexlyx_mysql_root"),
+    // Browser-facing Adminer URL. Local development gets a localhost default
+    // below; production is disabled unless an administrator explicitly supplies
+    // a secure public URL.
+    ADMINER_URL: z.string().url().optional(),
+    // Custom Domain Mock DNS (F3.1)
+    VEXLYX_MOCK_DNS: z.string().optional(),
+    // Email — Dovecot IMAP Server (F4.2)
+    IMAP_HOST: z.string().min(1).default("127.0.0.1"),
+    IMAP_PORT: z.coerce.number().int().default(143),
+    IMAPS_PORT: z.coerce.number().int().default(993),
+    // Webmail — Roundcube (F4.4)
+    WEBMAIL_URL: z.string().default("http://localhost:8089"),
+    WEBMAIL_PORT: z.coerce.number().int().default(8089),
+    WEBMAIL_CONTAINER_NAME: z.string().min(1).default("vexlyx-roundcube"),
+    // File Manager & SFTP (F2.8)
+    FILE_UPLOAD_MAX_MB: z.coerce.number().int().min(1).max(1000).default(1000),
+    SFTP_HOST: z.string().min(1).default("0.0.0.0"),
+    SFTP_PORT: z.coerce.number().int().default(22),
+    // Backup System (F5.3) — these are only first-boot defaults for the
+    // BackupSettings singleton row; once created, the DB row is authoritative.
+    BACKUPS_DIR: z.string().min(1).default("./workspaces/backups"),
+    BACKUP_SCHEDULE_CRON: z.string().min(1).default("0 3 * * *"),
+    BACKUP_RETENTION_DAILY: z.coerce.number().int().min(1).default(7),
+    BACKUP_RETENTION_WEEKLY: z.coerce.number().int().min(0).default(4),
+    // Firewall management (F5.4). Ports that add_rule/delete_rule/
+    // set_default_policy in firewall_manager.py refuse to lock out — see
+    // system/scripts/install/steps/15-firewall.sh for the installer's own
+    // (one-time) SSH-lockout guard this mirrors at runtime.
+    FIREWALL_SSH_PORT: z.coerce.number().int().min(1).max(65535).default(22),
+    FIREWALL_HELPER_IMAGE: z
+      .string()
+      .min(1)
+      .default("vexlyx-ufw-helper:latest"),
+    // No-build PHP hosting (F5.21) — fixed PHP-FPM image (common extensions
+    // baked in, see docker/php-fpm/Dockerfile) that composer-less PHP projects
+    // deploy against instead of a per-project Nixpacks build.
+    PHP_FPM_IMAGE: z.string().min(1).default("vexlyx-php-fpm:8.3"),
+    // Service Status Dashboard (F5.6) — container names for the managed
+    // services. POSTGRES_CONTAINER_NAME already exists above (F2.6); the rest
+    // follow the same "configurable via env, sane default" convention.
+    POSTFIX_CONTAINER_NAME: z.string().min(1).default("vexlyx-postfix"),
+    DOVECOT_CONTAINER_NAME: z.string().min(1).default("vexlyx-dovecot"),
+    COREDNS_CONTAINER_NAME: z.string().min(1).default("vexlyx-coredns"),
+    REDIS_CONTAINER_NAME: z.string().min(1).default("vexlyx-redis"),
+    // DNS Records & Public IP Onboarding (F5.9) — set by the installer in
+    // production (docker-compose.prod.yml). PANEL_DOMAIN is VEXLYX_DOMAIN;
+    // PUBLIC_IP is auto-detected by the installer and may be absent if
+    // detection failed, in which case docker-compose.prod.yml still sets the
+    // env var but to an empty string — coerce that to undefined rather than
+    // failing validation. Both unset in local dev, where DNS onboarding is moot.
+    PANEL_DOMAIN: z.string().min(1).optional(),
+    PUBLIC_IP: z
+      .string()
+      .optional()
+      .transform((v) => (v ? v : undefined)),
+    // Nameservers users delegate to when opting into "Managed" DNS (F5.23).
+    DNS_NAMESERVERS: z
+      .string()
+      .default("ns1.vexlyx.com,ns2.vexlyx.com")
+      .transform((v) =>
+        v
+          .split(",")
+          .map((s) => s.trim().toLowerCase())
+          .filter(Boolean),
+      ),
+    // Python interpreter used to spawn system/python/*.py scripts (F5.14).
+    // Defaults to "python" on win32 / "python3" elsewhere when unset — only
+    // set this to override that default (e.g. a venv interpreter, or a
+    // non-standard binary name/path on the host).
+    PYTHON_BIN: z.string().min(1).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.NODE_ENV !== "production" || !value.ADMINER_URL) return;
+
+    const url = new URL(value.ADMINER_URL);
+    if (url.protocol !== "https:") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ADMINER_URL"],
+        message: "ADMINER_URL must use HTTPS in production",
+      });
+    }
+    if (["localhost", "127.0.0.1", "::1"].includes(url.hostname)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ADMINER_URL"],
+        message: "ADMINER_URL must not point to localhost in production",
+      });
+    }
+  });
 
 /**
  * Parses and validates environment variables against the Zod schema.
@@ -142,11 +168,18 @@ function validateEnv() {
     throw new Error(`Invalid environment variables:\n${formatted}`);
   }
 
-  return result.data;
+  return {
+    ...result.data,
+    ADMINER_URL:
+      result.data.ADMINER_URL ??
+      (result.data.NODE_ENV === "development"
+        ? "http://localhost:8088"
+        : undefined),
+  };
 }
 
 /** Inferred TypeScript type from the environment schema */
-export type Env = z.infer<typeof envSchema>;
+export type Env = ReturnType<typeof validateEnv>;
 
 /** Validated environment variables — safe to use throughout the API */
 export const env = validateEnv();

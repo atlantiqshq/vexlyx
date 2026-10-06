@@ -4,8 +4,22 @@ export const VEXLYX_VERSION = "0.0.1";
 /** Application name constant used across both frontend and backend */
 export const APP_NAME = "Vexlyx";
 
-export { RegisterSchema, LoginSchema, ChangePasswordSchema, TwoFactorChallengeSchema, VerifyTotpSetupSchema, DisableTwoFactorSchema } from "./schemas/auth.js";
-export type { RegisterInput, LoginInput, ChangePasswordInput, TwoFactorChallengeInput, VerifyTotpSetupInput, DisableTwoFactorInput } from "./schemas/auth.js";
+export {
+  RegisterSchema,
+  LoginSchema,
+  ChangePasswordSchema,
+  TwoFactorChallengeSchema,
+  VerifyTotpSetupSchema,
+  DisableTwoFactorSchema,
+} from "./schemas/auth.js";
+export type {
+  RegisterInput,
+  LoginInput,
+  ChangePasswordInput,
+  TwoFactorChallengeInput,
+  VerifyTotpSetupInput,
+  DisableTwoFactorInput,
+} from "./schemas/auth.js";
 
 export {
   ProjectTypeSchema,
@@ -61,6 +75,8 @@ export type {
   CreateDatabaseInput,
   DatabaseListQuery,
   DatabaseDetail,
+  AdminerAvailability,
+  DatabaseListResponse,
   DatabaseConnectionTestResult,
 } from "./schemas/databases.js";
 
@@ -249,7 +265,6 @@ export type {
   ThresholdConfig,
 } from "./schemas/monitoring.js";
 
-
 export type {
   User,
   Role,
@@ -431,4 +446,3 @@ export type {
   AuditLogListResponse,
   AuditLogQuery,
 } from "./schemas/audit-log.js";
-

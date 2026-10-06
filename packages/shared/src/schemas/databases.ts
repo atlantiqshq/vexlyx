@@ -61,7 +61,7 @@ export interface DatabaseDetail {
   dbPassword?: string;
   connectionString: string;
   internalConnectionString: string;
-  adminerUrl: string;
+  adminerUrl?: string;
   userId: string;
   projectId: string | null;
   project?: {
@@ -70,6 +70,23 @@ export interface DatabaseDetail {
   } | null;
   createdAt: string | Date;
   updatedAt: string | Date;
+}
+
+export interface AdminerAvailability {
+  enabled: boolean;
+  url?: string;
+  disabledReason?: string;
+}
+
+export interface DatabaseListResponse {
+  databases: DatabaseDetail[];
+  adminer: AdminerAvailability;
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
 export interface DatabaseConnectionTestResult {

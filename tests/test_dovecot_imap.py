@@ -156,6 +156,7 @@ class TestDovecotConfigurations(unittest.TestCase):
         content = dockerfile.read_text(encoding="utf-8")
         self.assertIn("dovecot", content)
         self.assertIn("EXPOSE 143 993", content)
+        self.assertIn("sed -i 's/\\r$//' /usr/local/bin/entrypoint.sh", content)
 
     def test_03_entrypoint_seeds_dev_mailboxes(self):
         entrypoint = ROOT_DIR / "docker" / "dovecot" / "entrypoint.sh"

@@ -16,7 +16,8 @@ RUN mkdir -p /etc/dovecot /etc/dovecot/certs /var/mail/vhosts /var/run/dovecot
 COPY dovecot.conf /etc/dovecot/dovecot.conf
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && \
+    chmod +x /usr/local/bin/entrypoint.sh
 
 # Expose IMAP (143), IMAPS (993), LMTP (24), and the internal SASL auth port (12345)
 EXPOSE 143 993 24 12345

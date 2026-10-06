@@ -22,3 +22,17 @@ log_ok "docker/traefik/traefik.prod.yml rendered."
 touch docker/traefik/acme.json
 chmod 600 docker/traefik/acme.json
 log_ok "docker/traefik/acme.json ready (mode 600)."
+
+# Production mail containers mount this directory read-only. Seed a temporary
+# certificate so their first start is reliable while Traefik completes ACME;
+# step 14 replaces it with the trusted certificate before install completion.
+mkdir -p docker/mail-data/certs
+if [[ ! -s docker/mail-data/certs/cert.pem || ! -s docker/mail-data/certs/key.pem ]]; then
+  openssl req -new -newkey rsa:2048 -days 1 -nodes -x509 \
+    -subj "/O=Vexlyx Development/CN=${VEXLYX_MAIL_HOSTNAME}" \
+    -addext "subjectAltName=DNS:${VEXLYX_MAIL_HOSTNAME}" \
+    -keyout docker/mail-data/certs/key.pem \
+    -out docker/mail-data/certs/cert.pem >/dev/null 2>&1
+fi
+chmod 600 docker/mail-data/certs/key.pem
+chmod 644 docker/mail-data/certs/cert.pem

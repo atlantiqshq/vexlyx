@@ -191,6 +191,11 @@ class TestPostfixConfigurations(unittest.TestCase):
         self.assertIn("apt-get install -y postfix opendkim", content)
         self.assertIn("postconf", content)
 
+    def test_05_dockerfile_normalizes_windows_line_endings(self):
+        dockerfile = ROOT_DIR / "docker" / "postfix" / "Dockerfile"
+        content = dockerfile.read_text(encoding="utf-8")
+        self.assertIn("sed -i 's/\\r$//' /usr/local/bin/entrypoint.sh", content)
+
 
 class TestMailApiSecurity(unittest.TestCase):
     """Verifies that all Fastify /api/mail endpoints enforce authentication."""

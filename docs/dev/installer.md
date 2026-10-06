@@ -14,6 +14,8 @@ curl -fsSL https://vexlyx.atlantiqs.org/install.sh | bash
 4. Builds the panel on the host (`pnpm install && pnpm build && prisma generate`) and builds the dashboard/api Docker images.
 5. Brings up Postgres/MySQL/Redis, runs Prisma migrations, creates the admin user.
 6. Brings up Traefik (requesting a real Let's Encrypt certificate for the panel domain), CoreDNS, Postfix, Dovecot, Roundcube, and the panel itself.
+   It also requests a certificate for `VEXLYX_MAIL_HOSTNAME`, installs that
+   trusted pair into Postfix and Dovecot, and enables a 12-hour renewal sync.
 7. Configures UFW.
 
 Every step checks real state before acting (file exists? container running? rule present?), so re-running `install.sh` at any point — including after a failure — is always safe and cheap for whatever already succeeded.

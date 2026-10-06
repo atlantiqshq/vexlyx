@@ -71,10 +71,14 @@ services:
       MYDOMAIN: ${VEXLYX_MAIL_DOMAIN}
       # Never seed the known-password dev test mailboxes in production.
       VEXLYX_SEED_DEV_FIXTURES: "false"
+    volumes:
+      - ./docker/mail-data/certs:/etc/postfix/certs:ro
 
   dovecot:
     environment:
       VEXLYX_SEED_DEV_FIXTURES: "false"
+    volumes:
+      - ./docker/mail-data/certs:/etc/dovecot/certs:ro
 
   # The base file routes Roundcube on the dev hostname over plain HTTP, which
   # 404s in production — serve it at webmail.${VEXLYX_DOMAIN} over HTTPS
@@ -120,6 +124,12 @@ services:
       - "traefik.http.routers.vexlyx-dashboard.entrypoints=websecure"
       - "traefik.http.routers.vexlyx-dashboard.tls.certresolver=letsencrypt"
       - "traefik.http.services.vexlyx-dashboard.loadbalancer.server.port=3000"
+      # This router exists so Traefik obtains and renews the certificate used
+      # by SMTP/IMAP. Mail protocols themselves still connect directly.
+      - "traefik.http.routers.vexlyx-mail-cert.rule=Host(`${VEXLYX_MAIL_HOSTNAME}`)"
+      - "traefik.http.routers.vexlyx-mail-cert.entrypoints=websecure"
+      - "traefik.http.routers.vexlyx-mail-cert.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.vexlyx-mail-cert.service=vexlyx-dashboard"
 
   api:
     build:

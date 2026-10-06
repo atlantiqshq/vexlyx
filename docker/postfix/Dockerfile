@@ -19,7 +19,8 @@ COPY master.cf /etc/postfix/master.cf
 COPY opendkim.conf /etc/opendkim/opendkim.conf
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && \
+    chmod +x /usr/local/bin/entrypoint.sh
 
 # Expose SMTP (25) and Submission (587)
 EXPOSE 25 587 8891

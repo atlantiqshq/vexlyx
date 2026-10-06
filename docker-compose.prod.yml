@@ -33,10 +33,24 @@ services:
     ports: !reset []
 
   adminer:
-    # Unauthenticated raw DB browser — never started by a plain
-    # `docker compose up -d` in production. Bring it up deliberately with
-    # `--profile debug` for one-off troubleshooting only.
-    profiles: ["debug"]
+    # Raw DB browser — never started by a plain `docker compose up -d` in
+    # production. Opt in with system/scripts/enable-adminer.sh, which sets
+    # ADMINER_BASIC_AUTH + ADMINER_URL in the secrets file and starts it with
+    # `--profile adminer`. It is served only through Traefik over HTTPS behind
+    # basic auth (never on a published host port), so it is not reachable
+    # unauthenticated. An empty ADMINER_BASIC_AUTH leaves the middleware with
+    # no valid users, so requests are rejected rather than let through.
+    profiles: ["adminer"]
+    ports: !reset []
+    labels: !override
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-net"
+      - "traefik.http.routers.adminer.rule=Host(`adminer.${VEXLYX_DOMAIN}`)"
+      - "traefik.http.routers.adminer.entrypoints=websecure"
+      - "traefik.http.routers.adminer.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.adminer.middlewares=adminer-auth"
+      - "traefik.http.middlewares.adminer-auth.basicauth.users=${ADMINER_BASIC_AUTH:-}"
+      - "traefik.http.services.adminer.loadbalancer.server.port=8080"
 
   traefik:
     ports: !override

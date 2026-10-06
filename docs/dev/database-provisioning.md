@@ -77,7 +77,7 @@ For every provisioned database, Vexlyx generates two types of connection URIs:
 
 3. **Adminer Web GUI**:
    - Development defaults to a pre-filled deep link at `http://localhost:8088`.
-   - Production is disabled by default, matching the Compose `debug` profile. The dashboard hides database-specific actions and shows the page-level action as unavailable.
+   - Production is disabled by default, matching the Compose `adminer` profile. To enable it on a server, run `sudo bash system/scripts/enable-adminer.sh`: it serves Adminer at `https://adminer.<VEXLYX_DOMAIN>` behind Traefik basic auth, writes `ADMINER_BASIC_AUTH` and `ADMINER_URL` to the secrets file, and prints the generated password once. The dashboard hides database-specific actions and shows the page-level action as unavailable.
    - To enable production access, set `ADMINER_URL` to a protected HTTPS endpoint. The API rejects HTTP and localhost production values. Put Adminer behind authentication and network/IP restrictions; Adminer itself provides direct database access.
 
 ---

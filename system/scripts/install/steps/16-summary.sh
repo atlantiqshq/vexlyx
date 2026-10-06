@@ -43,8 +43,8 @@ else
 fi
 echo ""
 echo "  Adminer (web database browser) is disabled in production by default."
-echo "  To enable it, serve it behind access control over HTTPS and set"
-echo "  ADMINER_URL=https://<your-adminer-host> in ${VEXLYX_SECRETS_FILE}, then re-run install.sh."
+echo "  To enable it (HTTPS + basic auth at adminer.${VEXLYX_DOMAIN}), run:"
+echo "    sudo bash ${VEXLYX_HOME}/system/scripts/enable-adminer.sh"
 echo ""
 echo "  Manage the stack:"
 echo "    cd ${VEXLYX_HOME}"

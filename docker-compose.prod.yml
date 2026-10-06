@@ -178,6 +178,9 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       IMAP_HOST: dovecot
       WEBMAIL_URL: https://webmail.${VEXLYX_DOMAIN}
+      # Adminer stays disabled in production unless this is set to a protected
+      # HTTPS URL in the secrets file (see docs/dev/database-provisioning.md).
+      ADMINER_URL: ${ADMINER_URL:-}
       PROJECTS_DIR: ${VEXLYX_HOME:-/opt/vexlyx}/apps/api/workspaces/projects
       SSH_KEYS_DIR: ${VEXLYX_HOME:-/opt/vexlyx}/apps/api/workspaces/keys
     depends_on:

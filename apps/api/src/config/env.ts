@@ -63,7 +63,11 @@ const envSchema = z
     // Browser-facing Adminer URL. Local development gets a localhost default
     // below; production is disabled unless an administrator explicitly supplies
     // a secure public URL.
-    ADMINER_URL: z.string().url().optional(),
+    ADMINER_URL: z
+      .string()
+      .optional()
+      .transform((v) => (v ? v : undefined))
+      .pipe(z.string().url().optional()),
     // Custom Domain Mock DNS (F3.1)
     VEXLYX_MOCK_DNS: z.string().optional(),
     // Email — Dovecot IMAP Server (F4.2)

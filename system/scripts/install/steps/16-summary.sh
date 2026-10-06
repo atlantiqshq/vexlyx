@@ -42,6 +42,10 @@ else
   echo "    A     *.${VEXLYX_BASE_DOMAIN}   (deployed project subdomains)"
 fi
 echo ""
+echo "  Adminer (web database browser) is disabled in production by default."
+echo "  To enable it, serve it behind access control over HTTPS and set"
+echo "  ADMINER_URL=https://<your-adminer-host> in ${VEXLYX_SECRETS_FILE}, then re-run install.sh."
+echo ""
 echo "  Manage the stack:"
 echo "    cd ${VEXLYX_HOME}"
 echo "    docker compose --env-file ${VEXLYX_SECRETS_FILE} -f docker-compose.yml -f docker-compose.prod.yml ps"

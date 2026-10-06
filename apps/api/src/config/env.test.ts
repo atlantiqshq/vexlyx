@@ -41,6 +41,12 @@ describe("Adminer environment configuration", () => {
     expect(env.ADMINER_URL).toBeUndefined();
   });
 
+  it("treats an empty ADMINER_URL as unset (compose passes it through blank)", async () => {
+    const env = await loadEnv({ NODE_ENV: "production", ADMINER_URL: "" });
+
+    expect(env.ADMINER_URL).toBeUndefined();
+  });
+
   it("rejects an insecure production URL", async () => {
     await expect(
       loadEnv({ NODE_ENV: "production", ADMINER_URL: "http://db.example.com" }),

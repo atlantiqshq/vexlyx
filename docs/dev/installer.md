@@ -55,7 +55,7 @@ docker compose --env-file /etc/vexlyx/vexlyx.env \
   -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
-`docker-compose.prod.yml` uses the Compose Spec's `!override` tag to fully replace (not append to) a base service's `ports`/`volumes` list — e.g. Traefik's dev-only `insecure` dashboard port and Postgres/MySQL/Redis's host-published ports are removed in prod, and CoreDNS is bound to `127.0.0.1` only (it forwards unmatched queries to public resolvers, so publishing it on `0.0.0.0` would stand up an open recursive resolver). `adminer` gets a `profiles: ["debug"]` gate so a plain `up -d` never starts it. See [the Compose Spec merge rules](https://github.com/compose-spec/compose-spec/blob/master/13-merge.md) if you need to add another overridden list.
+`docker-compose.prod.yml` uses the Compose Spec's `!override` tag to fully replace (not append to) a base service's `ports`/`volumes` list — e.g. Traefik's dev-only `insecure` dashboard port and Postgres/MySQL/Redis's host-published ports are removed in prod, and CoreDNS is bound to `127.0.0.1` only (it forwards unmatched queries to public resolvers, so publishing it on `0.0.0.0` would stand up an open recursive resolver). `adminer` gets a `profiles: ["adminer"]` gate (no published port, HTTPS + basic auth via Traefik) so a plain `up -d` never starts it; see [Optional: Adminer](#optional-adminer). See [the Compose Spec merge rules](https://github.com/compose-spec/compose-spec/blob/master/13-merge.md) if you need to add another overridden list.
 
 ## Configuration
 
@@ -80,6 +80,10 @@ The API also receives `COOKIE_DOMAIN=$VEXLYX_DOMAIN` (set directly in `docker-co
 ## Secrets
 
 `/etc/vexlyx/vexlyx.env` (mode `0600`) holds `SESSION_SECRET`, `ENCRYPTION_KEY`, `POSTGRES_PASSWORD`, `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, plus the collected domain/admin-email/mail-hostname config. It's generated exactly once — re-running the installer never rotates it, so a re-run can't invalidate existing sessions or encrypted data. It lives outside the git checkout specifically so an upgrade (`git pull`) never touches it. The admin password is **not** persisted anywhere — it's applied to the database (Argon2id-hashed) and shown once in the final summary.
+
+## Optional: Adminer
+
+Not part of the default install. After installing, `sudo bash /opt/vexlyx/system/scripts/enable-adminer.sh` serves Adminer at `https://adminer.$VEXLYX_DOMAIN` behind Traefik basic auth and adds two optional keys to `/etc/vexlyx/vexlyx.env`: `ADMINER_BASIC_AUTH` (htpasswd entry for the Traefik middleware) and `ADMINER_URL` (passed to the api container so the panel shows the link). Because the installer never rewrites an existing secrets file, they survive re-runs and upgrades. `--disable` removes both and stops the container. Full details and troubleshooting: `docs/dev/database-provisioning.md`.
 
 ## Cross-subdomain session cookie
 

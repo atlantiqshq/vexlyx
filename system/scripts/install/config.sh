@@ -43,7 +43,7 @@ collect_config() {
   env_or_prompt VEXLYX_MAIL_DOMAIN "Mail domain" "${VEXLYX_DOMAIN}"
 
   VEXLYX_ENABLE_PUBLIC_DNS="${VEXLYX_ENABLE_PUBLIC_DNS:-false}"
-  VEXLYX_REPO_URL="${VEXLYX_REPO_URL:-https://github.com/atlantiqs-org/vexlyx.git}"
+  VEXLYX_REPO_URL="${VEXLYX_REPO_URL:-https://github.com/atlantiqshq/vexlyx.git}"
   VEXLYX_REPO_REF="${VEXLYX_REPO_REF:-main}"
 
   export VEXLYX_DOMAIN VEXLYX_BASE_DOMAIN VEXLYX_ADMIN_EMAIL VEXLYX_ADMIN_NAME VEXLYX_ADMIN_PASSWORD

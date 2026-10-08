@@ -27,7 +27,7 @@ Installs Docker, Node.js, Python, and Nixpacks; brings up Postgres, Redis, Traef
 
 ```bash
 # Clone the repo
-git clone https://github.com/atlantiqs-org/vexlyx.git
+git clone https://github.com/atlantiqshq/vexlyx.git
 cd vexlyx
 
 # Install dependencies

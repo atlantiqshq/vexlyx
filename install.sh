@@ -12,7 +12,7 @@
 set -euo pipefail
 
 VEXLYX_HOME="${VEXLYX_HOME:-/opt/vexlyx}"
-VEXLYX_REPO_URL="${VEXLYX_REPO_URL:-https://github.com/atlantiqs-org/vexlyx.git}"
+VEXLYX_REPO_URL="${VEXLYX_REPO_URL:-https://github.com/atlantiqshq/vexlyx.git}"
 VEXLYX_REPO_REF="${VEXLYX_REPO_REF:-main}"
 
 if [[ ${EUID} -ne 0 ]]; then

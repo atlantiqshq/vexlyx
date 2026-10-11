@@ -17,6 +17,9 @@ import {
   Pencil,
   Trash2,
   Copy,
+  ShieldCheck,
+  FileArchive,
+  PackageOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +31,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { fetchAPI } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { isExtractableArchive } from "@/lib/filePermissions";
 import { useRefreshAnimation, refreshIconClassName } from "@/hooks/useRefreshAnimation";
 import type { FileNode } from "@vexlyx/shared";
 
@@ -55,9 +59,14 @@ function FileIcon({ extension, className }: { extension?: string; className?: st
 export interface FileTreeProps {
   projectId: string;
   selectedPath?: string;
+  multiSelectedPaths?: ReadonlySet<string>;
   onSelect: (node: FileNode) => void;
+  onToggleMultiSelect: (node: FileNode) => void;
   onDelete: (node: FileNode) => void;
   onRename: (node: FileNode) => void;
+  onPermissions: (node: FileNode) => void;
+  onExtract: (node: FileNode) => void;
+  onCompress: (node: FileNode) => void;
   refreshTrigger?: number;
   className?: string;
 }
@@ -70,39 +79,54 @@ interface TreeNodeProps {
   node: FileNode;
   projectId: string;
   selectedPath?: string;
+  multiSelectedPaths?: ReadonlySet<string>;
   depth: number;
   expandedPaths: Set<string>;
   loadingPaths: Set<string>;
   dirChildren: Map<string, FileNode[]>;
   onToggle: (dirPath: string) => void;
   onSelect: (node: FileNode) => void;
+  onToggleMultiSelect: (node: FileNode) => void;
   onDelete: (node: FileNode) => void;
   onRename: (node: FileNode) => void;
+  onPermissions: (node: FileNode) => void;
+  onExtract: (node: FileNode) => void;
+  onCompress: (node: FileNode) => void;
 }
 
 function TreeNode({
   node,
   projectId,
   selectedPath,
+  multiSelectedPaths,
   depth,
   expandedPaths,
   loadingPaths,
   dirChildren,
   onToggle,
   onSelect,
+  onToggleMultiSelect,
   onDelete,
   onRename,
+  onPermissions,
+  onExtract,
+  onCompress,
 }: TreeNodeProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const isDir = node.type === "dir";
   const isOpen = isDir && expandedPaths.has(node.path);
   const isLoading = isDir && loadingPaths.has(node.path);
-  const isSelected = selectedPath === node.path;
+  const isMultiSelected = multiSelectedPaths?.has(node.path) ?? false;
+  const isSelected = selectedPath === node.path || isMultiSelected;
   const children = (isDir ? dirChildren.get(node.path) : undefined) ?? node.children ?? [];
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (e.ctrlKey || e.metaKey) {
+      onToggleMultiSelect(node);
+      return;
+    }
     if (isDir) {
       onToggle(node.path);
     }
@@ -175,6 +199,15 @@ function TreeNode({
 
         <span className="truncate flex-1 text-xs">{node.name}</span>
 
+        {node.mode && (
+          <span
+            className="shrink-0 font-mono text-[10px] text-muted-foreground/70"
+            title={`Permissions ${node.mode}`}
+          >
+            {node.mode}
+          </span>
+        )}
+
         {/* 3-dot context menu */}
         <DropdownMenu open={isMenuOpen} onOpenChange={setIsMenuOpen}>
           <DropdownMenuTrigger
@@ -196,7 +229,7 @@ function TreeNode({
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
-            className="w-40"
+            className="w-44"
             onClick={(e) => e.stopPropagation()}
           >
             <DropdownMenuItem
@@ -210,6 +243,35 @@ function TreeNode({
             </DropdownMenuItem>
             <DropdownMenuItem onClick={handleCopyPath}>
               <Copy className="mr-2 h-3.5 w-3.5" /> Copy path
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsMenuOpen(false);
+                onPermissions(node);
+              }}
+            >
+              <ShieldCheck className="mr-2 h-3.5 w-3.5" /> Permissions…
+            </DropdownMenuItem>
+            {!isDir && isExtractableArchive(node.name) && (
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsMenuOpen(false);
+                  onExtract(node);
+                }}
+              >
+                <PackageOpen className="mr-2 h-3.5 w-3.5" /> Extract here…
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsMenuOpen(false);
+                onCompress(node);
+              }}
+            >
+              <FileArchive className="mr-2 h-3.5 w-3.5" /> Compress…
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -235,14 +297,19 @@ function TreeNode({
               node={child}
               projectId={projectId}
               selectedPath={selectedPath}
+              multiSelectedPaths={multiSelectedPaths}
               depth={depth + 1}
               expandedPaths={expandedPaths}
               loadingPaths={loadingPaths}
               dirChildren={dirChildren}
               onToggle={onToggle}
               onSelect={onSelect}
+              onToggleMultiSelect={onToggleMultiSelect}
               onDelete={onDelete}
               onRename={onRename}
+              onPermissions={onPermissions}
+              onExtract={onExtract}
+              onCompress={onCompress}
             />
           ))}
         </div>
@@ -258,9 +325,14 @@ function TreeNode({
 export function FileTree({
   projectId,
   selectedPath,
+  multiSelectedPaths,
   onSelect,
+  onToggleMultiSelect,
   onDelete,
   onRename,
+  onPermissions,
+  onExtract,
+  onCompress,
   refreshTrigger = 0,
   className,
 }: FileTreeProps) {
@@ -471,14 +543,19 @@ export function FileTree({
             node={node}
             projectId={projectId}
             selectedPath={selectedPath}
+            multiSelectedPaths={multiSelectedPaths}
             depth={0}
             expandedPaths={expandedPaths}
             loadingPaths={loadingPaths}
             dirChildren={dirChildren}
             onToggle={handleToggle}
             onSelect={onSelect}
+            onToggleMultiSelect={onToggleMultiSelect}
             onDelete={onDelete}
             onRename={onRename}
+            onPermissions={onPermissions}
+            onExtract={onExtract}
+            onCompress={onCompress}
           />
         ))
       )}

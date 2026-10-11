@@ -80,6 +80,9 @@ const envSchema = z
     WEBMAIL_CONTAINER_NAME: z.string().min(1).default("vexlyx-roundcube"),
     // File Manager & SFTP (F2.8)
     FILE_UPLOAD_MAX_MB: z.coerce.number().int().min(1).max(1000).default(1000),
+    // Archive extract/compress limits (F5.24)
+    ARCHIVE_MAX_ENTRIES: z.coerce.number().int().min(1).default(100_000),
+    ARCHIVE_MAX_EXTRACT_MB: z.coerce.number().int().min(1).default(5120),
     SFTP_HOST: z.string().min(1).default("0.0.0.0"),
     SFTP_PORT: z.coerce.number().int().default(22),
     // Backup System (F5.3) — these are only first-boot defaults for the

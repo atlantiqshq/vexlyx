@@ -2228,7 +2228,7 @@ Surfaced while planning F5.18 (Audit Log): Vexlyx has no way to email its own pa
 
 ### F5.24 — File Manager: Permissions (chmod) & Archive Extract/Compress
 
-**Status:** 🔴 NOT STARTED
+**Status:** 🟢 COMPLETED — API and Python tests pass on Windows and on Linux (Debian bookworm container, same base as the API image, running as root); the dashboard dialogs are covered by typecheck, lint and helper unit tests but were not exercised in a browser
 
 **Description:**
 Surfaced directly while live-testing F5.21 against a real Duplicator (WordPress migration) package: Duplicator's own `installer.php` handles its archive's extraction internally, but the File Manager itself (`apps/api/src/modules/files/`, `FileManagerCard.tsx` / the standalone `/projects/[id]/files` page) has no way to extract an arbitrary uploaded `.zip`/`.tar.gz` on the server, or to change a file/folder's permissions. Confirmed by reading `apps/api/src/modules/files/routes.ts`: today's routes are `list`, `read`, `create`, `write`, `delete`, `rename`, `mkdir`, `copy`, `move`, `download`, `upload` — no `extract`/`compress`, no `chmod`. For any uploaded archive that *isn't* a self-extracting installer (a plain site backup `.zip`, a theme/plugin `.zip`, a Composer vendor dump, etc.) the only way to get its contents onto disk today is to unzip it locally first and re-upload every file individually. Permissions matter for the same class of workflow: some installers/frameworks expect a config file at `640`/`600` or a writable `storage/`/`uploads/` directory at `755`, and there's currently no way to fix that without shell access to the host.
@@ -2248,11 +2248,11 @@ Surfaced directly while live-testing F5.21 against a real Duplicator (WordPress 
 5. Path-traversal safety matters more here than for existing routes: `extract` must resolve every entry inside the archive through the same `safePath` guard (`apps/api/src/modules/files/schema.ts`) already used elsewhere, rejecting any entry whose path would escape the project root (a malicious/zip-slip archive) — worth a dedicated test case, not just a general note.
 
 **Acceptance Criteria:**
-- [ ] File/folder permissions are viewable and editable from the File Manager UI (octal + checkbox editor), non-recursive by default
-- [ ] An uploaded `.zip` can be extracted into the current directory from the File Manager, with no shell/SSH access needed
-- [ ] A selection of files/folders can be compressed into a `.zip` from the File Manager
-- [ ] Archive extraction is hardened against zip-slip / path traversal (entries resolved through `safePath`, extraction rejected if any entry would land outside the project root)
-- [ ] No new dependency (npm package or system binary) is added without explicit user confirmation, per CLAUDE.md §6
+- [x] File/folder permissions are viewable and editable from the File Manager UI (octal + checkbox editor), non-recursive by default
+- [x] An uploaded `.zip` can be extracted into the current directory from the File Manager, with no shell/SSH access needed
+- [x] A selection of files/folders can be compressed into a `.zip` from the File Manager
+- [x] Archive extraction is hardened against zip-slip / path traversal (entries resolved through `safePath`, extraction rejected if any entry would land outside the project root)
+- [x] No new dependency (npm package or system binary) is added without explicit user confirmation, per CLAUDE.md §6 — Python stdlib engine (no new package or binary); the shadcn `checkbox` component reuses the already-installed `radix-ui` package
 
 **Test Plan:**
 1. Upload a `.zip` containing a small site → Extract → files appear in the correct directory with correct contents
@@ -2263,6 +2263,12 @@ Surfaced directly while live-testing F5.21 against a real Duplicator (WordPress 
 
 **Developer Docs:**
 - **Location:** `docs/dev/file-manager-permissions-archives.md`
+
+**Implementation:**
+- API: `chmod` / `extract` / `compress` in `apps/api/src/modules/files/` (`archive.ts` spawns the helper); `mode` added to listings and `FileNode`
+- System: `system/python/archive_manager.py` (+ `test_archive_manager.py`)
+- Dashboard: `PermissionsDialog`, `ExtractDialog`, `CompressDialog`, Ctrl/Cmd+click multi-select in `FileTree`
+- Config: `ARCHIVE_MAX_ENTRIES`, `ARCHIVE_MAX_EXTRACT_MB`
 
 ---
 

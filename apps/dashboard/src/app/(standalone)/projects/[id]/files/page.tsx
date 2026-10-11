@@ -12,6 +12,8 @@ import {
   Loader2,
   FolderOpen,
   RefreshCw,
+  FileArchive,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -30,6 +32,9 @@ import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { FileTree } from "@/components/files/FileTree";
 import { FileEditor } from "@/components/files/FileEditor";
 import { UploadDropzone } from "@/components/files/UploadDropzone";
+import { PermissionsDialog } from "@/components/files/PermissionsDialog";
+import { ExtractDialog } from "@/components/files/ExtractDialog";
+import { CompressDialog } from "@/components/files/CompressDialog";
 import { fetchAPI } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useRefreshAnimation, refreshIconClassName } from "@/hooks/useRefreshAnimation";
@@ -59,6 +64,15 @@ export default function StandaloneFileManagerPage() {
   const [newName, setNewName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [nodeToAct, setNodeToAct] = useState<FileNode | null>(null);
+
+  // Permissions / archive state (F5.24)
+  const [multiSelected, setMultiSelected] = useState<FileNode[]>([]);
+  const [permissionsNode, setPermissionsNode] = useState<FileNode | null>(null);
+  const [extractNode, setExtractNode] = useState<FileNode | null>(null);
+  const [compressNodes, setCompressNodes] = useState<FileNode[]>([]);
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [extractOpen, setExtractOpen] = useState(false);
+  const [compressOpen, setCompressOpen] = useState(false);
 
   // Fetch project metadata for top bar
   useEffect(() => {
@@ -92,6 +106,7 @@ export default function StandaloneFileManagerPage() {
   // ── Select node ──────────────────────────────────────────────────────────
 
   const handleSelect = (node: FileNode) => {
+    setMultiSelected([]);
     setSelectedNode(node);
     if (node.type === "dir") {
       setCurrentDirPath(node.path);
@@ -100,6 +115,53 @@ export default function StandaloneFileManagerPage() {
       parts.pop();
       setCurrentDirPath(parts.join("/"));
     }
+  };
+
+  // ── Multi-select, permissions, archives ──────────────────────────────────
+
+  const handleToggleMultiSelect = (node: FileNode) => {
+    setMultiSelected((current) => {
+      const withoutNode = current.filter((n) => n.path !== node.path);
+      if (withoutNode.length !== current.length) return withoutNode;
+      const seed =
+        current.length === 0 && selectedNode && selectedNode.path !== node.path ? [selectedNode] : current;
+      return [...seed, node];
+    });
+  };
+
+  const openPermissions = (node: FileNode) => {
+    setPermissionsNode(node);
+    setPermissionsOpen(true);
+  };
+
+  const openExtract = (node: FileNode) => {
+    setExtractNode(node);
+    setExtractOpen(true);
+  };
+
+  const openCompress = (node: FileNode) => {
+    const inSelection = multiSelected.some((n) => n.path === node.path);
+    setCompressNodes(inSelection ? multiSelected : [node]);
+    setCompressOpen(true);
+  };
+
+  const downloadFile = (filePath: string, fileName: string) => {
+    const url = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/api/files/${projectId}/download?path=${encodeURIComponent(filePath)}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    a.click();
+  };
+
+  const handleCompressed = (archivePath: string) => {
+    setMultiSelected([]);
+    refreshTree();
+    toast.success("Archive ready", {
+      action: {
+        label: "Download",
+        onClick: () => downloadFile(archivePath, archivePath.split("/").pop() ?? "archive.zip"),
+      },
+    });
   };
 
   // ── Create file ──────────────────────────────────────────────────────────
@@ -228,11 +290,7 @@ export default function StandaloneFileManagerPage() {
 
   const handleDownload = () => {
     if (!selectedNode || selectedNode.type === "dir") return;
-    const url = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000"}/api/files/${projectId}/download?path=${encodeURIComponent(selectedNode.path)}`;
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = selectedNode.name;
-    a.click();
+    downloadFile(selectedNode.path, selectedNode.name);
   };
 
   // ── Breadcrumbs ──────────────────────────────────────────────────────────
@@ -342,6 +400,34 @@ export default function StandaloneFileManagerPage() {
             Upload
           </Button>
 
+          {multiSelected.length > 0 && (
+            <div className="flex items-center gap-1">
+              <Button
+                id="fm-compress-btn"
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs shadow-xs"
+                onClick={() => {
+                  setCompressNodes(multiSelected);
+                  setCompressOpen(true);
+                }}
+                title="Compress the selected items into a .zip"
+              >
+                <FileArchive className="h-3.5 w-3.5 text-violet-500" />
+                Compress ({multiSelected.length})
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground"
+                onClick={() => setMultiSelected([])}
+                aria-label="Clear selection"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+
           {selectedNode?.type === "file" && (
             <Button
               id="fm-download-btn"
@@ -388,12 +474,20 @@ export default function StandaloneFileManagerPage() {
             <FileTree
               projectId={projectId}
               selectedPath={selectedNode?.path}
+              multiSelectedPaths={new Set(multiSelected.map((n) => n.path))}
               onSelect={handleSelect}
+              onToggleMultiSelect={handleToggleMultiSelect}
               onDelete={openDelete}
               onRename={openRename}
+              onPermissions={openPermissions}
+              onExtract={openExtract}
+              onCompress={openCompress}
               refreshTrigger={refreshTrigger}
             />
           </div>
+          <p className="border-t border-border px-3 py-2 text-[10px] text-muted-foreground">
+            Ctrl/Cmd+click to select several items.
+          </p>
         </aside>
 
         {/* Right Pane: Code Editor / Empty State */}
@@ -567,6 +661,30 @@ export default function StandaloneFileManagerPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PermissionsDialog
+        open={permissionsOpen}
+        onOpenChange={setPermissionsOpen}
+        projectId={projectId}
+        node={permissionsNode}
+        onApplied={refreshTree}
+      />
+
+      <ExtractDialog
+        open={extractOpen}
+        onOpenChange={setExtractOpen}
+        projectId={projectId}
+        node={extractNode}
+        onExtracted={refreshTree}
+      />
+
+      <CompressDialog
+        open={compressOpen}
+        onOpenChange={setCompressOpen}
+        projectId={projectId}
+        nodes={compressNodes}
+        onCompressed={handleCompressed}
+      />
 
       {/* Upload dialog */}
       <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>

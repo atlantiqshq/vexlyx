@@ -296,6 +296,9 @@ export {
   MkdirBodySchema,
   CopyBodySchema,
   MoveBodySchema,
+  ChmodBodySchema,
+  ExtractBodySchema,
+  CompressBodySchema,
   SftpUserSchema,
   SftpAddSshKeyBodySchema,
 } from "./schemas/files.js";

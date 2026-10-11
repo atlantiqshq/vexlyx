@@ -42,6 +42,7 @@ async function authPlugin(app: FastifyInstance) {
 
   app.decorateRequest("userId", null);
   app.decorateRequest("userRole", null);
+  app.decorateRequest("userResellerId", null);
 
   // On every request, check for session cookie and populate request.userId
   app.addHook("onRequest", async (request) => {
@@ -79,6 +80,21 @@ async function authPlugin(app: FastifyInstance) {
       request.userResellerId = user.resellerId;
     }
   });
+
+  // Shared preHandler hook to require authentication. The session itself was
+  // already validated by the onRequest hook above, so this is a pure
+  // "is there a signed-in user" check — no extra DB lookup needed.
+  const requireAuth = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!request.userId) {
+      return reply.status(401).send({
+        error: "Authentication required",
+        code: "UNAUTHORIZED",
+        details: {},
+      });
+    }
+  };
+
+  app.decorate("requireAuth", requireAuth);
 
   // Shared preHandler factory to require one of a set of roles. Looked up
   // fresh from Postgres (not the session) on every call so a role change

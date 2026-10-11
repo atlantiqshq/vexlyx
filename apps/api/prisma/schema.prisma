@@ -702,7 +702,7 @@ model ScheduledTaskRun {
   taskId     String                  @map("task_id")
   trigger    ScheduledTaskRunTrigger
   status     ScheduledTaskRunStatus
-  exitCode   Int?
+  exitCode   Int?                  @map("exit_code")
   output     String?                 @db.Text // capped at 64KB
   startedAt  DateTime                @default(now()) @map("started_at")
   finishedAt DateTime?               @map("finished_at")

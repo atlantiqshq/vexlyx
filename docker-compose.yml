@@ -144,6 +144,8 @@ services:
       # than a named volume, since named volumes reset ownership to root on
       # Windows/WSL2 mounts (see the /var/spool/postfix note below).
       - ./docker/mail-data/vhosts:/var/mail/vhosts
+      # Per-mailbox signature files written by the panel, read by the signature filter (F5.31).
+      - ./docker/mail-data/signatures:/etc/vexlyx/signatures:ro
       # Delivery/bounce log (F4.8) — same host-bind-mount convention as
       # vhosts above (named volumes reset ownership to root on Windows).
       - ./docker/mail-data/logs:/var/log/postfix
@@ -184,6 +186,9 @@ services:
     environment:
       ROUNDCUBEMAIL_DB_TYPE: sqlite
       ROUNDCUBEMAIL_SKIN: elastic
+      # archive and zipdownload are the image's own defaults; setting this variable replaces the
+      # list, so they stay. vexlyx_signature applies the signature managed in the panel (F5.31).
+      ROUNDCUBEMAIL_PLUGINS: archive,zipdownload,vexlyx_signature
       # tls:// forces STARTTLS — Dovecot's `ssl = required` (docker/dovecot/dovecot.conf)
       # rejects auth on a plaintext connection, so a bare "dovecot"/"postfix"
       # host (no scheme) silently fails every login. See docker/roundcube/config/local.inc.php
@@ -195,6 +200,9 @@ services:
     volumes:
       - vexlyx_roundcube_data:/var/roundcube/db
       - ./docker/roundcube/config:/var/roundcube/config:ro
+      - ./docker/roundcube/plugins/vexlyx_signature:/var/www/html/plugins/vexlyx_signature:ro
+      # One JSON file per mailbox, written by the panel (system/python/signature_manager.py).
+      - ./docker/mail-data/signatures:/var/roundcube/signatures:ro
     networks:
       - default
       - traefik-net

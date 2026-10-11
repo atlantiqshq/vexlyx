@@ -10,6 +10,8 @@ export type EmailParams = {
   two_factor_reset: { name: string };
   quota_warning: { name: string; resource: string; used: number; limit: number; level: 80 | 100 };
   backup_failed: { error: string; snapshotId: string };
+  /** signatureHtml is HTML produced by the signature renderer, which escapes everything it is given. */
+  signature_test: { name: string; address: string; signatureHtml: string; signatureText: string };
   test: Record<string, never>;
 };
 
@@ -37,17 +39,20 @@ interface Layout {
   heading: string;
   paragraphs: string[];
   action?: { label: string; url: string };
+  /** Already-escaped HTML (and its plain-text twin) shown below the text, e.g. a rendered signature. */
+  extra?: { html: string; text: string };
 }
 
 // Inline styles are deliberate here: email clients strip <style> blocks and
 // ignore Tailwind, so inline CSS is the only portable option. The UI-wide
 // "no inline styles" rule applies to the dashboard, not to HTML email.
-function render({ subject, heading, paragraphs, action }: Layout): RenderedEmail {
+function render({ subject, heading, paragraphs, action, extra }: Layout): RenderedEmail {
   const text = [
     heading,
     "",
     ...paragraphs,
     ...(action ? ["", `${action.label}: ${action.url}`] : []),
+    ...(extra ? ["", extra.text] : []),
     "",
     "— Vexlyx",
   ].join("\n");
@@ -59,6 +64,7 @@ function render({ subject, heading, paragraphs, action }: Layout): RenderedEmail
     action
       ? `<p style="margin:20px 0"><a href="${escapeHtml(action.url)}" style="background:#4f46e5;color:#f8fafc;padding:10px 16px;border-radius:8px;text-decoration:none">${escapeHtml(action.label)}</a></p><p style="margin:0 0 12px;color:#64748b;font-size:12px">${escapeHtml(action.url)}</p>`
       : "",
+    extra ? extra.html : "",
     '<p style="margin:24px 0 0;color:#64748b;font-size:12px">Sent automatically by your Vexlyx panel. Please do not reply.</p>',
     "</div>",
   ].join("");
@@ -110,6 +116,18 @@ const TEMPLATES: { [E in SystemEmailEvent]: (params: EmailParams[E]) => Rendered
       subject: "Your Vexlyx password was changed",
       heading: "Your password was changed",
       paragraphs: [`Hi ${name}, the password for your account was just changed.`, NOT_YOU],
+    }),
+  signature_test: ({ name, address, signatureHtml, signatureText }) =>
+    render({
+      subject: `Signature preview for ${address}`,
+      heading: "Your signature",
+      paragraphs: [
+        `Hi ${name}, here is how the signature for ${address} looks. This preview was sent by your panel, not from the mailbox itself.`,
+      ],
+      extra: {
+        html: `<div style="margin:16px 0;padding-top:12px;border-top:1px solid #e2e8f0">${signatureHtml}</div>`,
+        text: signatureText,
+      },
     }),
   role_changed: ({ name, newRole }) =>
     render({

@@ -12,6 +12,61 @@ export {
 } from "./schemas/password.js";
 
 export {
+  SIGNATURE_VARIABLES,
+  composeSignature,
+  escapeHtml,
+  isSafeLogoUrl,
+  renderNoticeBlock,
+  renderSignatureTemplate,
+  sanitizeUrl,
+  validateSignatureTemplate,
+} from "./mailSignature/render.js";
+export type {
+  ComposeParts,
+  RenderOptions,
+  RenderedBlock,
+  SignatureVariable,
+  SignatureVars,
+} from "./mailSignature/render.js";
+export {
+  DomainSignaturePolicySchema,
+  MailboxProfileSchema,
+  SIGNATURE_BANNER_MAX,
+  SIGNATURE_EXPORT_FORMAT,
+  SIGNATURE_LOGO_MAX_BYTES,
+  SIGNATURE_NOTICE_MAX,
+  SIGNATURE_TEMPLATE_MAX,
+  SIGNATURE_VERSIONS_KEPT,
+  SignatureBannerSchema,
+  SignatureBulkSchema,
+  SignatureExportSchema,
+  SignatureGroupSchema,
+  SignatureModeSchema,
+  SignatureSenderListModeSchema,
+  UpdateMailboxSignatureSchema,
+} from "./mailSignature/schemas.js";
+export type {
+  DomainSignaturePolicy,
+  DomainSignatureResponse,
+  MailboxProfile,
+  MailboxSignatureResponse,
+  ResolvedSignatureResponse,
+  SignatureBannerInput,
+  SignatureBulkInput,
+  SignatureBulkResult,
+  SignatureEnforcementStatus,
+  SignatureExport,
+  SignatureFile,
+  SignatureGroupInput,
+  SignatureMode,
+  SignatureSenderListMode,
+  SignatureSource,
+  SignatureVersionResponse,
+  UpdateDomainSignatureInput,
+  UpdateMailboxSignatureInput,
+} from "./mailSignature/schemas.js";
+
+export {
   RegisterSchema,
   LoginSchema,
   ChangePasswordSchema,

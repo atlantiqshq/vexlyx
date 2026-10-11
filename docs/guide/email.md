@@ -62,6 +62,21 @@ sender from getting the reply more than once in that window. Auto-replies are se
 mailbox itself and DKIM-signed like any other outgoing mail, and normal inbox delivery keeps
 working exactly as before.
 
+## Email signatures
+
+**Mail → Mailboxes → Domain signatures** lets you design one signature for a whole domain using
+variables such as `{{name}}`, `{{title}}` and `{{phone}}`, with a live preview in light, dark and plain
+text. Each mailbox's **Email signature** button (the pen icon in its row) fills those variables
+from its own profile. You can lock the signature so people can't change it, create groups with their own
+version (for example Sales), add a legal footer, and schedule banners between two dates.
+
+Signatures are applied in webmail automatically. Mail sent from other apps (Outlook, a phone) only
+gets the signature when you turn on **Enforce server-side** for the domain; the server then adds it,
+and DKIM signing still happens afterwards so deliverability is unaffected. If you turn it on, ask people
+to clear the signature in their own mail app so it isn't added twice. **Settings → Mail signatures** has
+an emergency switch that stops all server-side signing instantly. See the
+[technical reference](/reference/email/signatures) for limits and details.
+
 ## Webmail
 
 Every mailbox can be read and sent from a browser at `https://webmail.<your-panel-domain>` — one

@@ -101,6 +101,7 @@ const groups: Group[] = [
       "reference/email/authentication",
       "reference/email/aliases",
       "reference/email/vacation-responder",
+      "reference/email/signatures",
       "reference/email/mail-operations",
       "reference/system-transactional-email",
     ],

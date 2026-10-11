@@ -16,8 +16,11 @@ import {
   Send,
   ShieldAlert,
   Palmtree,
+  PenLine,
 } from "lucide-react";
 import { VacationResponderDialog } from "./VacationResponderDialog";
+import { DomainSignatureDialog } from "./signatures/DomainSignatureDialog";
+import { MailboxSignatureDialog } from "./signatures/MailboxSignatureDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -142,6 +145,10 @@ export function MailboxesPanel() {
   const [deleteTarget, setDeleteTarget] = useState<MailboxResponse | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Signature dialogs (F5.31)
+  const [signatureTarget, setSignatureTarget] = useState<MailboxResponse | null>(null);
+  const [domainSignatureOpen, setDomainSignatureOpen] = useState(false);
+
   // Vacation responder dialog state
   const [vacationTarget, setVacationTarget] = useState<MailboxResponse | null>(null);
 
@@ -258,6 +265,16 @@ export function MailboxesPanel() {
 
             <div className="flex items-center gap-3">
               <QuotaBadge label="Mailboxes" usage={usage?.mailbox} isLoading={isUsageLoading} />
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2"
+                onClick={() => setDomainSignatureOpen(true)}
+                disabled={domains.length === 0}
+              >
+                <PenLine className="h-4 w-4" />
+                Domain signatures
+              </Button>
               <Button
                 size="sm"
                 className="gap-2"
@@ -397,6 +414,15 @@ export function MailboxesPanel() {
                             onClick={() => setVacationTarget(mailbox)}
                           >
                             <Palmtree className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground"
+                            aria-label="Email signature"
+                            onClick={() => setSignatureTarget(mailbox)}
+                          >
+                            <PenLine className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"
@@ -687,6 +713,13 @@ export function MailboxesPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Email signature dialogs (F5.31) */}
+      <MailboxSignatureDialog
+        mailbox={signatureTarget}
+        open={!!signatureTarget}
+        onOpenChange={(open) => !open && setSignatureTarget(null)}
+      />
+      <DomainSignatureDialog open={domainSignatureOpen} onOpenChange={setDomainSignatureOpen} domains={domains} />
       {/* Vacation Responder Dialog */}
       <VacationResponderDialog
         mailbox={vacationTarget}

@@ -22,6 +22,7 @@ Use this page to find the right user guide or technical reference. Availability 
 | PostgreSQL and MySQL databases | [Database provisioning](/reference/database-provisioning) | [Database architecture](/reference/database) |
 | Mailboxes and webmail | [Email](/guide/email) | [Mail architecture](/reference/email/postfix) |
 | Forwarding, aliases, and vacation replies | [Email](/guide/email) | [Aliases](/reference/email/aliases) |
+| Email signatures, legal footers, and banners | [Email](/guide/email) | [Signatures](/reference/email/signatures) |
 
 ## Administration and security
 

@@ -80,6 +80,11 @@ const envSchema = z
     WEBMAIL_CONTAINER_NAME: z.string().min(1).default("vexlyx-roundcube"),
     // File Manager & SFTP (F2.8)
     FILE_UPLOAD_MAX_MB: z.coerce.number().int().min(1).max(1000).default(1000),
+    // Mail signatures (F5.31). SIGNATURES_DIR is where the per-mailbox signature files are written
+    // for Roundcube and Postfix to read (default: docker/mail-data/signatures); SIGNATURE_ASSETS_DIR
+    // holds uploaded logo images.
+    SIGNATURES_DIR: z.string().min(1).optional(),
+    SIGNATURE_ASSETS_DIR: z.string().min(1).default("./workspaces/signature-assets"),
     // Archive extract/compress limits (F5.24)
     ARCHIVE_MAX_ENTRIES: z.coerce.number().int().min(1).default(100_000),
     ARCHIVE_MAX_EXTRACT_MB: z.coerce.number().int().min(1).default(5120),

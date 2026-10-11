@@ -16,6 +16,7 @@ const SAMPLES: { [E in keyof EmailParams]: EmailParams[E] } = {
   two_factor_reset: { name: "Ada" },
   quota_warning: { name: "Ada", resource: "project", used: 8, limit: 10, level: 80 },
   backup_failed: { error: "disk full", snapshotId: "snap-1" },
+  signature_test: { name: "Ada", address: "ada@example.com", signatureHtml: "<div>Ada Lovelace</div>", signatureText: "Ada Lovelace" },
   test: {},
 };
 
@@ -37,6 +38,14 @@ describe("renderEmail", () => {
     const mail = renderEmail("backup_failed", { error: "<script>alert(1)</script>", snapshotId: "s" });
     expect(mail.html).not.toContain("<script>");
     expect(mail.html).toContain("&lt;script&gt;");
+  });
+
+  it("shows the rendered signature in both bodies, and escapes everything else", () => {
+    const mail = renderEmail("signature_test", { ...SAMPLES.signature_test, name: "<b>Ada</b>" });
+    expect(mail.html).toContain("<div>Ada Lovelace</div>");
+    expect(mail.text).toContain("Ada Lovelace");
+    expect(mail.html).not.toContain("<b>Ada</b>");
+    expect(mail.subject).toBe("Signature preview for ada@example.com");
   });
 
   it("uses the stronger wording when the limit is fully reached", () => {

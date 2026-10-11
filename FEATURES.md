@@ -2520,6 +2520,38 @@ Issue #19. A forgotten password could not be recovered: no forgot-password flow 
 
 ---
 
+### F5.31 — Email Signatures (Domain Templates, Groups, Legal Footers, Banners, Server-Side Enforcement)
+**Status:** 🟢 COMPLETED — unit, route and real-Postgres service tests pass; the Postfix filter (40 checks plus a 3-check live harness with cryptographic DKIM verification) and the Roundcube plugin (19-check HTTP flow) were exercised in real containers; in the dashboard the domain dialog (signature tab), mailbox dialog, test email and the Settings switch were driven in a browser, but the Delivery, Groups, Banners and Tools tabs were checked only by typecheck, lint and helper tests
+
+**Description:**
+Issue #23. Domain owners design one signature template that every mailbox fills from its own profile, with locking, groups, a legal footer, dated banners, rules (external only, new messages only, sender list), bulk actions, import/export and version history. Signatures are applied in webmail by a Roundcube plugin and, with "Enforce server-side", to mail from any app by a Postfix filter that keeps DKIM valid.
+
+**Acceptance Criteria:**
+- [x] Per-domain template with variables, bold and links, a live light/dark/plain-text preview, and an uploaded or linked logo
+- [x] Per-mailbox profile and a choice of domain signature, own signature, or none; a locked domain overrides it
+- [x] Groups with their own template, a legal footer, and banners that only show between their dates
+- [x] Server-side enforcement for any mail app, added before DKIM signing so the DKIM signature stays valid
+- [x] The filter fails open, skips signed, encrypted, calendar, report, bounce and auto-reply mail, and never signs twice
+- [x] Roundcube applies the signature on sign-in and hides the signature form when it is locked or server-enforced
+- [x] An admin emergency switch and counters; version history with restore; bulk reset and group assignment; export and import
+- [x] Template and profile values cannot inject markup or links; only https, mailto and tel links are allowed
+- [x] Owner-only access; unauthenticated requests get 401 and other users' domains get 404
+
+**Not included:** reseller management of sub-accounts' signatures, a rich-text/HTML editor, image re-encoding of uploaded logos, and control over signatures set inside users' own desktop or phone apps when server-side enforcement is off.
+
+**Test Plan:**
+1. Resolution order: disabled, locked, custom, group, domain, none; banners only with a signature; legal footer independent
+2. Hostile profile and template values (HTML, `**`, `javascript:` links, bidi characters) render as inert text
+3. Send mail over authenticated submission: the signature is added once, DKIM verifies, replies are placed correctly
+4. Signed, encrypted, calendar and auto-reply mail pass through byte for byte; a missing or crashing Python still delivers the original
+5. Roundcube sign-in writes the identity; a locked domain hides the form and ignores edits
+6. Another user's mailbox or domain returns 404; no session returns 401
+
+**Developer Docs:**
+- **Location:** `docs/dev/email/signatures.md`
+
+---
+
 ## Phase 6: Ecosystem & Launch
 
 ### F6.1 — Complete Documentation

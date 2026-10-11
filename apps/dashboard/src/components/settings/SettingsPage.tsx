@@ -33,6 +33,7 @@ import { formatTime } from "@/lib/datetime";
 import { useRefreshAnimation, refreshIconClassName } from "@/hooks/useRefreshAnimation";
 import { TwoFactorCard } from "./TwoFactorCard";
 import { SystemEmailCard } from "./SystemEmailCard";
+import { SignatureEnforcementCard } from "./SignatureEnforcementCard";
 import { GitHubCard } from "./GitHubCard";
 import { MIN_PASSWORD_LENGTH, PasswordSchema } from "@vexlyx/shared";
 import type { DnsRecordVerification } from "@vexlyx/shared";
@@ -289,6 +290,9 @@ export function SettingsPage() {
 
       {/* System transactional email status (F5.23), ADMIN only */}
       {isAdmin && <SystemEmailCard />}
+
+      {/* Server-side mail signatures: global switch and counters (F5.31), ADMIN only */}
+      {isAdmin && <SignatureEnforcementCard />}
 
       {/* DNS Records & Public IP reference (F5.9), ADMIN only */}
       {isAdmin && (

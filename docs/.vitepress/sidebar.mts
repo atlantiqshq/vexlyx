@@ -110,6 +110,7 @@ const groups: Group[] = [
       "reference/ci-cd",
       "reference/settings-page",
       "reference/dashboard-home",
+      "reference/scheduled-tasks",
     ],
   },
   { text: "Project", pages: ["project/contributing", "project/security"] },

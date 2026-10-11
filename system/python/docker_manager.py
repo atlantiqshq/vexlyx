@@ -18,6 +18,8 @@ Commands:
   cleanup   -- `docker container prune` + `docker image prune -a` (F5.15).
   image_id  -- Resolve the current image ID for a tag, or null (F5.15).
   remove_image -- `docker image rm <id>`, no-ops if the image is in use (F5.15).
+  exec      -- Execute a command inside a project's running container (F5.28).
+               Returns: { exitCode, output, timedOut, containerId }
 
 Port allocation strategy:
   Each project gets a unique host port derived from a configurable range (default 8100-8999).
@@ -35,6 +37,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 
@@ -798,6 +801,107 @@ def cmd_logs_follow(payload: dict) -> None:
                 pass
 
 
+def cmd_exec(payload: dict) -> None:
+    """
+    Execute a command inside a project's running container (F5.28).
+
+    Required payload fields:
+      projectDir  -- absolute path to the deploy directory
+      projectType -- e.g. NODEJS, PYTHON, STATIC
+      shellCommand -- command string to execute
+      timeout     -- hard timeout in seconds (1-3600)
+      outputLimit -- max output bytes to capture (default 65536)
+
+    Returns: { exitCode, output, timedOut, containerId }
+    """
+    project_dir = require_field(payload, "projectDir")
+    project_type = payload.get("projectType", "NODEJS")
+    command = require_field(payload, "shellCommand")
+    timeout = int(payload.get("timeout", 300))
+    output_limit = int(payload.get("outputLimit", 65536))
+
+    if timeout < 1 or timeout > 3600:
+        fail("Timeout must be between 1 and 3600 seconds", "INVALID_TIMEOUT")
+
+    docker_bin = get_docker_binary()
+    compose_dir = str(Path(project_dir) / "deploy")
+
+    if not Path(compose_dir).is_dir() or not (Path(compose_dir) / "docker-compose.yml").is_file():
+        fail("Project not deployed (no compose directory)", "NOT_DEPLOYED")
+
+    # Get the primary container ID (same logic as status/logs)
+    container_id = get_container_id(compose_dir, docker_bin, project_type)
+    if not container_id:
+        fail("No running container found for this project", "NO_CONTAINER")
+
+    # Execute with timeout and output cap
+    # Use sh -c to support shell features; command is passed as argv[2] (not interpolated)
+    cmd = [docker_bin, "exec", container_id, "sh", "-c", command]
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+    except Exception as e:
+        fail(f"Failed to start docker exec: {e}", "EXEC_SPAWN_ERROR")
+
+    output_lines = []
+    total_bytes = 0
+    timed_out = False
+
+    def kill_proc() -> None:
+        nonlocal timed_out
+        timed_out = True
+        try:
+            proc.terminate()
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    timer = threading.Timer(timeout, kill_proc)
+    timer.start()
+
+    try:
+        if proc.stdout:
+            for line in iter(proc.stdout.readline, ""):
+                if total_bytes >= output_limit:
+                    # Cap reached, stop reading but let process continue
+                    break
+                line_bytes = len(line.encode("utf-8"))
+                if total_bytes + line_bytes > output_limit:
+                    # Truncate this line
+                    remaining = output_limit - total_bytes
+                    if remaining > 0:
+                        output_lines.append(line[:remaining])
+                    break
+                output_lines.append(line.rstrip("\n"))
+                total_bytes += line_bytes
+    finally:
+        timer.cancel()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+
+    exit_code = proc.returncode
+
+    respond({
+        "exitCode": exit_code,
+        "output": "\n".join(output_lines),
+        "timedOut": timed_out,
+        "containerId": container_id,
+    })
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -815,6 +919,7 @@ COMMANDS = {
     "cleanup": cmd_cleanup,
     "image_id": cmd_image_id,
     "remove_image": cmd_remove_image,
+    "exec": cmd_exec,
 }
 
 

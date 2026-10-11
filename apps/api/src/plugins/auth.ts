@@ -8,6 +8,7 @@ declare module "fastify" {
   interface FastifyRequest {
     userId: string | null;
     userRole: Role | null;
+    userResellerId: string | null;
   }
   interface FastifyInstance {
     requireAuth: (
@@ -64,18 +65,20 @@ async function authPlugin(app: FastifyInstance) {
     }
   });
 
-  // Shared preHandler hook to require authentication
-  const requireAuth = async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!request.userId) {
-      return reply.status(401).send({
-        error: "Authentication required",
-        code: "UNAUTHORIZED",
-        details: {},
-      });
-    }
-  };
+  // Populate userRole and userResellerId on each authenticated request
+  app.addHook("preHandler", async (request) => {
+    if (!request.userId) return;
 
-  app.decorate("requireAuth", requireAuth);
+    const user = await app.prisma.user.findUnique({
+      where: { id: request.userId },
+      select: { role: true, resellerId: true },
+    });
+
+    if (user) {
+      request.userRole = user.role;
+      request.userResellerId = user.resellerId;
+    }
+  });
 
   // Shared preHandler factory to require one of a set of roles. Looked up
   // fresh from Postgres (not the session) on every call so a role change
@@ -94,7 +97,7 @@ async function authPlugin(app: FastifyInstance) {
 
       const user = await app.prisma.user.findUnique({
         where: { id: request.userId },
-        select: { role: true },
+        select: { role: true, resellerId: true },
       });
 
       if (!user || !roles.includes(user.role)) {
@@ -106,6 +109,7 @@ async function authPlugin(app: FastifyInstance) {
       }
 
       request.userRole = user.role;
+      request.userResellerId = user.resellerId;
     };
 
   app.decorate("requireRole", requireRole);
@@ -129,7 +133,7 @@ async function authPlugin(app: FastifyInstance) {
 
       const user = await app.prisma.user.findUnique({
         where: { id: request.userId },
-        select: { role: true, permissions: true },
+        select: { role: true, permissions: true, resellerId: true },
       });
 
       if (!user || (!roles.includes(user.role) && !user.permissions.includes(permission))) {
@@ -141,6 +145,7 @@ async function authPlugin(app: FastifyInstance) {
       }
 
       request.userRole = user.role;
+      request.userResellerId = user.resellerId;
     };
 
   app.decorate("requireRoleOrPermission", requireRoleOrPermission);

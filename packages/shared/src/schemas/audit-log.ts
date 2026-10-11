@@ -33,6 +33,10 @@ export const AUDIT_ACTIONS = [
   "user.2fa_reset",
   "user.password_reset",
   "system_email.test_sent",
+  "scheduled_task.created",
+  "scheduled_task.updated",
+  "scheduled_task.deleted",
+  "scheduled_task.run_now",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

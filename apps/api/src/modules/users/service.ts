@@ -210,6 +210,21 @@ export class UserService {
   }
 
   /**
+   * Who may start a password reset for a user (F5.30): an ADMIN for any
+   * non-admin account, a RESELLER only for their own sub-accounts. Admin
+   * accounts are never resettable from the panel — they recover from the
+   * server shell, so a compromised panel session can't take one over.
+   */
+  async getResettableUser(requester: Requester, id: string) {
+    const target = await this.ensureExists(id);
+    this.assertCanManage(requester, target);
+    if (target.role === "ADMIN") {
+      throw new UserError("Admin accounts are recovered from the server", "ADMIN_NOT_RESETTABLE", 403);
+    }
+    return target;
+  }
+
+  /**
    * ADMIN may manage anyone; RESELLER may only manage a USER they own
    * (their own sub-account) — never another reseller's account, an admin,
    * or a user that isn't theirs.
@@ -271,6 +286,7 @@ export class UserService {
       select: {
         id: true,
         email: true,
+        name: true,
         role: true,
         resellerId: true,
         maxProjects: true,

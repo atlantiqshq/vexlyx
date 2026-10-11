@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { z } from "zod";
+import { PasswordSchema } from "@vexlyx/shared";
 import { toast } from "sonner";
 import { usePasswordReset } from "@/hooks/usePasswordReset";
 import { ApiRequestError } from "@/lib/api";
@@ -14,7 +15,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
 const passwordSchema = z
   .object({
-    newPassword: z.string().min(8, "Password must be at least 8 characters"),
+    newPassword: PasswordSchema,
     confirmPassword: z.string(),
   })
   .refine((data) => data.newPassword === data.confirmPassword, {

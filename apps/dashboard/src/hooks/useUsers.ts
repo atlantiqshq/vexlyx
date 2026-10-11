@@ -8,6 +8,7 @@ import type {
   UpdateUserRoleInput,
   UpdateUserQuotasInput,
   UpdateUserPermissionsInput,
+  AdminPasswordResetResult,
 } from "@vexlyx/shared";
 
 // ---------------------------------------------------------------------------
@@ -65,6 +66,12 @@ async function updateUserPermissions(id: string, input: UpdateUserPermissionsInp
     body: JSON.stringify(input),
   });
   if (!res.ok) throw new Error(await extractError(res, "Failed to update permissions"));
+}
+
+async function issuePasswordReset(id: string): Promise<AdminPasswordResetResult> {
+  const res = await fetch(`${API_URL}/api/users/${id}/password-reset`, { method: "POST", credentials: "include" });
+  if (!res.ok) throw new Error(await extractError(res, "Failed to create a reset link"));
+  return res.json() as Promise<AdminPasswordResetResult>;
 }
 
 async function deleteUser(id: string): Promise<void> {
@@ -143,5 +150,6 @@ export function useUsers() {
     updatePermissions: (id: string, input: UpdateUserPermissionsInput) =>
       permissionsMutation.mutateAsync({ id, input }),
     deleteUser: (id: string) => deleteMutation.mutate(id),
+    issuePasswordReset,
   };
 }

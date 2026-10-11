@@ -31,6 +31,7 @@ export function UsersPage() {
     deleteUser,
     createSubAccount,
     isCreating,
+    issuePasswordReset,
   } = useUsers();
   const { usage, isLoading: isUsageLoading } = useUsage();
   const { adminReset } = useTwoFactor();
@@ -126,6 +127,7 @@ export function UsersPage() {
         canEditRole={isAdmin && editTarget?.id !== user.id}
         isSelf={editTarget?.id === user.id}
         canReset2FA={isAdmin && editTarget?.id !== user.id}
+        canResetPassword={!!editTarget && editTarget.role !== "ADMIN" && editTarget.id !== user.id}
         onOpenChange={(open) => !open && setEditTarget(null)}
         isSaving={isSavingQuotas}
         onSave={async (id, data) => {
@@ -135,6 +137,7 @@ export function UsersPage() {
           setEditTarget(null);
         }}
         onReset2FA={(id) => adminReset(id).then(() => undefined)}
+        onResetPassword={issuePasswordReset}
       />
 
       <DeleteUserConfirmDialog

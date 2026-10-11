@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { z } from "zod";
+import { MIN_PASSWORD_LENGTH, PasswordSchema } from "@vexlyx/shared";
 import { useAuth } from "@/hooks/useAuth";
 import { useAuthConfig } from "@/hooks/useAuthConfig";
 import { ApiRequestError } from "@/lib/api";
@@ -20,7 +21,7 @@ const registerSchema = z
   .object({
     name: z.string().min(1, "Name is required").max(100),
     email: z.string().email("Invalid email address"),
-    password: z.string().min(8, "Password must be at least 8 characters"),
+    password: PasswordSchema,
     confirmPassword: z.string(),
   })
   .refine((data) => data.password === data.confirmPassword, {
@@ -163,7 +164,7 @@ export function RegisterForm() {
               id="register-password"
               name="password"
               type="password"
-              placeholder="Min 8 characters"
+              placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
               autoComplete="new-password"
               disabled={isLoading}
               aria-invalid={!!errors.password}

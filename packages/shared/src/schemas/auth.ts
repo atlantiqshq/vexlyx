@@ -1,10 +1,7 @@
 import { z } from "zod";
+import { PasswordSchema as passwordSchema } from "./password.js";
 
 const emailSchema = z.string().email("Invalid email address");
-
-const passwordSchema = z
-  .string()
-  .min(8, "Password must be at least 8 characters");
 
 export const RegisterSchema = z
   .object({

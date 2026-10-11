@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, ShieldAlert } from "lucide-react";
+import { KeyRound, Loader2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -17,7 +17,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ApiRequestError } from "@/lib/api";
-import type { Role, Permission, UserResponse, UpdateUserQuotasInput } from "@vexlyx/shared";
+import { PasswordResetLinkDialog } from "./PasswordResetLinkDialog";
+import type { AdminPasswordResetResult, Role, Permission, UserResponse, UpdateUserQuotasInput } from "@vexlyx/shared";
 
 interface EditUserDialogProps {
   user: UserResponse | null;
@@ -35,9 +36,16 @@ interface EditUserDialogProps {
    * their own authenticator must be reset by another ADMIN directly.
    */
   canReset2FA: boolean;
+  /**
+   * Starts a password reset (F5.30) for a non-admin account the signed-in
+   * ADMIN or RESELLER manages. Admin accounts are recovered from the server
+   * shell, so this is never offered for them.
+   */
+  canResetPassword: boolean;
   onOpenChange: (open: boolean) => void;
   onSave: (id: string, data: { role?: Role; quotas: UpdateUserQuotasInput; permissions?: Permission[] }) => Promise<void>;
   onReset2FA: (id: string) => Promise<void>;
+  onResetPassword: (id: string) => Promise<AdminPasswordResetResult>;
 }
 
 type QuotaField = "maxProjects" | "maxDomains" | "maxDatabases" | "maxMailboxes" | "maxSubAccounts";
@@ -65,7 +73,7 @@ function fromFormValue(v: string): number | null {
   return v.trim() === "" ? null : Number(v);
 }
 
-export function EditUserDialog({ user, isSaving, canEditRole, isSelf, canReset2FA, onOpenChange, onSave, onReset2FA }: EditUserDialogProps) {
+export function EditUserDialog({ user, isSaving, canEditRole, isSelf, canReset2FA, canResetPassword, onOpenChange, onSave, onReset2FA, onResetPassword }: EditUserDialogProps) {
   const [role, setRole] = useState<Role>("USER");
   const [quotas, setQuotas] = useState<Record<QuotaField, string>>({
     maxProjects: "",
@@ -78,6 +86,8 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, canReset2F
   const [oversellingEnabled, setOversellingEnabled] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [isIssuingLink, setIsIssuingLink] = useState(false);
+  const [issuedLink, setIssuedLink] = useState<AdminPasswordResetResult | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -115,6 +125,23 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, canReset2F
       },
       permissions: canEditRole ? permissions : undefined,
     });
+  };
+
+  const handleSendResetLink = async () => {
+    if (!user) return;
+    setIsIssuingLink(true);
+    try {
+      const result = await onResetPassword(user.id);
+      if (result.delivery === "email") {
+        toast.success(`Reset link emailed to ${user.email}`);
+      } else {
+        setIssuedLink(result);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create a reset link");
+    } finally {
+      setIsIssuingLink(false);
+    }
   };
 
   const handleReset2FA = async () => {
@@ -220,6 +247,31 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, canReset2F
             ))}
           </div>
 
+          {canResetPassword && (
+            <div className="space-y-1.5">
+              <Label>Password</Label>
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">Send reset link</p>
+                  <p className="text-xs text-muted-foreground">
+                    Creates a single-use link, emailed to them when panel email is set up. You never see or choose
+                    their password, and any earlier link stops working.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 gap-1.5"
+                  onClick={() => void handleSendResetLink()}
+                  disabled={isIssuingLink}
+                >
+                  {isIssuingLink ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+                  Send link
+                </Button>
+              </div>
+            </div>
+          )}
+
           {canReset2FA && (
             <div className="space-y-1.5">
               <Label>Two-factor authentication</Label>
@@ -280,6 +332,13 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, canReset2F
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <PasswordResetLinkDialog
+      open={!!issuedLink}
+      onOpenChange={(open) => !open && setIssuedLink(null)}
+      userName={user?.name ?? "this user"}
+      result={issuedLink}
+    />
     </>
   );
 }

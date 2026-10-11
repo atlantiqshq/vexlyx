@@ -85,6 +85,7 @@ This matrix maps every completed roadmap feature to its primary maintained docum
 | F5.24 File permissions and archives | [File permissions and archives](/reference/file-manager-permissions-archives) |
 | F5.26 Mail authentication for connected domains | [Email authentication](/reference/email/authentication) |
 | F5.29 GitHub integration | [GitHub integration](/reference/github-integration) |
+| F5.30 Password recovery | [Password recovery](/reference/password-recovery) |
 | F6.2 CI/CD | [CI/CD](/reference/ci-cd) |
 
 F5.28 scheduled tasks and F6.3 community infrastructure are excluded because the roadmap marks them as not started.

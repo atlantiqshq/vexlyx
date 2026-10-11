@@ -2,7 +2,7 @@ import type { SystemEmailEvent } from "@vexlyx/shared";
 import { env } from "../../config/env.js";
 
 export type EmailParams = {
-  password_reset: { name: string; resetUrl: string; expiresMinutes: number };
+  password_reset: { name: string; resetUrl: string; expiresMinutes: number; initiatedByAdmin?: boolean };
   password_changed: { name: string };
   role_changed: { name: string; newRole: string };
   two_factor_enabled: { name: string };
@@ -66,6 +66,18 @@ function render({ subject, heading, paragraphs, action }: Layout): RenderedEmail
   return { subject, text, html };
 }
 
+function formatDuration(minutes: number): string {
+  if (minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return days === 1 ? "24 hours" : `${days} days`;
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return hours === 1 ? "1 hour" : `${hours} hours`;
+  }
+  return `${minutes} minutes`;
+}
+
 const NOT_YOU = "If this wasn't you, reset your password right away and contact your administrator.";
 
 const RESOURCE_LABELS: Record<string, string> = {
@@ -77,13 +89,19 @@ const RESOURCE_LABELS: Record<string, string> = {
 };
 
 const TEMPLATES: { [E in SystemEmailEvent]: (params: EmailParams[E]) => RenderedEmail } = {
-  password_reset: ({ name, resetUrl, expiresMinutes }) =>
+  password_reset: ({ name, resetUrl, expiresMinutes, initiatedByAdmin }) =>
     render({
       subject: "Reset your Vexlyx password",
       heading: "Reset your password",
       paragraphs: [
-        `Hi ${name}, we received a request to reset your password.`,
-        `This link works once and expires in ${expiresMinutes} minutes. If you didn't ask for it, you can ignore this email — your password won't change.`,
+        initiatedByAdmin
+          ? `Hi ${name}, an administrator started a password reset for your account.`
+          : `Hi ${name}, we received a request to reset your password.`,
+        `This link works once and expires in ${formatDuration(expiresMinutes)}. ${
+          initiatedByAdmin
+            ? "If you weren't expecting it, you can ignore this email — your password won't change."
+            : "If you didn't ask for it, you can ignore this email — your password won't change."
+        }`,
       ],
       action: { label: "Choose a new password", url: resetUrl },
     }),

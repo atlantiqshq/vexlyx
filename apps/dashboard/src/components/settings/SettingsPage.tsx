@@ -34,6 +34,7 @@ import { useRefreshAnimation, refreshIconClassName } from "@/hooks/useRefreshAni
 import { TwoFactorCard } from "./TwoFactorCard";
 import { SystemEmailCard } from "./SystemEmailCard";
 import { GitHubCard } from "./GitHubCard";
+import { MIN_PASSWORD_LENGTH, PasswordSchema } from "@vexlyx/shared";
 import type { DnsRecordVerification } from "@vexlyx/shared";
 
 // IANA timezone identifiers, sourced from the runtime's own tz database
@@ -86,8 +87,9 @@ export function SettingsPage() {
     e.preventDefault();
     setPasswordError(null);
 
-    if (newPassword.length < 8) {
-      setPasswordError("Password must be at least 8 characters");
+    const passwordCheck = PasswordSchema.safeParse(newPassword);
+    if (!passwordCheck.success) {
+      setPasswordError(passwordCheck.error.issues[0]?.message ?? "Invalid password");
       return;
     }
     if (newPassword !== confirmNewPassword) {
@@ -207,7 +209,7 @@ export function SettingsPage() {
                 id="new-password"
                 type="password"
                 autoComplete="new-password"
-                placeholder="Min 8 characters"
+                placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 disabled={isChangingPassword}

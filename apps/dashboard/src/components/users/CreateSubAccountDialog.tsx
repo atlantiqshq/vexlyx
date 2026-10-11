@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { MIN_PASSWORD_LENGTH } from "@vexlyx/shared";
 import type { CreateSubAccountInput, Role } from "@vexlyx/shared";
 
 interface CreateSubAccountDialogProps {
@@ -32,7 +33,7 @@ export function CreateSubAccountDialog({ isAdmin, onCreate, isCreating, disabled
   const [form, setForm] = useState(DEFAULTS);
 
   const handleSubmit = async () => {
-    if (!form.name.trim() || !form.email.trim() || form.password.length < 8) return;
+    if (!form.name.trim() || !form.email.trim() || form.password.length < MIN_PASSWORD_LENGTH) return;
 
     try {
       await onCreate({
@@ -114,7 +115,7 @@ export function CreateSubAccountDialog({ isAdmin, onCreate, isCreating, disabled
               type="password"
               value={form.password}
               onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-              placeholder="At least 8 characters"
+              placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
             />
           </div>
         </div>
@@ -126,7 +127,7 @@ export function CreateSubAccountDialog({ isAdmin, onCreate, isCreating, disabled
           <Button
             size="sm"
             onClick={handleSubmit}
-            disabled={isCreating || !form.name || !form.email || form.password.length < 8}
+            disabled={isCreating || !form.name || !form.email || form.password.length < MIN_PASSWORD_LENGTH}
           >
             {isCreating && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
             Create

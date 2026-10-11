@@ -46,6 +46,7 @@ const groups: Group[] = [
     text: "Access and security",
     pages: [
       "reference/authentication",
+      "reference/password-recovery",
       "reference/roles-permissions",
       "reference/fine-grained-permissions",
       "reference/reseller-overselling",

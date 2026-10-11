@@ -140,6 +140,15 @@ enum CleanupTrigger {
   REDEPLOY
 }
 
+/// Who issued a password reset link (F5.30). SELF_SERVICE links come from the
+/// public forgot-password form; ADMIN links from an admin or reseller; CLI
+/// links from shell access to the server, which is itself the proof of ownership.
+enum PasswordResetSource {
+  SELF_SERVICE
+  ADMIN
+  CLI
+}
+
 /// Transport protocol a firewall rule applies to.
 enum FirewallProtocol {
   TCP
@@ -198,6 +207,7 @@ model User {
   sessions       Session[]
   recoveryCodes RecoveryCode[]
   passwordResetTokens PasswordResetToken[]
+  issuedResetTokens   PasswordResetToken[] @relation("PasswordResetIssuer")
   quotaNotices QuotaNotice[]
   projects       Project[]
   domains        Domain[]
@@ -250,9 +260,13 @@ model PasswordResetToken {
   expiresAt DateTime  @map("expires_at")
   usedAt    DateTime? @map("used_at")
   requestIp String?   @map("request_ip")
+  source    PasswordResetSource @default(SELF_SERVICE)
+  /// The admin or reseller who issued the link; null for self-service and CLI links.
+  createdById String? @map("created_by_id")
   createdAt DateTime  @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("PasswordResetIssuer", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@map("password_reset_tokens")

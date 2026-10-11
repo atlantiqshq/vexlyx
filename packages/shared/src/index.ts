@@ -5,6 +5,13 @@ export const VEXLYX_VERSION = "0.0.1";
 export const APP_NAME = "Vexlyx";
 
 export {
+  PasswordSchema,
+  MIN_PASSWORD_LENGTH,
+  MAX_PASSWORD_LENGTH,
+  isCommonPassword,
+} from "./schemas/password.js";
+
+export {
   RegisterSchema,
   LoginSchema,
   ChangePasswordSchema,
@@ -438,6 +445,7 @@ export type {
   QuotaUsage,
   UsageSummary,
   CreateSubAccountInput,
+  AdminPasswordResetResult,
   UpdateUserRoleInput,
   UpdateUserQuotasInput,
   UpdateUserPermissionsInput,

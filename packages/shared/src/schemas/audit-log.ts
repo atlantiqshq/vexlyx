@@ -32,6 +32,7 @@ export const AUDIT_ACTIONS = [
   "user.2fa_disabled",
   "user.2fa_reset",
   "user.password_reset",
+  "user.password_reset_issued",
   "system_email.test_sent",
   "github.app_created",
   "github.app_replaced",

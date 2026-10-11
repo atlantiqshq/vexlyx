@@ -12,7 +12,7 @@ import { env } from "../../config/env.js";
 export async function authRoutes(app: FastifyInstance) {
   const service = new AuthService(app.prisma);
   const twoFactor = new TwoFactorService(app.prisma, app.redis, new AuditLogService(app.prisma, app.log));
-  const passwordReset = new PasswordResetService(app.prisma, app.redis, new AuditLogService(app.prisma, app.log));
+  const passwordReset = new PasswordResetService(app.prisma, app.redis, new AuditLogService(app.prisma, app.log), app.log);
 
   // Register rate limiting plugin for this scope
   await app.register(rateLimit, {
@@ -149,16 +149,13 @@ export async function authRoutes(app: FastifyInstance) {
 
   // POST /api/auth/forgot-password — always answers 202 with the same body,
   // whether or not the email belongs to an account, so it can't be used to
-  // discover which emails are registered.
+  // discover which emails are registered. The lookup and email happen after
+  // the answer is sent, so response time doesn't reveal it either.
   app.post("/forgot-password", {
     config: { rateLimit: { max: 5, timeWindow: "15 minutes" } },
     handler: async (request, reply) => {
       const data = ForgotPasswordSchema.parse(request.body);
-      try {
-        await passwordReset.requestReset(data.email, request.ip);
-      } catch (err) {
-        app.log.error({ err }, "Password reset request failed");
-      }
+      passwordReset.requestReset(data.email, request.ip);
       reply.status(202);
       return { message: "If that email belongs to an account, a reset link is on its way." };
     },
@@ -235,7 +232,7 @@ export async function authRoutes(app: FastifyInstance) {
   app.post("/2fa/disable", { preHandler: [app.requireAuth] }, async (request, reply) => {
     try {
       const data = DisableTwoFactorSchema.parse(request.body);
-      await twoFactor.disable(request.userId!, data.password, data.codeOrRecovery);
+      await twoFactor.disable(request.userId!, data.password, data.codeOrRecovery, request.cookies[SESSION_COOKIE]);
       return { message: "Two-factor authentication disabled" };
     } catch (err) {
       if (err instanceof AuthError) {

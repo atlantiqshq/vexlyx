@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PasswordSchema } from "./password.js";
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -68,12 +69,19 @@ export type UsageSummary = z.infer<typeof UsageSummarySchema>;
 export const CreateSubAccountSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1).max(100),
-  password: z.string().min(8).max(200),
+  password: PasswordSchema,
   // Only honored when the requester is ADMIN — a RESELLER-created account is
   // always forced to USER regardless of what's sent here.
   role: RoleSchema.optional(),
 });
 export type CreateSubAccountInput = z.infer<typeof CreateSubAccountSchema>;
+
+/** Result of an admin- or reseller-initiated password reset (F5.30). `resetUrl` is only present when `delivery` is "link". */
+export interface AdminPasswordResetResult {
+  delivery: "email" | "link";
+  expiresAt: string;
+  resetUrl?: string;
+}
 
 export const UpdateUserRoleSchema = z.object({
   role: RoleSchema,

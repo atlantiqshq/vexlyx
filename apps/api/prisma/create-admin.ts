@@ -1,5 +1,6 @@
 import { PrismaClient, Role } from "@prisma/client";
 import * as argon2 from "argon2";
+import { PasswordSchema } from "@vexlyx/shared";
 
 /**
  * Creates the initial admin user for a production install (F5.1).
@@ -20,6 +21,11 @@ async function main() {
     throw new Error(
       "VEXLYX_ADMIN_EMAIL and VEXLYX_ADMIN_PASSWORD must be set",
     );
+  }
+
+  const checked = PasswordSchema.safeParse(password);
+  if (!checked.success) {
+    throw new Error(`VEXLYX_ADMIN_PASSWORD is not acceptable: ${checked.error.issues[0]?.message}`);
   }
 
   const existing = await prisma.user.findUnique({ where: { email } });

@@ -2488,6 +2488,38 @@ Connecting a repository today is manual and per project (F1.3, F2.7): the user p
 
 ---
 
+### F5.30 — Password Recovery (Self-Service, Admin-Initiated, Server-Side)
+**Status:** 🟢 COMPLETED — unit, route and service tests pass on Windows, and a 55-check end-to-end run against real Postgres 16 and Redis 7 on Linux passed (migration applied, shell script, admin-issued and emailed links, 2FA, sessions, audit, rate limit); the dashboard UI was checked by typecheck, lint and helper tests but not exercised in a browser
+
+**Description:**
+Issue #19. A forgotten password could not be recovered: no forgot-password flow existed (the self-service half shipped inside F5.23), an admin could not reset another user's password, and a locked-out admin could only be fixed by editing the database. This adds the missing pieces on top of the F5.23 reset-token flow: an admin- or reseller-initiated reset link, server-side recovery for admins, session ending on 2FA changes, equal response timing for the forgot-password form, and a stronger password policy.
+
+**Acceptance Criteria:**
+- [x] A locked-out admin can regain access from the server shell without editing the database, and the action is audited (`prisma/reset-password.ts`)
+- [x] An admin or reseller can issue a one-time reset link for a user without ever seeing a password (admin: any non-admin user; reseller: own sub-accounts only; nobody: an admin)
+- [x] A regular user can reset their own password by email, with identical responses for known and unknown emails (response is sent before the lookup runs)
+- [x] Tokens are stored hashed, single-use and expiring; a new request invalidates older ones
+- [x] A successful reset ends all of that user's sessions, does not auto-login, and leaves 2FA enforced; admin 2FA reset and self 2FA-disable also end sessions
+- [x] Admin accounts cannot be reset by email unless `ALLOW_ADMIN_EMAIL_RESET=true`; shell-issued links work for admins
+- [x] Reset requests are rate limited per IP and per account without locking the account
+- [x] Reset and "password changed" actions are written to the audit log, and the user is notified
+- [x] Password policy: 12–128 characters plus a common-password blocklist, no composition rules, applied to new passwords only
+- [x] Reset page served with `Referrer-Policy: no-referrer`
+
+**Test Plan:**
+1. Issue a link, reset, then the old password is rejected, the new one works, other sessions are logged out
+2. A used or expired token is rejected; a new link invalidates the previous one
+3. forgot-password returns the same status and body for existing and non-existing emails, and answers before the lookup finishes
+4. The 6th request in the window returns 429 and the account is not locked afterwards
+5. After a reset, login still requires the second factor
+6. A reseller cannot reset another reseller's sub-account or any admin; unauthenticated returns 401; a normal user gets 403
+7. `reset-password.ts --link` works against a stack with no SMTP configured
+
+**Developer Docs:**
+- **Location:** `docs/dev/password-recovery.md`
+
+---
+
 ## Phase 6: Ecosystem & Launch
 
 ### F6.1 — Complete Documentation

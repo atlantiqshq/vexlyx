@@ -39,6 +39,10 @@ collect_config() {
     fi
   fi
 
+  if (( ${#VEXLYX_ADMIN_PASSWORD} < 12 )); then
+    die "The admin password must be at least 12 characters. Use a longer one, or leave VEXLYX_ADMIN_PASSWORD unset to have one generated."
+  fi
+
   env_or_prompt VEXLYX_MAIL_HOSTNAME "Mail server hostname" "mail.${VEXLYX_DOMAIN}"
   env_or_prompt VEXLYX_MAIL_DOMAIN "Mail domain" "${VEXLYX_DOMAIN}"
 

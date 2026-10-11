@@ -1,3 +1,4 @@
+import { notifyAdmins } from "../system-email/notifier.js";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -396,6 +397,7 @@ export class BackupService {
         data: { status: "FAILED", error: message, completedAt: new Date() },
       });
       io.to("backups").emit("backup:completed", { snapshotId, status: "FAILED", error: message });
+      notifyAdmins("backup_failed", { error: message.slice(0, 500), snapshotId });
     }
   }
 

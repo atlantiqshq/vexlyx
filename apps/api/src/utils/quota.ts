@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { notifyUser } from "../modules/system-email/notifier.js";
 
 export type QuotaResource = "project" | "domain" | "database" | "mailbox" | "subAccount";
 
@@ -225,4 +226,54 @@ export async function getUsageSummary(
   );
 
   return Object.fromEntries(entries) as Record<QuotaResource, QuotaUsage>;
+}
+
+/** Usage percentages at which a quota-warning email is sent (F5.23). */
+const WARNING_LEVELS = [80, 100] as const;
+
+/**
+ * Emails the user once when their usage of `resource` crosses 80% and again at
+ * 100% of their own limit. Call after a successful create. A QuotaNotice row
+ * records each warning already sent, so later requests stay silent; the row is
+ * removed once usage drops back under its threshold, re-arming the warning.
+ * Never throws — a notification must not fail the create that triggered it.
+ * Pooled reseller limits (F5.20) are not considered; only the user's own cap.
+ */
+export async function notifyQuotaThreshold(
+  prisma: PrismaClient,
+  userId: string,
+  resource: QuotaResource,
+): Promise<void> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, name: true, [QUOTA_FIELD[resource]]: true } as Record<string, true>,
+    });
+    const limit = (user as Record<string, unknown> | null)?.[QUOTA_FIELD[resource]] as number | null | undefined;
+    if (!user || limit === null || limit === undefined || limit <= 0) return;
+
+    const used = await countExisting(prisma, userId, resource);
+    const percent = (used / limit) * 100;
+
+    const newlyReached: number[] = [];
+    for (const level of WARNING_LEVELS) {
+      if (percent < level) {
+        await prisma.quotaNotice.deleteMany({ where: { userId, resource, level } });
+        continue;
+      }
+      const alreadySent = await prisma.quotaNotice.findUnique({
+        where: { userId_resource_level: { userId, resource, level } },
+      });
+      if (alreadySent) continue;
+      await prisma.quotaNotice.create({ data: { userId, resource, level } });
+      newlyReached.push(level);
+    }
+
+    if (newlyReached.length === 0) return;
+    // Both thresholds can be crossed in one step (e.g. a limit of 1): send only the strongest.
+    const level = Math.max(...newlyReached) as 80 | 100;
+    notifyUser("quota_warning", String(user.email), { name: String(user.name), resource, used, limit, level });
+  } catch {
+    // Swallowed on purpose: see the docblock above.
+  }
 }

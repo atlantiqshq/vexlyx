@@ -117,7 +117,7 @@ function getPythonExe(): string {
   return process.platform === "win32" ? "python" : "python3";
 }
 
-async function runPostfixManager<T = Record<string, unknown>>(
+export async function runPostfixManager<T = Record<string, unknown>>(
   command: string,
   payload: Record<string, unknown> = {},
 ): Promise<T> {

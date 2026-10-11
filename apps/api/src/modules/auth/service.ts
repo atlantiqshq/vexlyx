@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import * as argon2 from "argon2";
+import { notifyUser } from "../system-email/notifier.js";
 import type { RegisterInput, LoginInput, ChangePasswordInput } from "./schema.js";
 
 const PUBLIC_USER_SELECT = {
@@ -14,6 +15,7 @@ const PUBLIC_USER_SELECT = {
   maxMailboxes: true,
   maxSubAccounts: true,
   permissions: true,
+  totpEnabled: true,
   createdAt: true,
 } as const;
 
@@ -65,8 +67,7 @@ export class AuthService {
       throw new AuthError("Invalid email or password", "INVALID_CREDENTIALS", 401);
     }
 
-    const { password: _password, ...publicUser } = user;
-    return publicUser;
+    return this.getCurrentUser(user.id);
   }
 
   // F5.11 — self-service password change. The current session stays valid;
@@ -93,6 +94,8 @@ export class AuthService {
       where: { id: userId },
       data: { password: hashedPassword },
     });
+
+    notifyUser("password_changed", user.email, { name: user.name });
   }
 
   async getCurrentUser(userId: string) {

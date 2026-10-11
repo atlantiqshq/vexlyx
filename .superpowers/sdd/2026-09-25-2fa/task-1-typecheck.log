@@ -1,0 +1,144 @@
+$ tsc --noEmit
+src/index.ts(5,42): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/aliases/schema.ts(7,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/aliases/schema.ts(21,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/aliases/service.ts(7,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/aliases/service.ts(41,25): error TS7006: Parameter 'a' implicitly has an 'any' type.
+src/modules/aliases/service.ts(77,50): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/aliases/service.ts(118,53): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/audit-log/routes.ts(2,43): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/audit-log/routes.ts(20,36): error TS7006: Parameter 'entry' implicitly has an 'any' type.
+src/modules/audit-log/schema.ts(1,37): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/audit-log/schema.ts(2,36): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/audit-log/service.ts(3,49): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/audit-log/service.ts(53,52): error TS2694: Namespace '"C:/Users/MADIHA/Desktop/atlantiqs/vexlyx/node_modules/.pnpm/@prisma+client@6.19.3_prism_1d040ab5215f59f0e27ddee7f0cf082e/node_modules/.prisma/client/default".Prisma' has no exported member 'InputJsonValue'.
+src/modules/audit-log/service.ts(62,25): error TS2694: Namespace '"C:/Users/MADIHA/Desktop/atlantiqs/vexlyx/node_modules/.pnpm/@prisma+client@6.19.3_prism_1d040ab5215f59f0e27ddee7f0cf082e/node_modules/.prisma/client/default".Prisma' has no exported member 'AuditLogWhereInput'.
+src/modules/auth/schema.ts(1,67): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/auth/schema.ts(2,69): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/backups/routes.ts(76,35): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/modules/backups/schema.ts(2,63): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/backups/service.ts(8,53): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/backups/service.ts(332,43): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/backups/service.ts(333,42): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/backups/service.ts(345,35): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/modules/backups/service.ts(350,37): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/backups/service.ts(358,34): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/backups/service.ts(359,32): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/backups/service.ts(362,40): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/modules/backups/service.ts(410,40): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/modules/backups/service.ts(470,38): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/backups/service.ts(480,43): error TS7006: Parameter 'tx' implicitly has an 'any' type.
+src/modules/backups/service.ts(507,34): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/modules/backups/service.ts(554,35): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/backups/service.ts(586,30): error TS7006: Parameter 'm' implicitly has an 'any' type.
+src/modules/build/service.ts(7,46): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/build/service.ts(777,37): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/cleanup/schema.ts(2,45): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/cleanup/service.ts(7,56): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/cleanup/service.ts(183,22): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/modules/dashboard/service.test.ts(4,36): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/dashboard/service.test.ts(113,35): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/modules/dashboard/service.test.ts(126,35): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/modules/dashboard/service.test.ts(161,48): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/modules/dashboard/service.test.ts(201,46): error TS7006: Parameter 'item' implicitly has an 'any' type.
+src/modules/dashboard/service.ts(3,76): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/dashboard/service.ts(88,29): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/dashboard/service.ts(105,25): error TS7006: Parameter 'b' implicitly has an 'any' type.
+src/modules/dashboard/service.ts(121,52): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/databases/schema.ts(9,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/databases/service.ts(6,29): error TS2305: Module '"@prisma/client"' has no exported member 'DatabaseType'.
+src/modules/databases/service.ts(311,36): error TS7006: Parameter 'rec' implicitly has an 'any' type.
+src/modules/dockerfile/schema.ts(3,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/dockerfile/schema.ts(8,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/domains/dns-service.ts(4,29): error TS2305: Module '"@prisma/client"' has no exported member 'Domain'.
+src/modules/domains/dns-service.ts(8,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/domains/dns-service.ts(18,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/domains/dns-service.ts(79,25): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/modules/domains/dns-service.ts(410,43): error TS7006: Parameter 'tx' implicitly has an 'any' type.
+src/modules/domains/schema.ts(8,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/domains/schema.ts(37,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/domains/schema.ts(45,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/domains/schema.ts(53,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/domains/schema.ts(61,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/domains/service.ts(6,29): error TS2305: Module '"@prisma/client"' has no exported member 'Domain'.
+src/modules/domains/service.ts(6,37): error TS2305: Module '"@prisma/client"' has no exported member 'Project'.
+src/modules/domains/service.ts(6,46): error TS2305: Module '"@prisma/client"' has no exported member 'Certificate'.
+src/modules/domains/service.ts(10,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/domains/service.ts(21,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/domains/service.ts(480,25): error TS7006: Parameter 'domain' implicitly has an 'any' type.
+src/modules/domains/service.ts(486,43): error TS7006: Parameter 'sub' implicitly has an 'any' type.
+src/modules/domains/service.ts(520,28): error TS7006: Parameter 'sub' implicitly has an 'any' type.
+src/modules/domains/service.ts(565,43): error TS7006: Parameter 'sub' implicitly has an 'any' type.
+src/modules/domains/ssl-service.ts(13,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/domains/zone-file.test.ts(2,49): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/domains/zone-file.test.ts(60,41): error TS7006: Parameter 'l' implicitly has an 'any' type.
+src/modules/domains/zone-file.test.ts(64,27): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/modules/domains/zone-file.test.ts(66,25): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/modules/domains/zone-file.test.ts(95,37): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/modules/domains/zone-file.test.ts(97,33): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/modules/env/routes.ts(2,76): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/env/schema.ts(6,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/env/service.ts(2,46): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/env/service.ts(141,46): error TS7006: Parameter 'rec' implicitly has an 'any' type.
+src/modules/env/service.ts(257,47): error TS7006: Parameter 'rec' implicitly has an 'any' type.
+src/modules/firewall/schema.ts(2,72): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/firewall/service.ts(12,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/firewall/service.ts(174,10): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/git/schema.ts(1,35): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/git/schema.ts(5,39): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/git/service.ts(7,34): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/health/routes.ts(2,32): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/mail/schema.ts(22,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/mail/schema.ts(65,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/mail/service.ts(24,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/mail/service.ts(354,45): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/mail/service.ts(357,66): error TS7006: Parameter 'k' implicitly has an 'any' type.
+src/modules/mail/service.ts(376,9): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/mail/service.ts(383,72): error TS2345: Argument of type '{}' is not assignable to parameter of type 'string'.
+src/modules/mail/service.ts(559,36): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/mail/service.ts(560,40): error TS7006: Parameter 'd' implicitly has an 'any' type.
+src/modules/mail/service.ts(561,24): error TS7006: Parameter 'm' implicitly has an 'any' type.
+src/modules/mail/service.ts(571,57): error TS7006: Parameter 'm' implicitly has an 'any' type.
+src/modules/mail/service.ts(594,29): error TS7006: Parameter 'a' implicitly has an 'any' type.
+src/modules/mail/service.ts(622,8): error TS7006: Parameter 'r' implicitly has an 'any' type.
+src/modules/mail/service.ts(839,10): error TS7006: Parameter 'k' implicitly has an 'any' type.
+src/modules/mail/service.ts(864,33): error TS7006: Parameter 'm' implicitly has an 'any' type.
+src/modules/mailboxes/schema.ts(8,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/mailboxes/schema.ts(24,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/mailboxes/service.ts(9,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/mailboxes/service.ts(53,38): error TS7006: Parameter 'm' implicitly has an 'any' type.
+src/modules/mailboxes/service.ts(59,27): error TS7006: Parameter 'm' implicitly has an 'any' type.
+src/modules/monitoring/schema.ts(2,36): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/monitoring/service.ts(7,67): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/monitoring/service.ts(8,60): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/monitoring/service.ts(153,42): error TS2366: Function lacks ending return statement and return type does not include 'undefined'.
+src/modules/monitoring/service.ts(209,27): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/modules/monitoring/socket.ts(4,53): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/projects/schema.ts(7,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/projects/schema.ts(12,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/services/schema.ts(2,35): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/services/service.ts(12,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/services/service.ts(171,41): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/modules/sftp/service.ts(171,39): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/modules/sftp/service.ts(253,39): error TS7006: Parameter 'p' implicitly has an 'any' type.
+src/modules/system/routes.ts(3,44): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/system/service.ts(10,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/system/service.ts(91,20): error TS7006: Parameter 'record' implicitly has an 'any' type.
+src/modules/users/schema.ts(8,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/users/schema.ts(14,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/users/service.ts(1,29): error TS2305: Module '"@prisma/client"' has no exported member 'Role'.
+src/modules/vacation/routes.ts(4,47): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/vacation/service.ts(5,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/webhooks/schema.ts(5,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/webhooks/schema.ts(11,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/modules/webhooks/service.ts(8,8): error TS2307: Cannot find module '@vexlyx/shared' or its corresponding type declarations.
+src/plugins/auth.ts(4,15): error TS2305: Module '"@prisma/client"' has no exported member 'Role'.
+src/plugins/auth.ts(4,21): error TS2305: Module '"@prisma/client"' has no exported member 'Permission'.
+src/utils/quota.ts(49,49): error TS7006: Parameter 'm' implicitly has an 'any' type.
+src/utils/quota.ts(152,41): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/utils/quota.ts(217,46): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/utils/quota.ts(218,41): error TS7006: Parameter 'v' implicitly has an 'any' type.
+C:\Users\MADIHA\Desktop\atlantiqs\vexlyx\apps\api:
+[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @vexlyx/api@0.0.1 typecheck: `tsc --noEmit`
+Exit status 1

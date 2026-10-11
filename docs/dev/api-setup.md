@@ -1,13 +1,8 @@
 # API Setup — Developer Guide
 
-> **Feature:** F0.3 — Fastify API Scaffold
-> **Last Updated:** 2026-08-29
-
----
-
 ## Overview
 
-The Vexlyx API is a Fastify 5 server with TypeScript, Zod validation, and a modular plugin architecture. It runs on `http://localhost:5000` during development and serves all backend logic for the dashboard.
+The Vexlyx API is a Fastify 5 server with TypeScript, Zod validation, and a modular plugin architecture. It runs on `http://localhost:5000` during development and serves all backend logic for the dashboard. What started as a single `health` module has grown to ~30 feature modules — see below.
 
 ## Architecture
 
@@ -15,20 +10,27 @@ The Vexlyx API is a Fastify 5 server with TypeScript, Zod validation, and a modu
 apps/api/src/
 ├── index.ts                    # Entry point — builds & starts Fastify
 ├── config/
-│   └── env.ts                  # Zod-validated environment variables
+│   ├── env.ts                  # Zod-validated environment variables (~60 vars)
+│   ├── redis.ts                # ioredis client, registered as app.redis
+│   └── queue.ts                # BullMQ queue/worker registration, registered as app.queues
 ├── plugins/
-│   └── error-handler.ts        # Global error handler plugin
-└── modules/
-    └── health/
-        └── routes.ts           # GET /api/health
+│   ├── auth.ts                 # requireAuth / requireRole / requireRoleOrPermission, session cookie handling
+│   ├── prisma.ts                # PrismaClient, registered as app.prisma
+│   ├── socket.ts                 # Socket.io server + session auth for realtime rooms
+│   └── error-handler.ts        # Global error handler plugin — the { error, code, details } shape below
+└── modules/                    # ~30 feature directories, each routes.ts + service.ts + schema.ts:
+    aliases/  audit-log/  auth/  backups/  build/  cleanup/  dashboard/  databases/
+    deploy/   dockerfile/ domains/ env/    files/  firewall/ git/       health/
+    logs/     mail/       mailboxes/ monitoring/ projects/ services/  sftp/
+    system/   users/      vacation/  webhooks/  wordpress/
 ```
 
 ### Key Concepts
 
 - **Entry point** (`index.ts`): Creates the Fastify instance, registers plugins & modules, then listens.
 - **Config** (`config/`): Environment validation runs on import — fails fast if vars are missing.
-- **Plugins** (`plugins/`): Fastify plugins that register hooks, decorators, or error handlers.
-- **Modules** (`modules/`): Feature modules with `routes.ts`, `service.ts`, `schema.ts`.
+- **Plugins** (`plugins/`): Fastify plugins that register hooks, decorators, or error handlers — `app.requireAuth`/`app.requireRole` (see [Authentication](authentication.md)), `app.prisma`, `app.redis`, `app.queues`, and Socket.io rooms (see [Real-time logs](realtime-logs.md)) all come from here.
+- **Modules** (`modules/`): Feature modules with `routes.ts`, `service.ts`, `schema.ts` — most also spawn a `system/python/*.py` script for anything that needs to touch Docker, Postfix, Dovecot, or the host firewall (see each feature's own reference page for its script).
 
 ---
 
@@ -103,7 +105,7 @@ When a Zod schema fails, `details.fields` contains per-field errors:
 
 ## Environment Variables
 
-Validated with Zod on startup. If any are invalid, the server refuses to start with a clear error.
+Validated with Zod on startup (`apps/api/src/config/env.ts`) — the server refuses to start with a clear error if any are invalid. Core server config is a small set:
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
@@ -111,6 +113,11 @@ Validated with Zod on startup. If any are invalid, the server refuses to start w
 | `HOST` | string | `0.0.0.0` | Bind address |
 | `NODE_ENV` | enum | `development` | `development`, `production`, `test` |
 | `CORS_ORIGIN` | string (URL) | `http://localhost:3000` | Allowed CORS origin |
+| `DATABASE_URL` | string (URL) | — required | PostgreSQL connection string |
+| `REDIS_URL` | string | `redis://localhost:6379` | Redis connection string |
+| `SESSION_SECRET` | string | — required, min 32 chars | Session token signing |
+
+Beyond that, each feature module that needs its own configuration adds a block to the same schema — container names for [service status](service-status.md), backup schedule defaults, mail/webmail ports, the [DNS onboarding](dns-onboarding.md) nameservers, and so on. `env.ts` itself is the up-to-date source of truth; each variable there has an inline comment naming the feature that added it.
 
 ### Adding a New Env Var
 
@@ -179,6 +186,25 @@ pnpm build
 ```
 
 ---
+
+## OpenAPI reference
+
+The API registers `plugins/openapi.ts` before every route module. `@fastify/swagger` discovers the
+registered routes and publishes an OpenAPI 3.1 document; `@fastify/swagger-ui` serves the interactive
+reference at `/documentation/`. The raw specification is available at `/documentation/json` and
+`/documentation/yaml`.
+
+The plugin supplies stable operation IDs, resource tags, session-cookie security, and the standard
+error envelope to routes that do not declare more specific metadata. Public health, authentication,
+and signed-webhook routes omit session-cookie security. When adding or changing an endpoint, add
+route-specific parameter, body, success-response, and example schemas wherever generic metadata is
+not sufficient.
+
+Run the focused contract test with:
+
+```bash
+pnpm --dir apps/api exec vitest run src/plugins/openapi.test.ts
+```
 
 ## Testing Endpoints
 

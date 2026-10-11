@@ -8,7 +8,7 @@ import type {
   MailboxResponse,
 } from "@vexlyx/shared";
 import { runDovecotManager, MailService } from "../mail/service.js";
-import { assertUnderQuota } from "../../utils/quota.js";
+import { assertUnderQuota, notifyQuotaThreshold } from "../../utils/quota.js";
 import type { AuditLogService } from "../audit-log/service.js";
 
 export class MailboxError extends Error {
@@ -117,6 +117,7 @@ export class MailboxService {
       },
       include: { domain: true },
     });
+    void notifyQuotaThreshold(this.prisma, userId, "mailbox");
 
     await this.mailService.syncVirtualDomains(userId);
 

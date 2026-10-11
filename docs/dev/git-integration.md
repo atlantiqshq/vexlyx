@@ -4,6 +4,8 @@
 
 Allows users to connect a GitHub, GitLab, or Bitbucket repository to a Vexlyx project. It clones the repo into an isolated workspace directory, generates Ed25519 SSH keys for private repos, and provides a webhook URL (secret pre-generated) for future auto-deploy integration (F2.7).
 
+This is the manual provider-neutral flow. GitHub users can instead connect the panel's GitHub App, browse authorized repositories, and use short-lived installation tokens without deploy keys. See [GitHub Integration](github-integration.md). The manual path remains supported and unchanged.
+
 ---
 
 ## Architecture

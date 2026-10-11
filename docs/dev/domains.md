@@ -9,6 +9,20 @@
 
 ## 1. Overview
 
+Existing domains can be assigned, moved, or unassigned with `PATCH /api/domains/:id`
+and `{ "projectId": "project-id" }` (or `null` to unassign). The authenticated user
+must own both the domain and the target project, which must not be soft deleted.
+The update preserves domain IDs, verification, DNS records, SSL certificates, and
+mail data. Routing is refreshed for active assignments and removed on unassign;
+certificate files are retained. Changes produce a `domain.updated` audit entry.
+
+The Domains page provides **Assign to project / Change project**, including a
+**None (Unassigned)** option. The project Domains tab offers to attach an existing
+owned hostname after the add flow detects a duplicate, and explicitly confirms
+moves from another project. Subdomains keep their own independent assignments.
+
+Regression coverage: `apps/api/src/modules/domains/service.test.ts`.
+
 Custom Domain Management allows users to attach custom fully-qualified domain names (FQDNs) to their deployed projects, verify domain ownership through DNS TXT record challenges, and automatically configure Traefik v3 HTTP routing using zero-downtime dynamic file provider definitions.
 
 When a domain is verified, Vexlyx generates a dynamic router configuration in `docker/traefik/dynamic/domain-{domainId}.yml` routing all incoming web traffic matching `Host(...)` to the project's container on `traefik-net`. When a domain is deleted, the dynamic configuration file is removed immediately with zero downtime or container restarts.

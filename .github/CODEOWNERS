@@ -1,0 +1,18 @@
+# Code owners — every pull request needs an approving review from an owner of
+# the files it changes (enforced by the "Protect main" ruleset, which requires
+# code-owner review). The last matching pattern wins.
+#
+# Docs: https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything.
+*                         @getatlantiqs
+
+# Paths that change what runs on the server or in CI. Listed explicitly so a
+# future owner split starts from the sensitive areas.
+/.github/                 @getatlantiqs
+/system/                  @getatlantiqs
+/docker/                  @getatlantiqs
+/docker-compose*.yml      @getatlantiqs
+/apps/api/prisma/         @getatlantiqs
+/install.sh               @getatlantiqs
+/SECURITY.md              @getatlantiqs

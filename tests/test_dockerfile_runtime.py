@@ -6,7 +6,7 @@ Tests:
 2. EXPOSE port parsing (single port, multi-port, tcp/udp protocol tags).
 3. HEALTHCHECK directive parsing from Dockerfile.
 4. Dockerfile & .dockerignore CRUD management via `dockerfile-save` and `dockerfile-get`.
-5. Docker Compose template generation with docker.yml (custom container port, Traefik routing, health check).
+5. Docker Compose template generation with docker.yml (custom container port and Traefik routing).
 6. Environment variable injection into docker.yml.
 """
 
@@ -202,8 +202,10 @@ def test_docker_compose_template_generation():
         assert "NODE_ENV: \"production\"" in content
         assert "API_KEY: \"secret_key_123\"" in content
         assert "traefik-net" in content
-        assert "healthcheck:" in content
-        print("  [PASS] docker.yml generated with custom container port (8080), Traefik loadbalancer routing, and env variables")
+        assert "healthcheck:" not in content
+        assert "wget" not in content
+        assert "curl" not in content
+        print("  [PASS] docker.yml generated without assuming health-check tools in the custom image")
 
 
 def main():

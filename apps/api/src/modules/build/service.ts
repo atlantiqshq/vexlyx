@@ -9,6 +9,7 @@ import { env } from "../../config/env.js";
 import { runDockerDeploy, runDockerStatus } from "../deploy/service.js";
 import { runGitManager } from "../git/service.js";
 import { EnvService } from "../env/service.js";
+import { getGitHubInstallationToken } from "../github/service.js";
 import { CleanupService } from "../cleanup/service.js";
 import { getIO } from "../../plugins/socket.js";
 import type { BuildJobData, DeploymentListQuery, TriggerBuildBody } from "./schema.js";
@@ -406,6 +407,8 @@ export function createBuildProcessor(
           gitUrl: true,
           branch: true,
           sshPrivateKeyPath: true,
+          githubConnectionStatus: true,
+          githubInstallation: { select: { installationId: true, status: true } },
         },
       });
 
@@ -417,6 +420,15 @@ export function createBuildProcessor(
       if (project.gitUrl) {
         await appendLog(`[vexlyx] Syncing latest git commits (${project.branch})…`);
         try {
+          if (
+            project.githubInstallation &&
+            (project.githubConnectionStatus !== "CONNECTED" || project.githubInstallation.status !== "CONNECTED")
+          ) {
+            throw new Error("The GitHub connection is inactive. Reconnect it before deploying.");
+          }
+          const accessToken = project.githubInstallation
+            ? await getGitHubInstallationToken(prisma, project.githubInstallation.installationId)
+            : undefined;
           await runGitManager({
             command: "clone",
             projectId,
@@ -424,11 +436,13 @@ export function createBuildProcessor(
             branch: project.branch,
             projectsDir: resolve(env.PROJECTS_DIR),
             sshPrivateKeyPath: project.sshPrivateKeyPath ?? undefined,
+            accessToken,
           });
           await appendLog("[vexlyx] Git workspace up-to-date ✓");
         } catch (gitErr) {
           const msg = gitErr instanceof Error ? gitErr.message : String(gitErr);
           await appendLog(`[vexlyx:warn] Git sync notice: ${msg}`);
+          if (project.githubInstallation) throw gitErr;
         }
       }
 

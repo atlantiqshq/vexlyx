@@ -137,6 +137,11 @@ export const CreateDomainSchema = z.object({
 
 export type CreateDomainInput = z.infer<typeof CreateDomainSchema>;
 
+export const UpdateDomainSchema = z.object({
+  projectId: z.string().min(1, "Project ID is required").nullable(),
+}).strict();
+export type UpdateDomainInput = z.infer<typeof UpdateDomainSchema>;
+
 // ---------------------------------------------------------------------------
 // List Query
 // ---------------------------------------------------------------------------

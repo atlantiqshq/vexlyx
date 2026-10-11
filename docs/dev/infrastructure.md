@@ -1,6 +1,20 @@
 # Infrastructure — Docker Compose Dev Environment
 
-Vexlyx runs three Docker services for local development: **PostgreSQL** (database), **Redis** (sessions, caching, queues), and **Traefik** (reverse proxy with auto-SSL). All services have health checks and persistent volumes.
+`docker-compose.yml` originally ran three services (PostgreSQL, Redis, Traefik); it now runs nine, one per infrastructure piece the panel depends on:
+
+| Service | Image | Purpose |
+|---|---|---|
+| `postgres` | `postgres:16-alpine` | Primary database (see [Database](database.md)) |
+| `mysql` | `mysql:8.0` | Optional database type for [user-provisioned databases](database-provisioning.md) |
+| `redis` | `redis:7-alpine` | Sessions, caching, BullMQ queues |
+| `adminer` | `adminer:4` | Dev-only raw DB browser — gated behind `--profile debug` in production |
+| `traefik` | `traefik:v3.6` | Reverse proxy, automatic Let's Encrypt HTTPS, per-domain dynamic routing |
+| `coredns` | `coredns/coredns:1.11.3` | Authoritative DNS for domains in [Hosted DNS mode](dns-management.md) |
+| `postfix` | `vexlyx-postfix` (custom) | Outbound/inbound SMTP — see [Postfix](email/postfix.md) |
+| `dovecot` | `vexlyx-dovecot` (custom) | IMAP + mailbox storage — see [Dovecot](email/dovecot.md) |
+| `roundcube` | `roundcube/roundcubemail:1.6.18-apache` | Webmail — see [Webmail](email/webmail.md) |
+
+All services have health checks and persistent volumes. Two more images are built locally at install time rather than pulled — `vexlyx-ufw-helper` (see [Firewall](firewall.md)) and `vexlyx-php-fpm` (see [No-build PHP hosting](no-build-php-hosting.md)) — see `system/scripts/install/steps/10-images.sh`.
 
 ## Quick Start
 
@@ -50,9 +64,9 @@ docker-compose down -v
 **Connection string:** `redis://localhost:6379`
 
 **Usage in Vexlyx:**
-- **Sessions** — Lucia Auth session storage (F0.6)
+- **Sessions** — the custom session plugin (`apps/api/src/plugins/auth.ts`, not a third-party auth library) stores signed session tokens here, keyed `session:<id>`, with a 24-hour TTL
 - **Caching** — API response caching, rate limiting
-- **Queues** — BullMQ background job processing
+- **Queues** — BullMQ background job processing (see below)
 
 **Test connectivity:**
 ```bash
@@ -64,16 +78,19 @@ docker exec vexlyx-redis redis-cli ping
 
 | Property | Value |
 |----------|-------|
-| Image | `traefik:v3.4` |
-| HTTP Port | `80` |
+| Image | `traefik:v3.6` (bumped from `v3.4` — see the [installer reference](installer.md#bugs-found-during-the-real-install-and-their-fixes) for why) |
+| HTTP/HTTPS Ports | `80` / `443` |
 | Dashboard | `http://localhost:8080` |
 | Docker provider | Enabled (`exposedByDefault: false`) |
 
 **Dashboard:** Open `http://localhost:8080` in your browser to view the Traefik dashboard. This shows all configured routers, services, and middlewares.
 
 **Configuration files:**
-- Static config: `docker/traefik/traefik.yml`
-- Dynamic configs: `docker/traefik/dynamic/` (empty for now — Phase 1 adds routing)
+- Static config: `docker/traefik/traefik.yml` (dev) / `traefik.prod.yml.tmpl` (production)
+- Dynamic configs: `docker/traefik/dynamic/` — one YAML file per verified custom domain
+  (`domain-{domainId}.yml`, written by `DomainService.syncTraefikRouter()`) plus a couple of
+  static routes (e.g. webmail). See [Custom domains](domains.md) and
+  [Domain routing](domain-routing.md).
 
 ## Redis Client (API)
 
@@ -105,7 +122,12 @@ Background job queues are registered as a Fastify plugin and available via `app.
 
 | Queue Name | Worker | Purpose |
 |------------|--------|---------|
-| `test-ping` | Yes | Infrastructure validation only |
+| Build queue | Yes | Nixpacks/Docker build + deploy jobs, one per push or manual trigger — see [Nixpacks build integration](build-system.md) |
+| Backup queue | Yes | Scheduled (daily, cron-configurable) and manual backup snapshots — see [Backup system](backup-system.md) |
+| Cleanup queue | Yes | Scheduled and manual Docker image/container pruning — see [Docker cleanup](docker-cleanup.md) |
+| Metrics queue | Yes | 60-second resource-usage snapshots — see [Monitoring](monitoring.md) |
+
+Each is registered the same way the original `test-ping` example queue was — see `apps/api/src/modules/{build,backups,cleanup,monitoring}/routes.ts` for the current call sites.
 
 ### Adding a New Queue
 
@@ -139,10 +161,10 @@ app.post("/deploy", async (request, reply) => {
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | — | PostgreSQL connection string |
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection string |
+`DATABASE_URL` and `REDIS_URL` are the two this doc originally covered; every other infrastructure
+service (MySQL, mail, webmail, firewall helper, DNS nameservers, ...) has its own env vars in the
+same schema now — see [API Setup](api-setup.md#environment-variables) or
+`apps/api/src/config/env.ts` directly for the current full list.
 
 ## How to Extend
 

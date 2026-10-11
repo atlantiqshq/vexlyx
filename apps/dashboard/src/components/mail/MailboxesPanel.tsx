@@ -150,7 +150,9 @@ export function MailboxesPanel() {
   // Mail client setup dialog state
   const [setupTarget, setSetupTarget] = useState<MailboxResponse | null>(null);
   const [copiedSetupField, setCopiedSetupField] = useState<string | null>(null);
-  const clientHost = typeof window !== "undefined" ? window.location.hostname : "your-server";
+  const clientHost =
+    process.env.NEXT_PUBLIC_MAIL_HOSTNAME ||
+    (typeof window !== "undefined" ? window.location.hostname : "your-server");
 
   const filteredMailboxes = useMemo(() => {
     if (!searchQuery.trim()) return mailboxes;
@@ -495,13 +497,15 @@ export function MailboxesPanel() {
               </span>
             </div>
 
-            <div className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
-              <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>
-                This server uses a self-signed TLS certificate in development — most mail apps will show a
-                certificate-trust warning on first connect. That&apos;s expected here, not an error.
-              </span>
-            </div>
+            {process.env.NODE_ENV === "development" && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+                <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Local development uses a self-signed TLS certificate, so mail apps may show a certificate-trust
+                  warning on first connect.
+                </span>
+              </div>
+            )}
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">

@@ -1,43 +1,55 @@
 # Monorepo Setup — Developer Guide
 
-> **Feature:** F0.1 — Monorepo Setup
-> **Status:** 🟢 COMPLETED
-> **Date:** 2026-08-28
-
----
-
 ## What This Feature Does
 
-Initializes the Vexlyx project as a Turborepo monorepo with pnpm workspaces. Three packages are configured: `apps/dashboard` (frontend), `apps/api` (backend), and `packages/shared` (shared types and schemas). All tooling — TypeScript, ESLint, Prettier — is shared at the root and extended by each workspace.
+Vexlyx is a Turborepo monorepo with pnpm workspaces. The scaffold set up three TypeScript
+packages — `apps/dashboard` (frontend), `apps/api` (backend), and `packages/shared` (shared
+schemas and types) — with tooling (TypeScript, ESLint, Prettier) shared at the root. Two more
+top-level trees sit alongside the workspace packages: `system/` (the Python layer that shells out
+to Docker/Postfix/Dovecot/UFW — see each feature's own doc for its `system/python/*.py` script)
+and `docker/` (Compose service configs and per-service Dockerfiles — see
+[Infrastructure](infrastructure.md)).
 
 ---
 
 ## Architecture
 
-### Workspace Structure
+### Repository Layout
 
 ```
 vexlyx/
 ├── apps/
-│   ├── dashboard/          # @vexlyx/dashboard — Next.js frontend (F0.2)
-│   │   ├── src/index.ts    # Placeholder entry point
+│   ├── dashboard/          # @vexlyx/dashboard — Next.js 15 App Router frontend
+│   │   ├── src/app/        # (panel) and (standalone) route groups
+│   │   ├── src/components/ # One directory per feature area, plus components/ui (shadcn)
+│   │   ├── src/hooks/      # One data-fetching/mutation hook per feature area
 │   │   ├── package.json
 │   │   └── tsconfig.json   # Extends root, references shared
-│   └── api/                # @vexlyx/api — Fastify backend (F0.3)
-│       ├── src/index.ts    # Placeholder entry point
+│   └── api/                 # @vexlyx/api — Fastify 5 backend
+│       ├── src/modules/    # One directory per feature (routes/service/schema.ts) — see API Setup
+│       ├── src/config/     # env.ts (Zod-validated config), redis.ts, queue.ts
+│       ├── src/plugins/    # Fastify plugins: auth, prisma, redis, error-handler, socket.io
+│       ├── prisma/         # schema.prisma, migrations/, seed.ts, create-admin.ts
 │       ├── package.json
 │       └── tsconfig.json   # Extends root, references shared
 ├── packages/
-│   └── shared/             # @vexlyx/shared — Zod schemas + types (F0.7)
-│       ├── src/index.ts    # Exports VEXLYX_VERSION, APP_NAME
+│   └── shared/              # @vexlyx/shared — Zod schemas + types, see Shared Package
+│       ├── src/schemas/    # One file per feature area
+│       ├── src/types/
 │       ├── package.json
 │       └── tsconfig.json   # Extends root, composite: true
-├── package.json            # Root — devDependencies + turbo scripts
-├── pnpm-workspace.yaml     # Declares apps/* and packages/*
-├── turbo.json              # Build pipeline configuration
-├── tsconfig.json           # Base TypeScript config (strict mode)
-├── eslint.config.mjs       # Shared ESLint flat config
-└── .prettierrc             # Shared Prettier config
+├── system/
+│   ├── python/              # docker_manager.py, postfix_manager.py, dovecot_manager.py, etc.
+│   ├── templates/           # docker-compose service templates per project runtime
+│   └── scripts/install/     # The one-line installer (see Installer reference)
+├── docker/                  # Per-service configs: traefik/, postfix/, dovecot/, coredns/, php-fpm/, ufw-helper/
+├── tests/                   # Python test suites (tests/test_*.py), one per system-layer feature
+├── package.json             # Root — devDependencies + turbo scripts
+├── pnpm-workspace.yaml      # Declares apps/* and packages/*
+├── turbo.json                # Build pipeline configuration
+├── tsconfig.json             # Base TypeScript config (strict mode)
+├── eslint.config.mjs         # Shared ESLint flat config
+└── .prettierrc                # Shared Prettier config
 ```
 
 ### Dependency Graph

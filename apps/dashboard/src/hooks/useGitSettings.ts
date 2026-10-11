@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { fetchAPI, ApiRequestError } from "@/lib/api";
-import type { GitMetadata, ConnectRepoInput } from "@vexlyx/shared";
+import type { GitMetadata, ConnectRepoInput, ConnectGitHubRepositoryInput } from "@vexlyx/shared";
 
 // ---------------------------------------------------------------------------
 // State shapes
@@ -18,6 +18,8 @@ interface UseGitSettings {
   state: GitSettingsState;
   fetchMetadata: () => Promise<void>;
   connectRepo: (input: ConnectRepoInput) => Promise<void>;
+  connectGitHub: (input: ConnectGitHubRepositoryInput) => Promise<void>;
+  disconnectGitHub: () => Promise<void>;
   generateSshKey: () => Promise<void>;
   rotateWebhookSecret: () => Promise<void>;
 }
@@ -87,6 +89,26 @@ export function useGitSettings(projectId: string): UseGitSettings {
     }
   }, [projectId]);
 
+  const connectGitHub = useCallback(async (input: ConnectGitHubRepositoryInput) => {
+    setState((prev) => ({ ...prev, isLoading: true, error: null }));
+    try {
+      const data = await fetchAPI<GitMetadata>(`/api/projects/${projectId}/git/connect-github`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+      setState({ data, isLoading: false, error: null });
+    } catch (err) {
+      const message = err instanceof ApiRequestError ? err.message : "Failed to connect GitHub repository";
+      setState((prev) => ({ ...prev, isLoading: false, error: message }));
+      throw err;
+    }
+  }, [projectId]);
+
+  const disconnectGitHub = useCallback(async () => {
+    const data = await fetchAPI<GitMetadata>(`/api/projects/${projectId}/git/disconnect-github`, { method: "POST" });
+    setState({ data, isLoading: false, error: null });
+  }, [projectId]);
+
   const rotateWebhookSecret = useCallback(async () => {
     setState((prev) => ({ ...prev, isLoading: true, error: null }));
     try {
@@ -113,5 +135,5 @@ export function useGitSettings(projectId: string): UseGitSettings {
     }
   }, [projectId]);
 
-  return { state, fetchMetadata, connectRepo, generateSshKey, rotateWebhookSecret };
+  return { state, fetchMetadata, connectRepo, connectGitHub, disconnectGitHub, generateSshKey, rotateWebhookSecret };
 }

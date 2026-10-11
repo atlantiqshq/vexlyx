@@ -7,6 +7,7 @@ import {
 import { createQueue } from "../../config/queue.js";
 import { BUILD_QUEUE_NAME } from "../build/service.js";
 import type { BuildJobData } from "../build/schema.js";
+import { registerGitHubAppWebhook } from "./github-app.js";
 
 // ---------------------------------------------------------------------------
 // Error handler
@@ -55,6 +56,8 @@ export async function webhookRoutes(app: FastifyInstance) {
       removeOnFail: { count: 100 },
     });
   };
+
+  registerGitHubAppWebhook(app, enqueueJob);
 
   // -------------------------------------------------------------------------
   // POST /api/webhooks/github

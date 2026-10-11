@@ -1,0 +1,201 @@
+diff --git a/.superpowers/sdd/2026-09-25-2fa/task-5-report.md b/.superpowers/sdd/2026-09-25-2fa/task-5-report.md
+index befad1b..3906119 100644
+--- a/.superpowers/sdd/2026-09-25-2fa/task-5-report.md
++++ b/.superpowers/sdd/2026-09-25-2fa/task-5-report.md
+@@ -53,10 +53,45 @@ pre-existing in Task 4's `two-factor-service.test.ts` (lines 102/123/125,
+ 1. Suite is timing-flaky on this machine: before the `30_000` timeout, the new
+    test (and once, `plugins/auth.test.ts`) hit the 5s default under parallel
+    workers. CI/faster hardware should be unaffected.
+ 2. Task 8's `pnpm typecheck` gate will fail on the pre-existing Task 4 test
+    errors noted above — needs a `non-null`/`!` fix in `two-factor-service.test.ts`.
+ 3. Unused `beforeEach` import in the new test file comes from the plan verbatim;
+    left as-is (vitest passes; lint may flag — Task 8's problem).
+ 4. Contracts for Tasks 6–7 are live: `202 { requires2FA, challengeToken }`,
+    `403 ADMIN_2FA_REQUIRED`, challenge/setup/verify-setup/disable/reset shapes
+    and `requireAdmin2FA` in `/config` exactly per plan §Task 5 interfaces.
++
++## Fix round 1/3 (HEAD 455ae83)
++
++1. **Reset route error mapping (important)** — `POST /api/users/:id/2fa/reset`
++   had no try/catch, so any throw (incl. unknown target id) became a 500.
++   Handler now catches `AuthError` → `{ error, code, details }` (same shape as
++   `auth/routes.ts` neighbors) and delegates the rest to the file's existing
++   `handleUserError`. Root-cause half: `TwoFactorService.adminReset` did a
++   blind `prisma.user.update` (P2025 → 500 on unknown id); it now checks
++   `findUnique` first and throws `AuthError("User not found",
++   "USER_NOT_FOUND", 404)`, same as `createSetup`/`disable`. One caller only
++   (`users/routes.ts`), so no other paths affected.
++2. **Minor** — removed unused `beforeEach` import from
++   `two-factor-routes.test.ts`.
++3. **Typecheck** — 3 errors in `two-factor-service.test.ts` (lines
++   102/123/125, `recoveryCodes[i]: string | undefined` passed to
++   `verifyLoginCode(userId, code: string)`) fixed with `as string` casts,
++   matching the file's existing style (line 56/116). Assertions untouched;
++   real argon2 hashing/verification retained.
++
++**Re-run:** `vitest run src/modules/auth/two-factor-service.test.ts
++src/modules/auth/two-factor-routes.test.ts` → **2 files, 6 tests, all pass**
++(real-argon2 reconfirm test included). Full `test -- src/modules/auth/`
++(note: filter does not narrow — whole API suite runs): 60/61 pass; the one
++failure was `src/plugins/auth.test.ts > returns 401 when there is no
++session` timing out at 5s under 10 parallel workers — rerun solo passes
++5/5 in 2.85s, so a load flake, not a regression (file untouched).
++
++**Typecheck:** `pnpm --filter @vexlyx/api typecheck` → **exit 0, zero
++errors repo-wide.** The 3 target errors are gone and there are no remaining
++pre-existing errors to report separately.
++
++**Commit:** `fix(2fa): map reset errors and clean test types` (files:
++users `routes.ts`, auth `two-factor-service.ts`,
++`two-factor-service.test.ts`, `two-factor-routes.test.ts`, this report).
+diff --git a/apps/api/src/modules/auth/two-factor-routes.test.ts b/apps/api/src/modules/auth/two-factor-routes.test.ts
+index 4225bd2..ba8ded0 100644
+--- a/apps/api/src/modules/auth/two-factor-routes.test.ts
++++ b/apps/api/src/modules/auth/two-factor-routes.test.ts
+@@ -1,11 +1,11 @@
+-import { describe, it, expect, vi, beforeEach } from "vitest";
++import { describe, it, expect, vi } from "vitest";
+ import Fastify from "fastify";
+ 
+ process.env.DATABASE_URL ??= "postgresql://user:pass@localhost:5432/vexlyx_test";
+ process.env.SESSION_SECRET ??= "test-session-secret-at-least-32-characters-long";
+ 
+ describe("POST /api/auth/2fa/challenge rate limit + shape", () => {
+   it("rejects unknown challenge with 401 2FA_INVALID_CODE", async () => {
+     const { authRoutes } = await import("./routes.js");
+     const app = Fastify();
+     app.decorate("prisma", { user: { findUnique: vi.fn() } } as unknown as import("fastify").FastifyInstance["prisma"]);
+diff --git a/apps/api/src/modules/auth/two-factor-service.test.ts b/apps/api/src/modules/auth/two-factor-service.test.ts
+index 12d9ee6..9c22d4c 100644
+--- a/apps/api/src/modules/auth/two-factor-service.test.ts
++++ b/apps/api/src/modules/auth/two-factor-service.test.ts
+@@ -92,44 +92,44 @@ describe("TwoFactorService.confirmSetup", () => {
+     findUnique.mockResolvedValue({
+       id: "u1", email: "u1@example.com", password: "hashed", totpSecretEncrypted: encrypt(secret1), totpEnabled: false,
+     });
+     const first = await service.confirmSetup("u1", authenticator.generate(secret1));
+     expect(first.recoveryCodes).toHaveLength(10);
+ 
+     // Mark one first-batch code as used (audit history) — must survive reconfirm.
+     findUnique.mockResolvedValue({
+       id: "u1", email: "u1@example.com", password: "hashed", totpSecretEncrypted: encrypt(secret1), totpEnabled: true,
+     });
+-    expect(await service.verifyLoginCode("u1", first.recoveryCodes[0])).toBe(true);
++    expect(await service.verifyLoginCode("u1", first.recoveryCodes[0] as string)).toBe(true);
+ 
+     const secret2 = authenticator.generateSecret();
+     findUnique.mockResolvedValue({
+       id: "u1", email: "u1@example.com", password: "hashed", totpSecretEncrypted: encrypt(secret2), totpEnabled: false,
+     });
+     const second = await service.confirmSetup("u1", authenticator.generate(secret2));
+     expect(second.recoveryCodes).toHaveLength(10);
+ 
+     expect(prisma.recoveryCode.deleteMany).toHaveBeenCalledWith({ where: { userId: "u1", usedAt: null } });
+ 
+     // The consumed first-batch row survives reconfirm in observed state.
+     const usedRows = rows.filter((r) => r.usedAt !== null);
+     expect(usedRows).toHaveLength(1);
+     await expect(argon2.verify(usedRows[0]?.codeHash as string, first.recoveryCodes[0] as string)).resolves.toBe(true);
+ 
+     // Enabled user for verifyLoginCode (recovery-code path: hex codes skip the TOTP branch).
+     findUnique.mockResolvedValue({
+       id: "u1", email: "u1@example.com", password: "hashed", totpSecretEncrypted: encrypt(secret2), totpEnabled: true,
+     });
+     // Latest batch verifies…
+-    expect(await service.verifyLoginCode("u1", second.recoveryCodes[0])).toBe(true);
++    expect(await service.verifyLoginCode("u1", second.recoveryCodes[0] as string)).toBe(true);
+     // …stale unused codes from the first batch do not (only the used one is gone via consumption).
+-    expect(await service.verifyLoginCode("u1", first.recoveryCodes[1])).toBe(false);
++    expect(await service.verifyLoginCode("u1", first.recoveryCodes[1] as string)).toBe(false);
+   });
+ });
+ 
+ describe("TwoFactorService.verifyLoginCode", () => {
+   it("accepts a valid totp code", async () => {
+     const { service, prisma } = makeService();
+     const secret = authenticator.generateSecret();
+     (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+       id: "u1", totpSecretEncrypted: encrypt(secret), totpEnabled: true,
+     });
+diff --git a/apps/api/src/modules/auth/two-factor-service.ts b/apps/api/src/modules/auth/two-factor-service.ts
+index f68b195..30ba334 100644
+--- a/apps/api/src/modules/auth/two-factor-service.ts
++++ b/apps/api/src/modules/auth/two-factor-service.ts
+@@ -72,20 +72,22 @@ export class TwoFactorService {
+     const user = await this.prisma.user.findUnique({ where: { id: userId } });
+     if (!user) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
+     if (!(await argon2.verify(user.password, password))) throw new AuthError("Invalid email or password", "INVALID_CREDENTIALS", 401);
+     if (!(await this.verifyLoginCode(userId, codeOrRecovery))) throw new AuthError("Invalid code", "2FA_INVALID_CODE", 401);
+     await this.prisma.user.update({ where: { id: userId }, data: { totpSecretEncrypted: null, totpEnabled: false, totpVerifiedAt: null } });
+     await this.prisma.recoveryCode.deleteMany({ where: { userId } });
+     await this.auditLog.log(userId, "user.2fa_disabled", { type: "User", id: userId }, {});
+   }
+ 
+   async adminReset(actorId: string, targetUserId: string) {
++    const target = await this.prisma.user.findUnique({ where: { id: targetUserId } });
++    if (!target) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
+     await this.prisma.user.update({ where: { id: targetUserId }, data: { totpSecretEncrypted: null, totpEnabled: false, totpVerifiedAt: null } });
+     await this.prisma.recoveryCode.deleteMany({ where: { userId: targetUserId } });
+     await this.auditLog.log(actorId, "user.2fa_reset", { type: "User", id: targetUserId }, {});
+   }
+ 
+   async storeChallenge(userId: string): Promise<string> {
+     const token = crypto.randomBytes(32).toString("hex");
+     await this.redis.set(CHALLENGE_PREFIX + token, JSON.stringify({ userId }), "EX", CHALLENGE_TTL_SECONDS);
+     return token;
+   }
+diff --git a/apps/api/src/modules/users/routes.ts b/apps/api/src/modules/users/routes.ts
+index fff4e6f..54b2296 100644
+--- a/apps/api/src/modules/users/routes.ts
++++ b/apps/api/src/modules/users/routes.ts
+@@ -1,12 +1,13 @@
+ import type { FastifyInstance, FastifyReply } from "fastify";
+ import { UserService, UserError } from "./service.js";
++import { AuthError } from "../auth/service.js";
+ import { AuditLogService } from "../audit-log/service.js";
+ import { TwoFactorService } from "../auth/two-factor-service.js";
+ import {
+   CreateSubAccountSchema,
+   UpdateUserRoleSchema,
+   UpdateUserQuotasSchema,
+   UpdateUserPermissionsSchema,
+   UserIdParamSchema,
+ } from "./schema.js";
+ 
+@@ -64,24 +65,32 @@ export async function userRoutes(app: FastifyInstance) {
+     try {
+       const { id } = UserIdParamSchema.parse(request.params);
+       const body = UpdateUserRoleSchema.parse(request.body);
+       return await service.updateRole({ id: request.userId!, role: request.userRole! }, id, body);
+     } catch (err) {
+       handleUserError(err, reply);
+     }
+   });
+ 
+   // POST /api/users/:id/2fa/reset — ADMIN only (F5.17)
+-  app.post("/:id/2fa/reset", { preHandler: [app.requireRole("ADMIN")] }, async (request) => {
+-    const { id } = UserIdParamSchema.parse(request.params);
+-    await twoFactorAdminReset(app, request.userId!, id);
+-    return { message: "Two-factor authentication reset" };
++  app.post("/:id/2fa/reset", { preHandler: [app.requireRole("ADMIN")] }, async (request, reply) => {
++    try {
++      const { id } = UserIdParamSchema.parse(request.params);
++      await twoFactorAdminReset(app, request.userId!, id);
++      return { message: "Two-factor authentication reset" };
++    } catch (err) {
++      if (err instanceof AuthError) {
++        reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
++        return;
++      }
++      handleUserError(err, reply);
++    }
+   });
+ 
+   // PATCH /api/users/:id/quotas — ADMIN (any user) or RESELLER (own sub-accounts only)
+   app.patch("/:id/quotas", { preHandler: [app.requireRole("ADMIN", "RESELLER")] }, async (request, reply) => {
+     try {
+       const { id } = UserIdParamSchema.parse(request.params);
+       const body = UpdateUserQuotasSchema.parse(request.body);
+       return await service.updateQuotas({ id: request.userId!, role: request.userRole! }, id, body);
+     } catch (err) {
+       handleUserError(err, reply);

@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import type { PrismaClient } from "@prisma/client";
 import type { FastifyBaseLogger } from "fastify";
 import type { CreateProjectInput, UpdateProjectInput, ProjectListQuery } from "./schema.js";
-import { assertUnderQuota } from "../../utils/quota.js";
+import { assertUnderQuota, notifyQuotaThreshold } from "../../utils/quota.js";
 import { env } from "../../config/env.js";
 import { runDockerAction } from "../deploy/service.js";
 import type { AuditLogService } from "../audit-log/service.js";
@@ -190,6 +190,7 @@ export class ProjectService {
         },
         select: PROJECT_SELECT,
       });
+      void notifyQuotaThreshold(this.prisma, userId, "project");
 
       await this.auditLog.log(userId, "project.created", { type: "Project", id: project.id }, {
         after: { name: project.name, type: project.type },

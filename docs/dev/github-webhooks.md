@@ -4,6 +4,8 @@
 
 Automatically redeploys projects whenever new code is pushed to connected GitHub repositories. It provides cryptographically verified webhook ingestion via HMAC-SHA256 signatures, branch filtering, automated BullMQ job dispatching, and live commit metadata display in the dashboard.
 
+This page documents the legacy per-project webhook used by manually connected repositories. GitHub App projects use the panel-wide `/api/webhooks/github-app` endpoint and require no manual webhook setup; see [GitHub Integration](github-integration.md).
+
 ---
 
 ## Architecture

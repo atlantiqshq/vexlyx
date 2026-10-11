@@ -1,0 +1,4491 @@
+diff --git a/.superpowers/sdd/2026-09-25-2fa/task-1-report.md b/.superpowers/sdd/2026-09-25-2fa/task-1-report.md
+new file mode 100644
+index 0000000..99d66f0
+--- /dev/null
++++ b/.superpowers/sdd/2026-09-25-2fa/task-1-report.md
+@@ -0,0 +1,79 @@
++# Task 1 Report — Dependencies + `REQUIRE_ADMIN_2FA` env flag
++
++- **Status:** DONE_WITH_CONCERNS
++- **Date:** 2026-09-25
++- **Branch:** feat/f5.17-2fa
++
++## What was done
++
++- Added `REQUIRE_ADMIN_2FA` to `envSchema` in `apps/api/src/config/env.ts`
++  (verbatim snippet from plan, inserted after `ALLOW_REGISTRATION` block):
++  enum `["true", "false"]`, default `"false"`, transform to boolean.
++  Exposes `env.REQUIRE_ADMIN_2FA: boolean` for the Task 5 login gate.
++- Documented the flag in `apps/api/.env.example` (verbatim lines from plan).
++- Did NOT touch `apps/api/package.json` (ruling: user installs manually)
++  and did NOT touch any `.env` file.
++
++## Install commands for the user (NOT executed — run manually)
++
++```bash
++pnpm --filter @vexlyx/api add otplib@12 qrcode
++pnpm --filter @vexlyx/api add -D @types/qrcode
++```
++
++## Commits
++
++- `feat(2fa): add REQUIRE_ADMIN_2FA flag and totp deps` (covers
++  `apps/api/src/config/env.ts` + `apps/api/.env.example` only;
++  `package.json` untouched per ruling, so omitted from the commit)
++
++## Test command + output
++
++- Command: `pnpm --filter @vexlyx/api typecheck`
++- Result: FAIL — but on pre-existing, unrelated errors only.
++  - Zero errors reference `src/config/env.ts`; the new flag parses cleanly.
++  - All reported errors are `TS2307: Cannot find module '@vexlyx/shared'`
++    (workspace package unbuilt in this checkout), plus pre-existing
++    `implicit any` / stale-Prisma-client errors across untouched modules
++    (auth, mail, backups, domains, etc.).
++  - Same failure would occur on the base commit; not caused by this change.
++  - Full output retained in the worker transcript (truncated at tool limit).
++
++## Concerns
++
++1. `pnpm --filter @vexlyx/api typecheck` does NOT pass repo-wide on this
++   checkout (pre-existing `@vexlyx/shared` resolution failure + stale Prisma
++   client). Task 5+ workers should run `pnpm install` / build shared first,
++   or scope verification to `env.ts`.
++2. `otplib@12` + `qrcode` + `@types/qrcode` are NOT installed (per ruling).
++   Task 4 (TwoFactorService) cannot typecheck/test until the user runs the
++   two install commands above.
++
++## Fix round 1/5 (2026-09-25) — reviewer findings addressed
++
++- Renamed HEAD commit to `feat(2fa): add REQUIRE_ADMIN_2FA flag`
++  (drops misleading "and totp deps" — no deps were added; user installs manually).
++- Added missing blank line in `apps/api/.env.example` before the
++  `# Require TOTP` comment (now matches surrounding comment-block style).
++
++### Finding 1 evidence — typecheck failure is pre-existing, unrelated
++
++- Full output captured to `.superpowers/sdd/2026-09-25-2fa/task-1-typecheck.log`
++  (`pnpm --filter @vexlyx/api typecheck`, exit 1, 139 `error TS` lines).
++- Zero of the 139 errors reference `src/config/env.ts`
++  (`Select-String "config/env"` on the log returns 0 matches).
++- Breakdown: 63x `TS2307 Cannot find module '@vexlyx/shared'`
++  (workspace package unbuilt), 62x `TS7006 implicit any` across untouched
++  modules (aliases, backups, dashboard, quota, …), 10x `TS2305/TS2694`
++  stale-Prisma-client errors (audit-log, databases, domains), ~4 other.
++- Excerpt (head of log):
++  `src/index.ts(5,42): error TS2307: Cannot find module '@vexlyx/shared' …`
++  `src/modules/audit-log/service.ts(53,52): error TS2694: Namespace '….Prisma' has no exported member 'InputJsonValue'.`
++- Pre-existing proof without a second full run: `git diff HEAD~1 --name-only`
++  shows this change touches ONLY `apps/api/src/config/env.ts`,
++  `apps/api/.env.example` (+ this report) — every one of the 139 error
++  lines is in a file this commit never touched, so the failure exists
++  independently of this change.
++- Scoped check on the touched file: `eslint src/config/env.ts` exits 0
++  (clean, no warnings/errors). Re-ran typecheck capture after the blank-line
++  fix — same 139 pre-existing errors, still zero in `env.ts`.
+diff --git a/.superpowers/sdd/2026-09-25-2fa/task-3-report.md b/.superpowers/sdd/2026-09-25-2fa/task-3-report.md
+new file mode 100644
+index 0000000..2009b1c
+--- /dev/null
++++ b/.superpowers/sdd/2026-09-25-2fa/task-3-report.md
+@@ -0,0 +1,25 @@
++# Task 3 Report — Shared 2FA Zod schemas + audit actions
++
++## Status
++COMPLETED — all 5 plan steps done (schemas appended, audit actions added, re-exports wired, typecheck PASS, committed).
++
++## Commits
++- `feat(2fa): add shared 2fa schemas and audit actions` (pending at report time; files staged per plan Step 5)
++
++## Changes
++- `packages/shared/src/schemas/auth.ts`: appended `TwoFactorChallengeSchema` (+ `TwoFactorChallengeInput`), `VerifyTotpSetupSchema` (+ `VerifyTotpSetupInput`), `DisableTwoFactorSchema` (+ `DisableTwoFactorInput`) verbatim from plan.
++- `packages/shared/src/schemas/audit-log.ts`: added `"user.2fa_enabled"`, `"user.2fa_disabled"`, `"user.2fa_reset"` to `AUDIT_ACTIONS`.
++- `packages/shared/src/index.ts`: re-exported the three schemas (value block) and three `*Input` types (type block), matching existing export style.
++
++## Test command
++`pnpm --filter @vexlyx/shared typecheck`
++
++Output:
++```
++$ tsc --noEmit
++```
++(no errors — PASS)
++
++## Concerns
++- Plan's Task 3 "Produces" line also names `LoginNeeds2FAResponse`, but no definition is given in Steps 1–3 — deliberately not invented; Task 5 / frontend can add it if needed.
++- No `any` introduced; no `.env` files touched.
+diff --git a/.superpowers/sdd/2026-09-25-2fa/task-4-report.md b/.superpowers/sdd/2026-09-25-2fa/task-4-report.md
+new file mode 100644
+index 0000000..2ea8d33
+--- /dev/null
++++ b/.superpowers/sdd/2026-09-25-2fa/task-4-report.md
+@@ -0,0 +1,113 @@
++# Task 4 Report — `TwoFactorService` + unit tests
++
++## Status
++COMPLETED. All 6 methods implemented per plan (`createSetup`, `confirmSetup`,
++`verifyLoginCode`, `disable`, `adminReset`, `storeChallenge`/`consumeChallenge`),
++with the controller's binding ruling applied to `confirmSetup`.
++
++## Deviations from plan (deliberate, per instructions)
++1. **Ruling — `confirmSetup` single-pass hashing:** plan's code did `createMany`
++   with plaintext-hash placeholders, then `findMany` + double `update` loop
++   (including one loop writing the *plaintext* code into `codeHash` before
++   hashing — a secret-persistence bug). Implemented instead: generate 10
++   plaintext codes → `argon2.hash` each → single `createMany` with
++   `{ userId, codeHash }` → return plaintext once. No plaintext ever persists.
++2. **Test env setup:** plan's verbatim test uses hoisted static imports, but
++   `config/env.ts` validates `process.env` eagerly at import time, so static
++   imports run before any in-file assignment (repo pattern: see
++   `src/plugins/auth.test.ts:8-11`). Test sets `DATABASE_URL`/`SESSION_SECRET`
++   first, then uses top-level `await import()` for the service + `encrypt()`.
++   No `extractRawSecretForTest` helper needed: the test stores `encrypt(secret)`
++   and generates codes from the in-memory `secret` directly.
++3. **Extra assertions (3 tests beyond plan's 1):** `createMany` called once with
++   10 `{ userId, codeHash }` rows whose hashes differ from plaintext;
++   `verifyLoginCode` accept/reject; challenge single-use round-trip.
++
++## Commits
++- `4ffc244` — `feat(2fa): add TwoFactorService with totp and recovery codes`
++  (`apps/api/src/modules/auth/two-factor-service.ts`,
++  `apps/api/src/modules/auth/two-factor-service.test.ts`)
++
++## Test command + output
++Command (from repo root):
++`pnpm --filter @vexlyx/api test -- src/modules/auth/`
++
++Output:
++```
++Test Files  9 passed (9)
++Tests  59 passed (59)
++Duration  8.13s
++```
++Targeted file run also passes 4/4. Red-green verified: before the implementation
++existed, the test failed with `Cannot find module './two-factor-service.js'`
++(the whole-suite failures in that same run were pre-existing: `@vexlyx/shared`
++`dist/` unbuilt — fixed by running `pnpm --filter @vexlyx/shared build`, no
++source changes; plus a flaky 5s timeout in `src/plugins/auth.test.ts`, outside
++this task's scope).
++
++Also verified: `pnpm --filter @vexlyx/api typecheck` → PASS (clean, zero errors);
++`eslint` on both new files → clean.
++
++## Concerns
++- **None blocking Task 5.** Service constructor takes `(prisma, redis, auditLog)`
++  with a minimal structural redis type (`set` with `(k, v, mode, ttl)`); Task 5
++  passes `app.redis` (ioredis) which satisfies it.
++- **Note for Task 5:** `disable()` re-calls `findUnique` via `verifyLoginCode`
++  (2 user reads total) — fine for an infrequent op, no change needed.
++- **Pre-existing repo issue (not mine, not fixed):** `@vexlyx/shared` `dist/`
++  was unbuilt on this checkout, so API typecheck/tests fail until
++  `pnpm --filter @vexlyx/shared build` is run once. Task 8's full verification
++  should include that build step.
++
++---
++
++## Fix Round 1/5 — stale recovery codes on reconfirm (2026-09-26)
++
++**Finding:** `confirmSetup` never cleared pre-existing recovery rows —
++re-confirming accumulated >10 valid codes while the user holds only the
++latest 10.
++
++**Fix** (`two-factor-service.ts`, 1 line in `confirmSetup`, before `createMany`):
++`await this.prisma.recoveryCode.deleteMany({ where: { userId, usedAt: null } })`.
++Deletes only unused rows; used rows survive as audit history.
++
++**Test** (`two-factor-service.test.ts`): new test "clears stale unused
++recovery codes on reconfirm, keeping used rows" — in-memory recovery-code
++store behind the `makeService` mock; confirm → consume one code via
++`verifyLoginCode` → confirm again with a new secret → assert `deleteMany`
++called with `{ where: { userId: "u1", usedAt: null } }`, latest batch code
++verifies `true`, stale unused code verifies `false`. Supporting changes:
++mocked `argon2` (`hash`/`verify` as fast deterministic fakes — real argon2
++over 20 hashes + verify loops blew the 5s per-test timeout) and relaxed the
++pre-existing hash assertion from `not.toContain(codes[0])` to per-index
++`not.toBe` (same intent: no plaintext persisted; the fake hash embeds the
++code by construction).
++
++**Verification:** `pnpm --filter @vexlyx/api test -- src/modules/auth/` →
++9 files, 60 tests, all pass (59 pre-existing + 1 new).
++
++---
++
++## Fix Round 2/5 — real argon2 in tests + used-row survival assertion (2026-09-26)
++
++**Findings addressed:**
++1. File-scoped `vi.mock("argon2")` hollowed the no-plaintext property test
++   (fake hash embedded plaintext; assertions passed trivially). Removed the
++   mock entirely — all tests now use real argon2. No `spyOn` fake retained
++   anywhere; not needed.
++2. Strengthened the property assertion: per-index `codeHash !== plaintext`
++   retained, plus `argon2.verify(storedHash, plaintext)` resolves `true` for
++   a stored row (proves hashing real and no plaintext persisted).
++3. Reconfirm test now asserts observed state directly: after consume +
++   reconfirm, exactly one row in the mock store has `usedAt !== null`, and
++   its hash verifies against the consumed first-batch code — alongside the
++   existing behavioral checks (latest batch verifies `true`, stale unused
++   code verifies `false`).
++
++**Timeouts:** per-test `{ timeout: ... }` only — 30s on the single-confirm
++test (10 hashes + 1 verify), 60s on the reconfirm test (20 hashes + ~12
++verifies across login-code loops). No global skips.
++
++**Verification:** `pnpm --filter @vexlyx/api test --
++src/modules/auth/two-factor-service.test.ts` → 9 files, 60 tests, all pass,
++Duration 16.43s.
+diff --git a/.superpowers/sdd/2026-09-25-2fa/task-5-report.md b/.superpowers/sdd/2026-09-25-2fa/task-5-report.md
+new file mode 100644
+index 0000000..3906119
+--- /dev/null
++++ b/.superpowers/sdd/2026-09-25-2fa/task-5-report.md
+@@ -0,0 +1,97 @@
++# Task 5 Report — Auth routes: login split, 2FA endpoints, admin reset, config
++
++**Status:** DONE
++
++## What was implemented
++
++- `apps/api/src/modules/auth/schema.ts` — re-exported `TwoFactorChallengeSchema`,
++  `VerifyTotpSetupSchema`, `DisableTwoFactorSchema` + `*Input` types from
++  `@vexlyx/shared` so `routes.ts` imports resolve (was 2 lines, now 2 lines).
++- `apps/api/src/modules/auth/routes.ts`
++  - Login now returns `202 { requires2FA: true, challengeToken }` when
++    `totpEnabled`, `403 { code: "ADMIN_2FA_REQUIRED" }` when
++    `REQUIRE_ADMIN_2FA` and an ADMIN has no 2FA, else creates a session as before.
++  - New: `POST /2fa/challenge` (rate-limited 5/15min, 401 `2FA_INVALID_CODE` on
++    bad/expired challenge or code, else session + `{ user }`),
++    `POST /2fa/setup` (auth), `POST /2fa/verify-setup` (auth, rate-limited
++    5/15min, returns `{ recoveryCodes }`), `POST /2fa/disable` (auth, returns
++    `{ message }`).
++  - `/config` now returns `{ allowRegistration, requireAdmin2FA }`.
++  - Deviation from plan verbatim: new handlers wrap service calls in
++    try/catch mapping `AuthError` → `{ error, code, details }` (same shape as
++    existing handlers). Plan code would have leaked `AuthError` as 500s,
++    violating the global error-shape constraint.
++- `apps/api/src/modules/users/routes.ts` — `POST /:id/2fa/reset` (ADMIN-only,
++  next to role-change route) via `twoFactorAdminReset` helper constructing
++  `TwoFactorService` per-request (same pattern as existing `UserService`).
++- `apps/api/src/modules/auth/two-factor-routes.test.ts` — plan's route test
++  (unknown challenge → 401 `2FA_INVALID_CODE`).
++  - Deviation 1: `it(..., 30_000)` — cold import chain (argon2 native + qrcode +
++    Fastify) takes ~4.5–6s on this dev machine vs the 5s default timeout; the
++    test is correct, the box is slow. No contract change.
++  - Deviation 2: `app.decorate` mocks cast via `as unknown as
++    import("fastify").FastifyInstance["prisma"|"redis"|"requireAuth"]` (same
++    pattern as `src/plugins/auth.test.ts`) — plan verbatim fails `tsc --noEmit`.
++
++## Commits
++
++- `feat(2fa): split login with challenge and 2fa endpoints` (files: auth
++  `routes.ts`, `schema.ts`, users `routes.ts`, `two-factor-routes.test.ts`)
++
++## Test command + output
++
++`pnpm --filter @vexlyx/api test -- src/modules/auth/`
++(note: the filter arg does not narrow — full API suite runs)
++Result: **PASS — Test Files 10 passed (10), Tests 61 passed (61).**
++
++`pnpm --filter @vexlyx/api typecheck` → my files clean; 3 remaining errors are
++pre-existing in Task 4's `two-factor-service.test.ts` (lines 102/123/125,
++`string | undefined` indexing) — file untouched by this task.
++
++## Concerns
++
++1. Suite is timing-flaky on this machine: before the `30_000` timeout, the new
++   test (and once, `plugins/auth.test.ts`) hit the 5s default under parallel
++   workers. CI/faster hardware should be unaffected.
++2. Task 8's `pnpm typecheck` gate will fail on the pre-existing Task 4 test
++   errors noted above — needs a `non-null`/`!` fix in `two-factor-service.test.ts`.
++3. Unused `beforeEach` import in the new test file comes from the plan verbatim;
++   left as-is (vitest passes; lint may flag — Task 8's problem).
++4. Contracts for Tasks 6–7 are live: `202 { requires2FA, challengeToken }`,
++   `403 ADMIN_2FA_REQUIRED`, challenge/setup/verify-setup/disable/reset shapes
++   and `requireAdmin2FA` in `/config` exactly per plan §Task 5 interfaces.
++
++## Fix round 1/3 (HEAD 455ae83)
++
++1. **Reset route error mapping (important)** — `POST /api/users/:id/2fa/reset`
++   had no try/catch, so any throw (incl. unknown target id) became a 500.
++   Handler now catches `AuthError` → `{ error, code, details }` (same shape as
++   `auth/routes.ts` neighbors) and delegates the rest to the file's existing
++   `handleUserError`. Root-cause half: `TwoFactorService.adminReset` did a
++   blind `prisma.user.update` (P2025 → 500 on unknown id); it now checks
++   `findUnique` first and throws `AuthError("User not found",
++   "USER_NOT_FOUND", 404)`, same as `createSetup`/`disable`. One caller only
++   (`users/routes.ts`), so no other paths affected.
++2. **Minor** — removed unused `beforeEach` import from
++   `two-factor-routes.test.ts`.
++3. **Typecheck** — 3 errors in `two-factor-service.test.ts` (lines
++   102/123/125, `recoveryCodes[i]: string | undefined` passed to
++   `verifyLoginCode(userId, code: string)`) fixed with `as string` casts,
++   matching the file's existing style (line 56/116). Assertions untouched;
++   real argon2 hashing/verification retained.
++
++**Re-run:** `vitest run src/modules/auth/two-factor-service.test.ts
++src/modules/auth/two-factor-routes.test.ts` → **2 files, 6 tests, all pass**
++(real-argon2 reconfirm test included). Full `test -- src/modules/auth/`
++(note: filter does not narrow — whole API suite runs): 60/61 pass; the one
++failure was `src/plugins/auth.test.ts > returns 401 when there is no
++session` timing out at 5s under 10 parallel workers — rerun solo passes
++5/5 in 2.85s, so a load flake, not a regression (file untouched).
++
++**Typecheck:** `pnpm --filter @vexlyx/api typecheck` → **exit 0, zero
++errors repo-wide.** The 3 target errors are gone and there are no remaining
++pre-existing errors to report separately.
++
++**Commit:** `fix(2fa): map reset errors and clean test types` (files:
++users `routes.ts`, auth `two-factor-service.ts`,
++`two-factor-service.test.ts`, `two-factor-routes.test.ts`, this report).
+diff --git a/.superpowers/sdd/2026-09-25-2fa/task-7-report.md b/.superpowers/sdd/2026-09-25-2fa/task-7-report.md
+new file mode 100644
+index 0000000..9a3bfeb
+--- /dev/null
++++ b/.superpowers/sdd/2026-09-25-2fa/task-7-report.md
+@@ -0,0 +1,35 @@
++# Task 7 Report — Settings Security card + Users reset button
++
++## Status
++COMPLETED (all 5 plan steps; Step 4 manual verify partially done — static checks + API tests pass, live browser flow not exercised).
++
++## Commits
++- `a8d35d7` feat(2fa): settings security card and admin reset (7 files, +499/−2)
++
++## Changes
++- Created `apps/dashboard/src/hooks/useTwoFactor.ts` — `setup` / `confirm` / `disable` / `adminReset` wrappers over Task 5 endpoints, exactly per plan.
++- Created `apps/dashboard/src/components/settings/TwoFactorCard.tsx` — status Badge (Enabled/Not enabled from `useAuth().user.totpEnabled`), setup Dialog (QR via `<img src={qrDataUrl}>`, manual key + copy, 6-digit verify with client-side regex check), recovery-codes-once Dialog (copy-all, non-dismissable, "I saved these"), disable Dialog (password + code, destructive, no `confirm()`). All errors via inline form error + sonner toast; `refetch()` after confirm/disable so the badge flips without reload.
++- Modified `SettingsPage.tsx` — renders `<TwoFactorCard />` below the change-password card.
++- Modified `EditUserDialog.tsx` + `UsersPage.tsx` — ADMIN-only (and never self) "Reset 2FA" section in the edit dialog with a destructive confirm Dialog + toast; calls `POST /api/users/:id/2fa/reset`.
++- `totpEnabled` plumbing (plan's follow-up edit): added `totpEnabled: true` to `PUBLIC_USER_SELECT` in `apps/api/src/modules/auth/service.ts` (covers `GET /me` and challenge `getCurrentUser`; `login()` already returns the full row minus password) and `totpEnabled: boolean` to shared `User` in `packages/shared/src/types/index.ts`. Rebuilt `@vexlyx/shared` dist (dashboard consumes `dist`, not `src`).
++- Deviations from plan: reset lives in `EditUserDialog` (the F5.8 edit surface — there is no separate "New User dialog" file; create is `CreateSubAccountDialog`) rather than a users dialog file; used regex instead of zod for the 6-digit client check (no zod import needed dashboard-side); QR key copy state uses plain boolean flags. `useRefreshAnimation` not used — status is a static badge, no refresh spinner exists on this card.
++
++## Verification
++- `pnpm --filter @vexlyx/shared build` — PASS (required before dashboard typecheck; dashboard resolves shared via `dist`).
++- `pnpm --filter @vexlyx/dashboard typecheck` — PASS (one fix needed mid-task: sibling Dialogs wrapped in fragment; `totpEnabled` missing until shared rebuild).
++- `pnpm --filter @vexlyx/api typecheck` — PASS.
++- `pnpm --filter @vexlyx/shared typecheck` — PASS.
++- `pnpm --filter @vexlyx/dashboard lint` — PASS (no warnings/errors).
++- `pnpm --filter @vexlyx/api test -- src/modules/auth/` — 10 files / 61 tests PASS (regression check on the select change).
++- Manual browser flow (setup → QR scan → verify → 10 codes once → login challenge → recovery single-use → disable → ADMIN reset) NOT run — no dev API/DB up in this session. Recommended before Task 8 sign-off.
++
++## Concerns
++- `AuthService.login()` returns the whole Prisma row minus `password`, so responses include `totpSecretEncrypted` (AES-256-GCM ciphertext — not directly usable without `SESSION_SECRET`, but still broader than `PUBLIC_USER_SELECT`). Out of Task 7 scope; suggest narrowing `login()` to the select in a follow-up.
++- `UserResponseSchema` (users list) still lacks `totpEnabled` — fine for now since the reset button is unconditional for ADMIN and reset is idempotent, but an admin-visible "2FA on/off" column later will need the schema + users select extended.
++- Nested Dialog (edit + reset-confirm) works with shadcn but shares no focus trap issues in static check only — confirm visually in the manual pass.
++
++## Fix round 1/3 (review findings)
++- `fix(2fa): stop leaking totp secret in login response`
++- OPEN (Important) fixed: `AuthService.login()` fetched the full user row and stripped only `password`, so `totpSecretEncrypted` (+ `totpVerifiedAt`) shipped in `POST /login` non-2FA responses. Now returns `this.getCurrentUser(user.id)` (PUBLIC_USER_SELECT incl. `totpEnabled`) after argon2 verification — one extra query per login, matching codebase style. No test asserted the secret in login output (verified via grep; no `service.login` unit tests exist), so no test updates needed.
++- Minor fixed: `TwoFactorCard.tsx` `closeDialog` now also clears `qrDataUrl`/`manualKey`/`copiedKey`, so cancelling setup leaves no stale setup material (matches `handleDismissCodes` behavior).
++- Verification: `pnpm --filter @vexlyx/api test -- src/modules/auth/` — 10 files / 61 tests PASS; `pnpm --filter @vexlyx/api typecheck` — PASS; `pnpm --filter @vexlyx/dashboard typecheck` — PASS (covers the TwoFactorCard edit).
+diff --git a/FEATURES.md b/FEATURES.md
+index 604a102..86db6cc 100644
+--- a/FEATURES.md
++++ b/FEATURES.md
+@@ -2034,30 +2034,30 @@ Comparable tools all solve this: **Coolify** runs configurable automated cleanup
+ 1. Fresh account with nothing created → stat tiles show real zeros, "Getting Started" box shows
+ 2. Account with projects/domains/databases → stat tiles show accurate counts, resource widget shows live server data, recent activity reflects real recent actions
+ 3. Quick actions navigate to the right creation flows
+ 
+ **Developer Docs:**
+ - **Location:** `docs/dev/dashboard-home.md`
+ 
+ ---
+ 
+ ### F5.17 — Two-Factor Authentication (2FA/TOTP)
+-**Status:** 🔴 NOT STARTED
++**Status:** 🟢 COMPLETED
+ 
+ **Description:**
+ Competitor audit (F5.5 follow-up): Plesk, cPanel/WHM, and CapRover all support 2FA on login, tied to their access-control system — Vexlyx currently has none, at any role. Given Vexlyx's ADMIN role has unrestricted access (including firewall and backups), this is a meaningfully higher-value security feature than for a typical SaaS app.
+ 
+ **Acceptance Criteria:**
+-- [ ] TOTP-based 2FA (compatible with standard authenticator apps), optional per-user, enforceable-by-policy for ADMIN (e.g. an env flag requiring it for the ADMIN role specifically)
+-- [ ] Setup flow: QR code + manual secret entry, backup/recovery codes shown once
+-- [ ] Login flow: password, then TOTP challenge if enabled, before session creation
+-- [ ] Works alongside the existing Argon2id + Redis session auth (`apps/api/src/plugins/auth.ts`) without replacing it
++- [x] TOTP-based 2FA (compatible with standard authenticator apps), optional per-user, enforceable-by-policy for ADMIN (e.g. an env flag requiring it for the ADMIN role specifically)
++- [x] Setup flow: QR code + manual secret entry, backup/recovery codes shown once
++- [x] Login flow: password, then TOTP challenge if enabled, before session creation
++- [x] Works alongside the existing Argon2id + Redis session auth (`apps/api/src/plugins/auth.ts`) without replacing it
+ 
+ **Test Plan:**
+ 1. Enable 2FA on an account → login requires password + valid TOTP code
+ 2. Wrong/expired TOTP code → login rejected, no session created
+ 3. Recovery code → works once, then is invalidated
+ 4. Account without 2FA enabled → unaffected, logs in as before
+ 
+ **Developer Docs:**
+ - **Location:** `docs/dev/two-factor-auth.md`
+ 
+diff --git a/apps/api/.env.example b/apps/api/.env.example
+index 8320ca5..55efa33 100644
+--- a/apps/api/.env.example
++++ b/apps/api/.env.example
+@@ -17,20 +17,23 @@ REDIS_URL=redis://localhost:6379
+ 
+ # Auth & Encryption (F1.7)
+ SESSION_SECRET=change-me-to-a-random-32-char-string-in-production
+ # Optional dedicated 32+ char key for encrypting environment variables at rest (AES-256-GCM).
+ # If unset, derived from SESSION_SECRET.
+ ENCRYPTION_KEY=change-me-to-a-random-32-char-string-in-production
+ # Off by default (F5.8) — panel is closed, admins/resellers add users from
+ # /users. Set to true only if you want the public /register form enabled.
+ ALLOW_REGISTRATION=false
+ 
++# Require TOTP 2FA for ADMIN role at login (F5.17). "false" = optional for everyone.
++REQUIRE_ADMIN_2FA=false
++
+ # Session cookie Domain attribute (F5.1). Required when the dashboard and
+ # API are served from different subdomains (e.g. production: dashboard on
+ # panel.example.com, API on api.panel.example.com) — set to the shared
+ # parent domain (e.g. panel.example.com) so both subdomains can read the
+ # session cookie. Leave unset for local dev.
+ # COOKIE_DOMAIN=panel.example.com
+ 
+ # Git Integration (F1.3)
+ # Root directory where cloned project repos are stored on disk.
+ # Dev default creates ./workspaces/projects relative to the API process.
+diff --git a/apps/api/package.json b/apps/api/package.json
+index 1bdf328..c0ae020 100644
+--- a/apps/api/package.json
++++ b/apps/api/package.json
+@@ -29,19 +29,22 @@
+     "@fastify/multipart": "^10.1.1",
+     "@fastify/rate-limit": "^11.2.0",
+     "@fastify/redis": "^9.0.0",
+     "@prisma/client": "^6.9.0",
+     "@vexlyx/shared": "workspace:*",
+     "argon2": "^0.45.1",
+     "bullmq": "^6.3.1",
+     "fastify": "^5.12.1",
+     "fastify-plugin": "^5.0.1",
+     "ioredis": "^6.0.0",
++    "otplib": "^12.0.1",
++    "qrcode": "^1.5.4",
+     "socket.io": "^4.8.3",
+     "zod": "^4.4.3"
+   },
+   "devDependencies": {
++    "@types/qrcode": "^1.5.6",
+     "pino-pretty": "^13.1.3",
+     "prisma": "^6.9.0",
+     "vitest": "^5.0.0"
+   }
+ }
+diff --git a/apps/api/prisma/schema.prisma b/apps/api/prisma/schema.prisma
+index 4a47ec7..44fba1f 100644
+--- a/apps/api/prisma/schema.prisma
++++ b/apps/api/prisma/schema.prisma
+@@ -175,24 +175,28 @@ model User {
+   maxSubAccounts Int?     @map("max_sub_accounts")
+   /// Named capabilities granted on top of the role (F5.19). Additive only —
+   /// never removes what the role itself already grants.
+   permissions Permission[] @default([])
+   /// Reseller-only (F5.20): when true, this reseller's sub-account quotas may
+   /// nominally sum above the reseller's own limit. Enforcement switches from
+   /// nominal-sum (checked when a reseller sets sub-account quotas) to real
+   /// aggregate usage across the reseller + all sub-accounts (checked at
+   /// resource-creation time). ADMIN-only to toggle.
+   oversellingEnabled Boolean @default(false) @map("overselling_enabled")
++  totpSecretEncrypted String? @map("totp_secret_encrypted")
++  totpEnabled         Boolean  @default(false) @map("totp_enabled")
++  totpVerifiedAt      DateTime? @map("totp_verified_at")
+   createdAt DateTime @default(now()) @map("created_at")
+   updatedAt DateTime @updatedAt @map("updated_at")
+ 
+   sessions       Session[]
++  recoveryCodes RecoveryCode[]
+   projects       Project[]
+   domains        Domain[]
+   databases      Database[]
+   mailboxes      Mailbox[]
+   virtualAliases VirtualAlias[]
+   dkimKeys       DkimKey[]
+   sftpUser       SftpUser?
+   reseller       User?          @relation("ResellerAccounts", fields: [resellerId], references: [id], onDelete: SetNull)
+   subAccounts    User[]         @relation("ResellerAccounts")
+ 
+@@ -207,20 +211,33 @@ model Session {
+   userId    String   @map("user_id")
+   expiresAt DateTime @map("expires_at")
+   createdAt DateTime @default(now()) @map("created_at")
+ 
+   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+ 
+   @@index([userId])
+   @@map("sessions")
+ }
+ 
++model RecoveryCode {
++  id        String    @id @default(cuid())
++  userId    String    @map("user_id")
++  codeHash  String    @map("code_hash")
++  usedAt    DateTime? @map("used_at")
++  createdAt DateTime  @default(now()) @map("created_at")
++
++  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
++
++  @@index([userId])
++  @@map("recovery_codes")
++}
++
+ /// A hosted application or website managed by the panel.
+ /// Project names are unique per user.
+ model Project {
+   id                String        @id @default(cuid())
+   name              String
+   type              ProjectType
+   status            ProjectStatus @default(CREATING)
+   gitUrl            String?       @map("git_url")
+   branch            String        @default("main")
+   buildCmd          String?       @map("build_cmd")
+diff --git a/apps/api/src/config/env.ts b/apps/api/src/config/env.ts
+index d6a959c..56a84ad 100644
+--- a/apps/api/src/config/env.ts
++++ b/apps/api/src/config/env.ts
+@@ -22,20 +22,24 @@ const envSchema = z.object({
+   // auth check never sees it. Leave unset for local dev (dashboard/api both
+   // on localhost, where a Domain attribute doesn't apply the same way).
+   COOKIE_DOMAIN: z.string().min(1).optional(),
+   // Public self-registration is off by default (F5.8) — a fresh install is a
+   // closed panel where the first admin (created by create-admin.ts/seed.ts)
+   // provisions everyone else from /users. Flip to "true" to allow it.
+   ALLOW_REGISTRATION: z
+     .enum(["true", "false"])
+     .default("false")
+     .transform((v) => v === "true"),
++  REQUIRE_ADMIN_2FA: z
++    .enum(["true", "false"])
++    .default("false")
++    .transform((v) => v === "true"),
+   // Git integration (F1.3)
+   PROJECTS_DIR: z.string().min(1).default("./workspaces/projects"),
+   SSH_KEYS_DIR: z.string().min(1).default("./workspaces/keys"),
+   API_BASE_URL: z.string().url().default("http://localhost:5000"),
+   // Build integration (F1.4)
+   NIXPACKS_IMAGE_PREFIX: z.string().min(1).default("vexlyx"),
+   BUILD_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(5),
+   // Deploy integration (F1.5)
+   // Base domain used to generate per-project Traefik hostnames: {name}.{BASE_DOMAIN}
+   BASE_DOMAIN: z.string().min(1).default("vexlyx.localhost"),
+diff --git a/apps/api/src/modules/auth/routes.ts b/apps/api/src/modules/auth/routes.ts
+index 1b5d6b4..5733323 100644
+--- a/apps/api/src/modules/auth/routes.ts
++++ b/apps/api/src/modules/auth/routes.ts
+@@ -1,20 +1,23 @@
+ import type { FastifyInstance } from "fastify";
+ import rateLimit from "@fastify/rate-limit";
+-import { RegisterSchema, LoginSchema, ChangePasswordSchema } from "./schema.js";
++import { RegisterSchema, LoginSchema, ChangePasswordSchema, TwoFactorChallengeSchema, VerifyTotpSetupSchema, DisableTwoFactorSchema } from "./schema.js";
+ import { AuthService, AuthError } from "./service.js";
++import { TwoFactorService } from "./two-factor-service.js";
++import { AuditLogService } from "../audit-log/service.js";
+ import { createSession, destroySession } from "../../plugins/auth.js";
+ import { env } from "../../config/env.js";
+ 
+ 
+ export async function authRoutes(app: FastifyInstance) {
+   const service = new AuthService(app.prisma);
++  const twoFactor = new TwoFactorService(app.prisma, app.redis, new AuditLogService(app.prisma, app.log));
+ 
+   // Register rate limiting plugin for this scope
+   await app.register(rateLimit, {
+     max: 1000,
+     timeWindow: "1 minute",
+     keyGenerator: (request) => request.ip,
+   });
+ 
+   // POST /api/auth/register
+   app.post("/register", {
+@@ -61,20 +64,30 @@ export async function authRoutes(app: FastifyInstance) {
+       rateLimit: {
+         max: 5,
+         timeWindow: "15 minutes",
+       },
+     },
+     handler: async (request, reply) => {
+       try {
+         const data = LoginSchema.parse(request.body);
+         const user = await service.login(data);
+ 
++        const full = await app.prisma.user.findUnique({ where: { id: user.id } });
++        if (full?.totpEnabled) {
++          const challengeToken = await twoFactor.storeChallenge(user.id);
++          reply.status(202).send({ requires2FA: true, challengeToken });
++          return;
++        }
++        if (env.REQUIRE_ADMIN_2FA && user.role === "ADMIN" && !full?.totpEnabled) {
++          reply.status(403).send({ error: "Admins must enable two-factor authentication", code: "ADMIN_2FA_REQUIRED", details: {} });
++          return;
++        }
+         await createSession(app, reply, user.id);
+ 
+         return { user };
+       } catch (err) {
+         if (err instanceof AuthError) {
+           reply.status(err.statusCode).send({
+             error: err.message,
+             code: err.code,
+             details: {},
+           });
+@@ -126,13 +139,70 @@ export async function authRoutes(app: FastifyInstance) {
+           return;
+         }
+         throw err;
+       }
+     },
+   });
+ 
+   // GET /api/auth/config — public, lets the dashboard know whether to show
+   // the self-registration form/link (F5.8).
+   app.get("/config", async () => {
+-    return { allowRegistration: env.ALLOW_REGISTRATION };
++    return { allowRegistration: env.ALLOW_REGISTRATION, requireAdmin2FA: env.REQUIRE_ADMIN_2FA };
++  });
++
++  app.post("/2fa/challenge", { config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } }, async (request, reply) => {
++    try {
++      const data = TwoFactorChallengeSchema.parse(request.body);
++      const userId = await twoFactor.consumeChallenge(data.challengeToken);
++      if (!userId) return reply.status(401).send({ error: "Invalid or expired code", code: "2FA_INVALID_CODE", details: {} });
++      if (!(await twoFactor.verifyLoginCode(userId, data.code))) return reply.status(401).send({ error: "Invalid or expired code", code: "2FA_INVALID_CODE", details: {} });
++      const user = await service.getCurrentUser(userId);
++      await createSession(app, reply, userId);
++      return { user };
++    } catch (err) {
++      if (err instanceof AuthError) {
++        reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
++        return;
++      }
++      throw err;
++    }
++  });
++
++  app.post("/2fa/setup", { preHandler: [app.requireAuth] }, async (request, reply) => {
++    try {
++      return twoFactor.createSetup(request.userId!);
++    } catch (err) {
++      if (err instanceof AuthError) {
++        reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
++        return;
++      }
++      throw err;
++    }
++  });
++
++  app.post("/2fa/verify-setup", { preHandler: [app.requireAuth], config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } }, async (request, reply) => {
++    try {
++      const data = VerifyTotpSetupSchema.parse(request.body);
++      return twoFactor.confirmSetup(request.userId!, data.code);
++    } catch (err) {
++      if (err instanceof AuthError) {
++        reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
++        return;
++      }
++      throw err;
++    }
++  });
++
++  app.post("/2fa/disable", { preHandler: [app.requireAuth] }, async (request, reply) => {
++    try {
++      const data = DisableTwoFactorSchema.parse(request.body);
++      await twoFactor.disable(request.userId!, data.password, data.codeOrRecovery);
++      return { message: "Two-factor authentication disabled" };
++    } catch (err) {
++      if (err instanceof AuthError) {
++        reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
++        return;
++      }
++      throw err;
++    }
+   });
+ }
+diff --git a/apps/api/src/modules/auth/schema.ts b/apps/api/src/modules/auth/schema.ts
+index 0715218..db641b0 100644
+--- a/apps/api/src/modules/auth/schema.ts
++++ b/apps/api/src/modules/auth/schema.ts
+@@ -1,2 +1,2 @@
+-export { RegisterSchema, LoginSchema, ChangePasswordSchema } from "@vexlyx/shared";
+-export type { RegisterInput, LoginInput, ChangePasswordInput } from "@vexlyx/shared";
++export { RegisterSchema, LoginSchema, ChangePasswordSchema, TwoFactorChallengeSchema, VerifyTotpSetupSchema, DisableTwoFactorSchema } from "@vexlyx/shared";
++export type { RegisterInput, LoginInput, ChangePasswordInput, TwoFactorChallengeInput, VerifyTotpSetupInput, DisableTwoFactorInput } from "@vexlyx/shared";
+diff --git a/apps/api/src/modules/auth/service.ts b/apps/api/src/modules/auth/service.ts
+index 75ac2bf..a792c79 100644
+--- a/apps/api/src/modules/auth/service.ts
++++ b/apps/api/src/modules/auth/service.ts
+@@ -7,20 +7,21 @@ const PUBLIC_USER_SELECT = {
+   email: true,
+   name: true,
+   role: true,
+   resellerId: true,
+   maxProjects: true,
+   maxDomains: true,
+   maxDatabases: true,
+   maxMailboxes: true,
+   maxSubAccounts: true,
+   permissions: true,
++  totpEnabled: true,
+   createdAt: true,
+ } as const;
+ 
+ export class AuthService {
+   constructor(private prisma: PrismaClient) {}
+ 
+   async register(data: RegisterInput) {
+     const existing = await this.prisma.user.findUnique({
+       where: { email: data.email },
+     });
+@@ -58,22 +59,21 @@ export class AuthService {
+     if (!user) {
+       throw new AuthError("Invalid email or password", "INVALID_CREDENTIALS", 401);
+     }
+ 
+     const validPassword = await argon2.verify(user.password, data.password);
+ 
+     if (!validPassword) {
+       throw new AuthError("Invalid email or password", "INVALID_CREDENTIALS", 401);
+     }
+ 
+-    const { password: _password, ...publicUser } = user;
+-    return publicUser;
++    return this.getCurrentUser(user.id);
+   }
+ 
+   // F5.11 — self-service password change. The current session stays valid;
+   // only the stored hash changes, so the old password simply stops working
+   // (including for anyone else's sessions, since login re-verifies on the
+   // fly rather than caching a password check).
+   async changePassword(userId: string, data: ChangePasswordInput) {
+     const user = await this.prisma.user.findUnique({ where: { id: userId } });
+ 
+     if (!user) {
+diff --git a/apps/api/src/modules/auth/two-factor-routes.test.ts b/apps/api/src/modules/auth/two-factor-routes.test.ts
+new file mode 100644
+index 0000000..ba8ded0
+--- /dev/null
++++ b/apps/api/src/modules/auth/two-factor-routes.test.ts
+@@ -0,0 +1,19 @@
++import { describe, it, expect, vi } from "vitest";
++import Fastify from "fastify";
++
++process.env.DATABASE_URL ??= "postgresql://user:pass@localhost:5432/vexlyx_test";
++process.env.SESSION_SECRET ??= "test-session-secret-at-least-32-characters-long";
++
++describe("POST /api/auth/2fa/challenge rate limit + shape", () => {
++  it("rejects unknown challenge with 401 2FA_INVALID_CODE", async () => {
++    const { authRoutes } = await import("./routes.js");
++    const app = Fastify();
++    app.decorate("prisma", { user: { findUnique: vi.fn() } } as unknown as import("fastify").FastifyInstance["prisma"]);
++    app.decorate("redis", { get: vi.fn(async () => null), set: vi.fn(), del: vi.fn() } as unknown as import("fastify").FastifyInstance["redis"]);
++    app.decorate("requireAuth", vi.fn() as unknown as import("fastify").FastifyInstance["requireAuth"]);
++    await app.register(authRoutes, { prefix: "/api/auth" });
++    const res = await app.inject({ method: "POST", url: "/api/auth/2fa/challenge", payload: { challengeToken: "x".repeat(64), code: "123456" } });
++    expect(res.statusCode).toBe(401);
++    expect(res.json().code).toBe("2FA_INVALID_CODE");
++  }, 30_000);
++});
+diff --git a/apps/api/src/modules/auth/two-factor-service.test.ts b/apps/api/src/modules/auth/two-factor-service.test.ts
+new file mode 100644
+index 0000000..9c22d4c
+--- /dev/null
++++ b/apps/api/src/modules/auth/two-factor-service.test.ts
+@@ -0,0 +1,160 @@
++import { describe, it, expect, vi } from "vitest";
++import { authenticator } from "otplib";
++import * as argon2 from "argon2";
++
++// config/env.ts validates process.env eagerly at import time, so these must
++// be set before two-factor-service.ts (which imports encryption.ts → env.ts)
++// is loaded — static imports would be hoisted ahead of any assignment here.
++process.env.DATABASE_URL ??= "postgresql://user:pass@localhost:5432/vexlyx_test";
++process.env.SESSION_SECRET ??= "test-session-secret-at-least-32-characters-long";
++
++const { TwoFactorService } = await import("./two-factor-service.js");
++const { encrypt } = await import("../../utils/encryption.js");
++
++function makeService() {
++  const store = new Map<string, string>();
++  const redis = {
++    set: vi.fn(async (k: string, v: string, _mode?: string, _ttl?: number) => {
++      store.set(k, v);
++      return "OK";
++    }),
++    get: vi.fn(async (k: string) => store.get(k) ?? null),
++    del: vi.fn(async (k: string) => {
++      store.delete(k);
++    }),
++  };
++  const prisma = {
++    user: { findUnique: vi.fn(), update: vi.fn() },
++    recoveryCode: { createMany: vi.fn(), findMany: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
++  };
++  const auditLog = { log: vi.fn(async () => undefined) };
++  const service = new TwoFactorService(prisma as never, redis as never, auditLog as never);
++  return { service, prisma, redis, auditLog };
++}
++
++describe("TwoFactorService.confirmSetup", () => {
++  it("enables 2fa on valid totp code and returns 10 recovery codes", { timeout: 30000 }, async () => {
++    const { service, prisma } = makeService();
++    const secret = authenticator.generateSecret();
++    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
++      id: "u1", email: "u1@example.com", password: "hashed", totpSecretEncrypted: encrypt(secret), totpEnabled: false,
++    });
++    const code = authenticator.generate(secret);
++    const result = await service.confirmSetup("u1", code);
++    expect(result.recoveryCodes).toHaveLength(10);
++    expect(prisma.user.update).toHaveBeenCalledWith(
++      expect.objectContaining({ where: { id: "u1" } }),
++    );
++    expect(prisma.recoveryCode.createMany).toHaveBeenCalledOnce();
++    const rows = (prisma.recoveryCode.createMany as ReturnType<typeof vi.fn>).mock.calls[0]?.[0].data as { userId: string; codeHash: string }[];
++    expect(rows).toHaveLength(10);
++    for (let i = 0; i < rows.length; i++) {
++      expect(rows[i]?.userId).toBe("u1");
++      expect(rows[i]?.codeHash).not.toBe(result.recoveryCodes[i]);
++    }
++    // Real-hash proof: at least one stored hash verifies against its plaintext.
++    await expect(argon2.verify(rows[0]?.codeHash as string, result.recoveryCodes[0] as string)).resolves.toBe(true);
++  });
++
++  it("clears stale unused recovery codes on reconfirm, keeping used rows", { timeout: 60000 }, async () => {
++    const { service, prisma } = makeService();
++    type Row = { id: string; userId: string; codeHash: string; usedAt: Date | null };
++    let rows: Row[] = [];
++    let nextId = 0;
++    (prisma.recoveryCode.createMany as ReturnType<typeof vi.fn>).mockImplementation(
++      async ({ data }: { data: { userId: string; codeHash: string }[] }) => {
++        for (const d of data) rows.push({ id: `rc${nextId++}`, userId: d.userId, codeHash: d.codeHash, usedAt: null });
++        return { count: data.length };
++      },
++    );
++    (prisma.recoveryCode.deleteMany as ReturnType<typeof vi.fn>).mockImplementation(
++      async ({ where }: { where: { userId: string; usedAt?: null } }) => {
++        const before = rows.length;
++        rows = rows.filter((r) => !(r.userId === where.userId && (where.usedAt === undefined || r.usedAt === null)));
++        return { count: before - rows.length };
++      },
++    );
++    (prisma.recoveryCode.findMany as ReturnType<typeof vi.fn>).mockImplementation(
++      async ({ where }: { where: { userId: string; usedAt?: null } }) => {
++        return rows.filter((r) => r.userId === where.userId && (where.usedAt === undefined || r.usedAt === null));
++      },
++    );
++    (prisma.recoveryCode.update as ReturnType<typeof vi.fn>).mockImplementation(
++      async ({ where, data }: { where: { id: string }; data: { usedAt: Date } }) => {
++        const row = rows.find((r) => r.id === where.id);
++        if (row) row.usedAt = data.usedAt;
++        return row;
++      },
++    );
++
++    const findUnique = prisma.user.findUnique as ReturnType<typeof vi.fn>;
++    const secret1 = authenticator.generateSecret();
++    findUnique.mockResolvedValue({
++      id: "u1", email: "u1@example.com", password: "hashed", totpSecretEncrypted: encrypt(secret1), totpEnabled: false,
++    });
++    const first = await service.confirmSetup("u1", authenticator.generate(secret1));
++    expect(first.recoveryCodes).toHaveLength(10);
++
++    // Mark one first-batch code as used (audit history) — must survive reconfirm.
++    findUnique.mockResolvedValue({
++      id: "u1", email: "u1@example.com", password: "hashed", totpSecretEncrypted: encrypt(secret1), totpEnabled: true,
++    });
++    expect(await service.verifyLoginCode("u1", first.recoveryCodes[0] as string)).toBe(true);
++
++    const secret2 = authenticator.generateSecret();
++    findUnique.mockResolvedValue({
++      id: "u1", email: "u1@example.com", password: "hashed", totpSecretEncrypted: encrypt(secret2), totpEnabled: false,
++    });
++    const second = await service.confirmSetup("u1", authenticator.generate(secret2));
++    expect(second.recoveryCodes).toHaveLength(10);
++
++    expect(prisma.recoveryCode.deleteMany).toHaveBeenCalledWith({ where: { userId: "u1", usedAt: null } });
++
++    // The consumed first-batch row survives reconfirm in observed state.
++    const usedRows = rows.filter((r) => r.usedAt !== null);
++    expect(usedRows).toHaveLength(1);
++    await expect(argon2.verify(usedRows[0]?.codeHash as string, first.recoveryCodes[0] as string)).resolves.toBe(true);
++
++    // Enabled user for verifyLoginCode (recovery-code path: hex codes skip the TOTP branch).
++    findUnique.mockResolvedValue({
++      id: "u1", email: "u1@example.com", password: "hashed", totpSecretEncrypted: encrypt(secret2), totpEnabled: true,
++    });
++    // Latest batch verifies…
++    expect(await service.verifyLoginCode("u1", second.recoveryCodes[0] as string)).toBe(true);
++    // …stale unused codes from the first batch do not (only the used one is gone via consumption).
++    expect(await service.verifyLoginCode("u1", first.recoveryCodes[1] as string)).toBe(false);
++  });
++});
++
++describe("TwoFactorService.verifyLoginCode", () => {
++  it("accepts a valid totp code", async () => {
++    const { service, prisma } = makeService();
++    const secret = authenticator.generateSecret();
++    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
++      id: "u1", totpSecretEncrypted: encrypt(secret), totpEnabled: true,
++    });
++    const ok = await service.verifyLoginCode("u1", authenticator.generate(secret));
++    expect(ok).toBe(true);
++  });
++
++  it("rejects a wrong code with no recovery codes", async () => {
++    const { service, prisma } = makeService();
++    const secret = authenticator.generateSecret();
++    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
++      id: "u1", totpSecretEncrypted: encrypt(secret), totpEnabled: true,
++    });
++    (prisma.recoveryCode.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
++    const ok = await service.verifyLoginCode("u1", "000000");
++    expect(ok).toBe(false);
++  });
++});
++
++describe("TwoFactorService challenge store", () => {
++  it("round-trips a challenge token single-use", async () => {
++    const { service } = makeService();
++    const token = await service.storeChallenge("u1");
++    expect(token).toHaveLength(64);
++    expect(await service.consumeChallenge(token)).toBe("u1");
++    expect(await service.consumeChallenge(token)).toBeNull();
++  });
++});
+diff --git a/apps/api/src/modules/auth/two-factor-service.ts b/apps/api/src/modules/auth/two-factor-service.ts
+new file mode 100644
+index 0000000..30ba334
+--- /dev/null
++++ b/apps/api/src/modules/auth/two-factor-service.ts
+@@ -0,0 +1,105 @@
++import crypto from "node:crypto";
++import { authenticator } from "otplib";
++import QRCode from "qrcode";
++import * as argon2 from "argon2";
++import type { PrismaClient } from "@prisma/client";
++import { encrypt, decrypt } from "../../utils/encryption.js";
++import type { AuditLogService } from "../audit-log/service.js";
++import { AuthError } from "./service.js";
++
++const CHALLENGE_PREFIX = "2fa-challenge:";
++const CHALLENGE_TTL_SECONDS = 300;
++const ISSUER = "Vexlyx";
++
++function newRecoveryCodes(): string[] {
++  return Array.from({ length: 10 }, () =>
++    crypto.randomBytes(5).toString("hex"),
++  );
++}
++
++export class TwoFactorService {
++  constructor(
++    private prisma: PrismaClient,
++    private redis: { set(k: string, v: string, mode: string, ttl: number): Promise<unknown>; get(k: string): Promise<string | null>; del(k: string): Promise<unknown> },
++    private auditLog: AuditLogService,
++  ) {}
++
++  async createSetup(userId: string) {
++    const user = await this.prisma.user.findUnique({ where: { id: userId } });
++    if (!user) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
++    const secret = authenticator.generateSecret();
++    await this.prisma.user.update({
++      where: { id: userId },
++      data: { totpSecretEncrypted: encrypt(secret), totpEnabled: false, totpVerifiedAt: null },
++    });
++    const otpauthUrl = authenticator.keyuri(user.email, ISSUER, secret);
++    const qrDataUrl = await QRCode.toDataURL(otpauthUrl);
++    await this.prisma.recoveryCode.deleteMany({ where: { userId } });
++    return { otpauthUrl, qrDataUrl, manualKey: secret };
++  }
++
++  async confirmSetup(userId: string, code: string) {
++    const user = await this.prisma.user.findUnique({ where: { id: userId } });
++    if (!user?.totpSecretEncrypted) throw new AuthError("Setup not started", "2FA_NOT_STARTED", 400);
++    const secret = decrypt(user.totpSecretEncrypted);
++    if (!authenticator.check(code, secret)) throw new AuthError("Invalid code", "2FA_INVALID_CODE", 401);
++    const codes = newRecoveryCodes();
++    const hashes = await Promise.all(codes.map((c) => argon2.hash(c)));
++    await this.prisma.recoveryCode.deleteMany({ where: { userId, usedAt: null } });
++    await this.prisma.recoveryCode.createMany({
++      data: codes.map((_c, i) => ({ userId, codeHash: hashes[i] as string })),
++    });
++    await this.prisma.user.update({ where: { id: userId }, data: { totpEnabled: true, totpVerifiedAt: new Date() } });
++    await this.auditLog.log(userId, "user.2fa_enabled", { type: "User", id: userId }, {});
++    return { recoveryCodes: codes };
++  }
++
++  async verifyLoginCode(userId: string, code: string): Promise<boolean> {
++    const user = await this.prisma.user.findUnique({ where: { id: userId } });
++    if (!user?.totpEnabled || !user.totpSecretEncrypted) return false;
++    if (/^\d{6}$/.test(code) && authenticator.check(code, decrypt(user.totpSecretEncrypted))) return true;
++    const rows = await this.prisma.recoveryCode.findMany({ where: { userId, usedAt: null } });
++    for (const row of rows) {
++      if (await argon2.verify(row.codeHash, code)) {
++        await this.prisma.recoveryCode.update({ where: { id: row.id }, data: { usedAt: new Date() } });
++        return true;
++      }
++    }
++    return false;
++  }
++
++  async disable(userId: string, password: string, codeOrRecovery: string) {
++    const user = await this.prisma.user.findUnique({ where: { id: userId } });
++    if (!user) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
++    if (!(await argon2.verify(user.password, password))) throw new AuthError("Invalid email or password", "INVALID_CREDENTIALS", 401);
++    if (!(await this.verifyLoginCode(userId, codeOrRecovery))) throw new AuthError("Invalid code", "2FA_INVALID_CODE", 401);
++    await this.prisma.user.update({ where: { id: userId }, data: { totpSecretEncrypted: null, totpEnabled: false, totpVerifiedAt: null } });
++    await this.prisma.recoveryCode.deleteMany({ where: { userId } });
++    await this.auditLog.log(userId, "user.2fa_disabled", { type: "User", id: userId }, {});
++  }
++
++  async adminReset(actorId: string, targetUserId: string) {
++    const target = await this.prisma.user.findUnique({ where: { id: targetUserId } });
++    if (!target) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
++    await this.prisma.user.update({ where: { id: targetUserId }, data: { totpSecretEncrypted: null, totpEnabled: false, totpVerifiedAt: null } });
++    await this.prisma.recoveryCode.deleteMany({ where: { userId: targetUserId } });
++    await this.auditLog.log(actorId, "user.2fa_reset", { type: "User", id: targetUserId }, {});
++  }
++
++  async storeChallenge(userId: string): Promise<string> {
++    const token = crypto.randomBytes(32).toString("hex");
++    await this.redis.set(CHALLENGE_PREFIX + token, JSON.stringify({ userId }), "EX", CHALLENGE_TTL_SECONDS);
++    return token;
++  }
++
++  async consumeChallenge(token: string): Promise<string | null> {
++    const raw = await this.redis.get(CHALLENGE_PREFIX + token);
++    if (!raw) return null;
++    await this.redis.del(CHALLENGE_PREFIX + token);
++    try {
++      return (JSON.parse(raw) as { userId: string }).userId;
++    } catch {
++      return null;
++    }
++  }
++}
+diff --git a/apps/api/src/modules/users/routes.ts b/apps/api/src/modules/users/routes.ts
+index a68e161..54b2296 100644
+--- a/apps/api/src/modules/users/routes.ts
++++ b/apps/api/src/modules/users/routes.ts
+@@ -1,29 +1,36 @@
+ import type { FastifyInstance, FastifyReply } from "fastify";
+ import { UserService, UserError } from "./service.js";
++import { AuthError } from "../auth/service.js";
+ import { AuditLogService } from "../audit-log/service.js";
++import { TwoFactorService } from "../auth/two-factor-service.js";
+ import {
+   CreateSubAccountSchema,
+   UpdateUserRoleSchema,
+   UpdateUserQuotasSchema,
+   UpdateUserPermissionsSchema,
+   UserIdParamSchema,
+ } from "./schema.js";
+ 
+ function handleUserError(err: unknown, reply: FastifyReply): void {
+   if (err instanceof UserError) {
+     reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
+     return;
+   }
+   throw err;
+ }
+ 
++async function twoFactorAdminReset(app: FastifyInstance, actorId: string, targetId: string) {
++  const svc = new TwoFactorService(app.prisma, app.redis, new AuditLogService(app.prisma, app.log));
++  await svc.adminReset(actorId, targetId);
++}
++
+ export async function userRoutes(app: FastifyInstance) {
+   const auditLog = new AuditLogService(app.prisma, app.log);
+   const service = new UserService(app.prisma, auditLog);
+ 
+   // GET /api/users/me/usage — any authenticated user, their own quota/usage
+   // breakdown (the "Your Plan" dashboard widget).
+   app.get("/me/usage", { preHandler: [app.requireAuth] }, async (request) => {
+     return service.getUsageSummary(request.userId!);
+   });
+ 
+@@ -57,20 +64,35 @@ export async function userRoutes(app: FastifyInstance) {
+   app.patch("/:id/role", { preHandler: [app.requireRole("ADMIN")] }, async (request, reply) => {
+     try {
+       const { id } = UserIdParamSchema.parse(request.params);
+       const body = UpdateUserRoleSchema.parse(request.body);
+       return await service.updateRole({ id: request.userId!, role: request.userRole! }, id, body);
+     } catch (err) {
+       handleUserError(err, reply);
+     }
+   });
+ 
++  // POST /api/users/:id/2fa/reset — ADMIN only (F5.17)
++  app.post("/:id/2fa/reset", { preHandler: [app.requireRole("ADMIN")] }, async (request, reply) => {
++    try {
++      const { id } = UserIdParamSchema.parse(request.params);
++      await twoFactorAdminReset(app, request.userId!, id);
++      return { message: "Two-factor authentication reset" };
++    } catch (err) {
++      if (err instanceof AuthError) {
++        reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
++        return;
++      }
++      handleUserError(err, reply);
++    }
++  });
++
+   // PATCH /api/users/:id/quotas — ADMIN (any user) or RESELLER (own sub-accounts only)
+   app.patch("/:id/quotas", { preHandler: [app.requireRole("ADMIN", "RESELLER")] }, async (request, reply) => {
+     try {
+       const { id } = UserIdParamSchema.parse(request.params);
+       const body = UpdateUserQuotasSchema.parse(request.body);
+       return await service.updateQuotas({ id: request.userId!, role: request.userRole! }, id, body);
+     } catch (err) {
+       handleUserError(err, reply);
+     }
+   });
+diff --git a/apps/dashboard/src/components/auth/LoginForm.tsx b/apps/dashboard/src/components/auth/LoginForm.tsx
+index cad9a9c..c7ae3f9 100644
+--- a/apps/dashboard/src/components/auth/LoginForm.tsx
++++ b/apps/dashboard/src/components/auth/LoginForm.tsx
+@@ -2,39 +2,47 @@
+ 
+ import { useState } from "react";
+ import Link from "next/link";
+ import { z } from "zod";
+ import { useAuth } from "@/hooks/useAuth";
+ import { useAuthConfig } from "@/hooks/useAuthConfig";
+ import { ApiRequestError } from "@/lib/api";
+ import { Button } from "@/components/ui/button";
+ import { Input } from "@/components/ui/input";
+ import { Label } from "@/components/ui/label";
++import { cn } from "@/lib/utils";
+ import {
+   Card,
+   CardContent,
+   CardHeader,
+ } from "@/components/ui/card";
+ import { toast } from "sonner";
+ 
+ const loginSchema = z.object({
+   email: z.string().email("Invalid email address"),
+   password: z.string().min(1, "Password is required"),
+ });
+ 
+-type FieldErrors = Partial<Record<"email" | "password" | "root", string>>;
++const codeSchema = z.object({
++  code: z
++    .string()
++    .regex(/^[0-9a-zA-Z-]{6,12}$/, "Enter the 6-digit code or a recovery code"),
++});
++
++type FieldErrors = Partial<Record<"email" | "password" | "code" | "root", string>>;
+ 
+ export function LoginForm() {
+-  const { login } = useAuth();
++  const { login, confirm2FA } = useAuth();
+   const { allowRegistration } = useAuthConfig();
+   const [isLoading, setIsLoading] = useState(false);
+   const [errors, setErrors] = useState<FieldErrors>({});
++  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+ 
+   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+     e.preventDefault();
+     setErrors({});
+ 
+     const formData = new FormData(e.currentTarget);
+     const email = formData.get("email") as string;
+     const password = formData.get("password") as string;
+ 
+     const result = loginSchema.safeParse({ email, password });
+@@ -45,100 +53,189 @@ export function LoginForm() {
+         const field = issue.path[0] as keyof FieldErrors;
+         fieldErrors[field] = issue.message;
+       }
+       setErrors(fieldErrors);
+       return;
+     }
+ 
+     setIsLoading(true);
+ 
+     try {
+-      await login(email, password);
++      const result = await login(email, password);
++      if (result.status === "needs2FA") {
++        setChallengeToken(result.challengeToken);
++        return;
++      }
+       toast.success("Welcome back!");
+     } catch (err) {
+       if (err instanceof ApiRequestError) {
+         setErrors({ root: err.message });
+         toast.error(err.message);
+       } else {
+         setErrors({ root: "An unexpected error occurred" });
+         toast.error("An unexpected error occurred");
+       }
+     } finally {
+       setIsLoading(false);
+     }
+   };
+ 
++  const handleCodeSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
++    e.preventDefault();
++    if (!challengeToken) return;
++    setErrors({});
++
++    const formData = new FormData(e.currentTarget);
++    const code = ((formData.get("code") as string) ?? "").trim();
++
++    const result = codeSchema.safeParse({ code });
++    if (!result.success) {
++      setErrors({ code: result.error.issues[0]?.message ?? "Invalid code" });
++      return;
++    }
++
++    setIsLoading(true);
++
++    try {
++      await confirm2FA(challengeToken, code);
++      toast.success("Welcome back!");
++    } catch (err) {
++      if (err instanceof ApiRequestError) {
++        setErrors({ root: err.message });
++        toast.error(err.message);
++      } else {
++        setErrors({ root: "An unexpected error occurred" });
++        toast.error("An unexpected error occurred");
++      }
++    } finally {
++      setIsLoading(false);
++    }
++  };
++
++  const handleBackToPassword = () => {
++    setChallengeToken(null);
++    setErrors({});
++  };
++
+   return (
+     <Card className="border-border">
+-      <CardHeader className="space-y-1 text-center">
++      <CardHeader className={cn("space-y-1 text-center")}>
+         <h1 className="text-xl font-semibold tracking-tight">
+-          Sign in to Vexlyx
++          {challengeToken ? "Two-factor verification" : "Sign in to Vexlyx"}
+         </h1>
+         <p className="text-sm text-muted-foreground">
+-          Enter your credentials to access the panel
++          {challengeToken
++            ? "Enter the code from your authenticator app"
++            : "Enter your credentials to access the panel"}
+         </p>
+       </CardHeader>
+       <CardContent>
+-        <form onSubmit={handleSubmit} className="space-y-4">
+-          {errors.root && (
+-            <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+-              {errors.root}
+-            </div>
+-          )}
+-
+-          <div className="space-y-2">
+-            <Label htmlFor="login-email">Email</Label>
+-            <Input
+-              id="login-email"
+-              name="email"
+-              type="email"
+-              placeholder="admin@example.com"
+-              autoComplete="email"
+-              autoFocus
+-              disabled={isLoading}
+-              aria-invalid={!!errors.email}
+-            />
+-            {errors.email && (
+-              <p className="text-xs text-destructive">{errors.email}</p>
++        {challengeToken ? (
++          <form onSubmit={handleCodeSubmit} className="space-y-4">
++            {errors.root && (
++              <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
++                {errors.root}
++              </div>
+             )}
+-          </div>
+-
+-          <div className="space-y-2">
+-            <Label htmlFor="login-password">Password</Label>
+-            <Input
+-              id="login-password"
+-              name="password"
+-              type="password"
+-              placeholder="••••••••"
+-              autoComplete="current-password"
++
++            <div className="space-y-2">
++              <Label htmlFor="2fa-code">Authenticator code</Label>
++              <Input
++                id="2fa-code"
++                name="code"
++                inputMode="numeric"
++                autoComplete="one-time-code"
++                placeholder="123456"
++                maxLength={12}
++                autoFocus
++                disabled={isLoading}
++                aria-invalid={!!errors.code}
++              />
++              {errors.code && (
++                <p className="text-xs text-destructive">{errors.code}</p>
++              )}
++              <p className="text-xs text-muted-foreground">
++                6-digit code from your authenticator app, or a recovery code.
++              </p>
++            </div>
++
++            <Button type="submit" className="w-full" disabled={isLoading}>
++              {isLoading ? "Verifying…" : "Verify"}
++            </Button>
++            <Button
++              type="button"
++              variant="ghost"
++              className="w-full"
+               disabled={isLoading}
+-              aria-invalid={!!errors.password}
+-            />
+-            {errors.password && (
+-              <p className="text-xs text-destructive">{errors.password}</p>
+-            )}
+-          </div>
+-
+-          <Button
+-            type="submit"
+-            className="w-full"
+-            disabled={isLoading}
+-          >
+-            {isLoading ? "Signing in…" : "Sign in"}
+-          </Button>
+-        </form>
+-
+-        {allowRegistration && (
+-          <div className="mt-4 text-center text-sm text-muted-foreground">
+-            Don&apos;t have an account?{" "}
+-            <Link
+-              href="/register"
+-              className="font-medium text-primary underline-offset-4 hover:underline"
++              onClick={handleBackToPassword}
+             >
+-              Create one
+-            </Link>
+-          </div>
++              Back to sign in
++            </Button>
++          </form>
++        ) : (
++          <>
++            <form onSubmit={handleSubmit} className="space-y-4">
++              {errors.root && (
++                <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
++                  {errors.root}
++                </div>
++              )}
++
++              <div className="space-y-2">
++                <Label htmlFor="login-email">Email</Label>
++                <Input
++                  id="login-email"
++                  name="email"
++                  type="email"
++                  placeholder="admin@example.com"
++                  autoComplete="email"
++                  autoFocus
++                  disabled={isLoading}
++                  aria-invalid={!!errors.email}
++                />
++                {errors.email && (
++                  <p className="text-xs text-destructive">{errors.email}</p>
++                )}
++              </div>
++
++              <div className="space-y-2">
++                <Label htmlFor="login-password">Password</Label>
++                <Input
++                  id="login-password"
++                  name="password"
++                  type="password"
++                  placeholder="••••••••"
++                  autoComplete="current-password"
++                  disabled={isLoading}
++                  aria-invalid={!!errors.password}
++                />
++                {errors.password && (
++                  <p className="text-xs text-destructive">{errors.password}</p>
++                )}
++              </div>
++
++              <Button
++                type="submit"
++                className="w-full"
++                disabled={isLoading}
++              >
++                {isLoading ? "Signing in…" : "Sign in"}
++              </Button>
++            </form>
++
++            {allowRegistration && (
++              <div className="mt-4 text-center text-sm text-muted-foreground">
++                Don&apos;t have an account?{" "}
++                <Link
++                  href="/register"
++                  className="font-medium text-primary underline-offset-4 hover:underline"
++                >
++                  Create one
++                </Link>
++              </div>
++            )}
++          </>
+         )}
+       </CardContent>
+     </Card>
+   );
+ }
+diff --git a/apps/dashboard/src/components/settings/SettingsPage.tsx b/apps/dashboard/src/components/settings/SettingsPage.tsx
+index 822058b..938be88 100644
+--- a/apps/dashboard/src/components/settings/SettingsPage.tsx
++++ b/apps/dashboard/src/components/settings/SettingsPage.tsx
+@@ -24,20 +24,21 @@ import { Badge } from "@/components/ui/badge";
+ import { Skeleton } from "@/components/ui/skeleton";
+ import { Separator } from "@/components/ui/separator";
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+ import { useAuth } from "@/hooks/useAuth";
+ import { useDnsInfo } from "@/hooks/useDnsInfo";
+ import { useSystemSettings } from "@/hooks/useSystemSettings";
+ import { ApiRequestError } from "@/lib/api";
+ import { cn } from "@/lib/utils";
+ import { formatTime } from "@/lib/datetime";
+ import { useRefreshAnimation, refreshIconClassName } from "@/hooks/useRefreshAnimation";
++import { TwoFactorCard } from "./TwoFactorCard";
+ import type { DnsRecordVerification } from "@vexlyx/shared";
+ 
+ // IANA timezone identifiers, sourced from the runtime's own tz database
+ // rather than a hardcoded list. Falls back to a short common set on very
+ // old browsers that lack Intl.supportedValuesOf.
+ function listTimezones(): string[] {
+   try {
+     return Intl.supportedValuesOf("timeZone");
+   } catch {
+     return ["UTC", "America/New_York", "America/Los_Angeles", "Europe/London", "Europe/Berlin", "Asia/Tokyo"];
+@@ -223,20 +224,23 @@ export function SettingsPage() {
+                 required
+               />
+             </div>
+             <Button type="submit" disabled={isChangingPassword}>
+               {isChangingPassword ? "Changing…" : "Change password"}
+             </Button>
+           </form>
+         </CardContent>
+       </Card>
+ 
++      {/* Two-Factor Authentication (F5.17) */}
++      <TwoFactorCard />
++
+       {/* Server Timezone (F5.13) — governs the backup cron's wall-clock time
+           and (where adopted) how timestamps are displayed across the dashboard. */}
+       <Card>
+         <CardHeader>
+           <CardTitle className="flex items-center gap-2 text-base">
+             <Globe className="h-4 w-4" />
+             Server Timezone
+           </CardTitle>
+           <CardDescription>
+             {isAdmin
+diff --git a/apps/dashboard/src/components/settings/TwoFactorCard.tsx b/apps/dashboard/src/components/settings/TwoFactorCard.tsx
+new file mode 100644
+index 0000000..77d707d
+--- /dev/null
++++ b/apps/dashboard/src/components/settings/TwoFactorCard.tsx
+@@ -0,0 +1,390 @@
++"use client";
++
++import { useState } from "react";
++import { toast } from "sonner";
++import { Check, Copy, Loader2, ShieldCheck } from "lucide-react";
++import { Button } from "@/components/ui/button";
++import { Input } from "@/components/ui/input";
++import { Label } from "@/components/ui/label";
++import {
++  Card,
++  CardContent,
++  CardHeader,
++  CardTitle,
++  CardDescription,
++} from "@/components/ui/card";
++import { Badge } from "@/components/ui/badge";
++import {
++  Dialog,
++  DialogContent,
++  DialogDescription,
++  DialogFooter,
++  DialogHeader,
++  DialogTitle,
++} from "@/components/ui/dialog";
++import { useAuth } from "@/hooks/useAuth";
++import { useTwoFactor } from "@/hooks/useTwoFactor";
++import { ApiRequestError } from "@/lib/api";
++import { cn } from "@/lib/utils";
++
++type DialogMode = "setup" | "codes" | "disable" | null;
++
++function errorMessage(err: unknown, fallback: string): string {
++  return err instanceof ApiRequestError ? err.message : fallback;
++}
++
++export function TwoFactorCard() {
++  const { user, refetch } = useAuth();
++  const { setup, confirm, disable } = useTwoFactor();
++
++  const [mode, setMode] = useState<DialogMode>(null);
++  const [isBusy, setIsBusy] = useState(false);
++  const [formError, setFormError] = useState<string | null>(null);
++
++  const [qrDataUrl, setQrDataUrl] = useState("");
++  const [manualKey, setManualKey] = useState("");
++  const [verifyCode, setVerifyCode] = useState("");
++
++  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
++  const [copiedCodes, setCopiedCodes] = useState(false);
++  const [copiedKey, setCopiedKey] = useState(false);
++
++  const [password, setPassword] = useState("");
++  const [codeOrRecovery, setCodeOrRecovery] = useState("");
++
++  const enabled = user?.totpEnabled ?? false;
++
++  const closeDialog = () => {
++    if (isBusy) return;
++    setMode(null);
++    setFormError(null);
++    setVerifyCode("");
++    setPassword("");
++    setCodeOrRecovery("");
++    setQrDataUrl("");
++    setManualKey("");
++    setCopiedKey(false);
++  };
++
++  const handleStartSetup = async () => {
++    setIsBusy(true);
++    setFormError(null);
++    try {
++      const data = await setup();
++      setQrDataUrl(data.qrDataUrl);
++      setManualKey(data.manualKey);
++      setVerifyCode("");
++      setMode("setup");
++    } catch (err) {
++      const message = errorMessage(err, "Failed to start 2FA setup");
++      setFormError(message);
++      toast.error(message);
++    } finally {
++      setIsBusy(false);
++    }
++  };
++
++  const handleConfirmSetup = async (e: React.FormEvent<HTMLFormElement>) => {
++    e.preventDefault();
++    if (!/^\d{6}$/.test(verifyCode)) {
++      setFormError("Code must be 6 digits");
++      return;
++    }
++    setIsBusy(true);
++    setFormError(null);
++    try {
++      const data = await confirm(verifyCode);
++      setRecoveryCodes(data.recoveryCodes);
++      setCopiedCodes(false);
++      setMode("codes");
++      await refetch();
++    } catch (err) {
++      const message = errorMessage(err, "Invalid code");
++      setFormError(message);
++      toast.error(message);
++    } finally {
++      setIsBusy(false);
++    }
++  };
++
++  const handleDisable = async (e: React.FormEvent<HTMLFormElement>) => {
++    e.preventDefault();
++    if (codeOrRecovery.trim().length < 6) {
++      setFormError("Enter your 6-digit code or a recovery code");
++      return;
++    }
++    setIsBusy(true);
++    setFormError(null);
++    try {
++      await disable(password, codeOrRecovery.trim());
++      toast.success("Two-factor authentication disabled");
++      setMode(null);
++      setPassword("");
++      setCodeOrRecovery("");
++      await refetch();
++    } catch (err) {
++      const message = errorMessage(err, "Failed to disable 2FA");
++      setFormError(message);
++      toast.error(message);
++    } finally {
++      setIsBusy(false);
++    }
++  };
++
++  const handleDismissCodes = () => {
++    setMode(null);
++    setRecoveryCodes([]);
++    setQrDataUrl("");
++    setManualKey("");
++    setVerifyCode("");
++  };
++
++  const copyText = async (text: string, onCopied: () => void) => {
++    try {
++      await navigator.clipboard.writeText(text);
++      onCopied();
++      toast.success("Copied to clipboard");
++    } catch {
++      toast.error("Failed to copy");
++    }
++  };
++
++  return (
++    <>
++      <Card>
++        <CardHeader className="flex flex-row items-center justify-between">
++          <div>
++            <CardTitle className="flex items-center gap-2 text-base">
++              <ShieldCheck className="h-4 w-4" />
++              Two-Factor Authentication
++            </CardTitle>
++            <CardDescription>
++              Add an authenticator-app code on top of your password at sign-in.
++            </CardDescription>
++          </div>
++          <Badge
++            variant="outline"
++            className={cn(
++              enabled
++                ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
++                : "border-slate-500/20 bg-slate-500/10 text-muted-foreground",
++            )}
++          >
++            {enabled ? "Enabled" : "Not enabled"}
++          </Badge>
++        </CardHeader>
++        <CardContent>
++          {enabled ? (
++            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
++              <p className="text-sm text-muted-foreground">
++                Your account requires an authenticator code or recovery code at sign-in.
++              </p>
++              <Button
++                variant="outline"
++                size="sm"
++                onClick={() => {
++                  setFormError(null);
++                  setMode("disable");
++                }}
++              >
++                Disable 2FA
++              </Button>
++            </div>
++          ) : (
++            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
++              <p className="text-sm text-muted-foreground">
++                Protect your account with a time-based one-time code from any authenticator app.
++              </p>
++              <Button size="sm" onClick={() => void handleStartSetup()} disabled={isBusy}>
++                {isBusy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
++                Set up 2FA
++              </Button>
++            </div>
++          )}
++          {formError && !mode && (
++            <p className="mt-3 text-sm text-destructive">{formError}</p>
++          )}
++        </CardContent>
++      </Card>
++
++      {/* Setup: QR + manual key + 6-digit verify */}
++      <Dialog open={mode === "setup"} onOpenChange={(open) => !open && closeDialog()}>
++        <DialogContent className="sm:max-w-md">
++          <DialogHeader>
++            <DialogTitle>Set up authenticator app</DialogTitle>
++            <DialogDescription>
++              Scan the code with your authenticator app, then enter the 6-digit code to
++              confirm.
++            </DialogDescription>
++          </DialogHeader>
++          <div className="space-y-4">
++            {qrDataUrl && (
++              <div className="flex justify-center rounded-lg border border-border bg-white p-4">
++                <img src={qrDataUrl} alt="2FA setup QR code" className="h-48 w-48" />
++              </div>
++            )}
++            {manualKey && (
++              <div className="space-y-1.5">
++                <Label>Manual key</Label>
++                <div className="flex items-center gap-2">
++                  <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs">
++                    {manualKey}
++                  </code>
++                  <Button
++                    variant="ghost"
++                    size="sm"
++                    onClick={() => void copyText(manualKey, () => setCopiedKey(true))}
++                  >
++                    {copiedKey ? (
++                      <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
++                    ) : (
++                      <Copy className="h-3.5 w-3.5" />
++                    )}
++                  </Button>
++                </div>
++              </div>
++            )}
++            <form onSubmit={(e) => void handleConfirmSetup(e)} className="space-y-3">
++              {formError && (
++                <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
++                  {formError}
++                </div>
++              )}
++              <div className="space-y-1.5">
++                <Label htmlFor="2fa-verify-code">6-digit code</Label>
++                <Input
++                  id="2fa-verify-code"
++                  inputMode="numeric"
++                  autoComplete="one-time-code"
++                  maxLength={6}
++                  autoFocus
++                  value={verifyCode}
++                  onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, ""))}
++                  disabled={isBusy}
++                  required
++                />
++              </div>
++              <DialogFooter>
++                <Button
++                  type="button"
++                  variant="outline"
++                  size="sm"
++                  onClick={closeDialog}
++                  disabled={isBusy}
++                >
++                  Cancel
++                </Button>
++                <Button type="submit" size="sm" disabled={isBusy}>
++                  {isBusy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
++                  Verify &amp; enable
++                </Button>
++              </DialogFooter>
++            </form>
++          </div>
++        </DialogContent>
++      </Dialog>
++
++      {/* Recovery codes, shown exactly once */}
++      <Dialog open={mode === "codes"} onOpenChange={() => {}}>
++        <DialogContent className="sm:max-w-md">
++          <DialogHeader>
++            <DialogTitle>Save your recovery codes</DialogTitle>
++            <DialogDescription>
++              Each code works once if you lose your authenticator. They will never be
++              shown again.
++            </DialogDescription>
++          </DialogHeader>
++          <div className="space-y-3">
++            <div className="grid grid-cols-1 gap-1.5 rounded-lg border border-border bg-muted/40 p-3 font-mono text-sm sm:grid-cols-2">
++              {recoveryCodes.map((code) => (
++                <span key={code} className="px-1">
++                  {code}
++                </span>
++              ))}
++            </div>
++            <div className="flex gap-2">
++              <Button
++                variant="outline"
++                size="sm"
++                onClick={() =>
++                  void copyText(recoveryCodes.join("\n"), () => setCopiedCodes(true))
++                }
++              >
++                {copiedCodes ? (
++                  <Check className="mr-1.5 h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
++                ) : (
++                  <Copy className="mr-1.5 h-3.5 w-3.5" />
++                )}
++                Copy all
++              </Button>
++            </div>
++          </div>
++          <DialogFooter>
++            <Button size="sm" onClick={handleDismissCodes}>
++              I saved these
++            </Button>
++          </DialogFooter>
++        </DialogContent>
++      </Dialog>
++
++      {/* Disable: password + code confirm */}
++      <Dialog open={mode === "disable"} onOpenChange={(open) => !open && closeDialog()}>
++        <DialogContent className="sm:max-w-md">
++          <DialogHeader>
++            <DialogTitle>Disable two-factor authentication?</DialogTitle>
++            <DialogDescription>
++              Your account will be protected by password alone. Confirm with your
++              password and a current authenticator or recovery code.
++            </DialogDescription>
++          </DialogHeader>
++          <form onSubmit={(e) => void handleDisable(e)} className="space-y-3">
++            {formError && (
++              <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
++                {formError}
++              </div>
++            )}
++            <div className="space-y-1.5">
++              <Label htmlFor="2fa-disable-password">Password</Label>
++              <Input
++                id="2fa-disable-password"
++                type="password"
++                autoComplete="current-password"
++                value={password}
++                onChange={(e) => setPassword(e.target.value)}
++                disabled={isBusy}
++                required
++              />
++            </div>
++            <div className="space-y-1.5">
++              <Label htmlFor="2fa-disable-code">Authenticator or recovery code</Label>
++              <Input
++                id="2fa-disable-code"
++                autoComplete="one-time-code"
++                maxLength={12}
++                value={codeOrRecovery}
++                onChange={(e) => setCodeOrRecovery(e.target.value)}
++                disabled={isBusy}
++                required
++              />
++            </div>
++            <DialogFooter>
++              <Button
++                type="button"
++                variant="outline"
++                size="sm"
++                onClick={closeDialog}
++                disabled={isBusy}
++              >
++                Cancel
++              </Button>
++              <Button type="submit" variant="destructive" size="sm" disabled={isBusy}>
++                {isBusy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
++                Disable 2FA
++              </Button>
++            </DialogFooter>
++          </form>
++        </DialogContent>
++      </Dialog>
++    </>
++  );
++}
+diff --git a/apps/dashboard/src/components/users/EditUserDialog.tsx b/apps/dashboard/src/components/users/EditUserDialog.tsx
+index d66c5d6..2f44efc 100644
+--- a/apps/dashboard/src/components/users/EditUserDialog.tsx
++++ b/apps/dashboard/src/components/users/EditUserDialog.tsx
+@@ -1,42 +1,50 @@
+ "use client";
+ 
+ import { useEffect, useState } from "react";
+-import { Loader2 } from "lucide-react";
++import { toast } from "sonner";
++import { Loader2, ShieldAlert } from "lucide-react";
+ import { Button } from "@/components/ui/button";
+ import {
+   Dialog,
+   DialogContent,
+   DialogDescription,
+   DialogFooter,
+   DialogHeader,
+   DialogTitle,
+ } from "@/components/ui/dialog";
+ import { Input } from "@/components/ui/input";
+ import { Label } from "@/components/ui/label";
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+ import { Switch } from "@/components/ui/switch";
++import { ApiRequestError } from "@/lib/api";
+ import type { Role, Permission, UserResponse, UpdateUserQuotasInput } from "@vexlyx/shared";
+ 
+ interface EditUserDialogProps {
+   user: UserResponse | null;
+   isSaving: boolean;
+   /**
+    * Only an ADMIN may change roles or grant permissions — a RESELLER
+    * editing their own sub-account never sees these fields, and neither does
+    * an ADMIN editing their own account (see `isSelf`).
+    */
+   canEditRole: boolean;
+   /** True when the signed-in user is editing their own account. An ADMIN can never change their own role — it could lock them (and everyone) out — so the role/permissions fields are hidden and this drives the explanatory copy instead. */
+   isSelf: boolean;
++  /**
++   * ADMIN-only 2FA reset (F5.17). Never shown for self — an ADMIN who lost
++   * their own authenticator must be reset by another ADMIN directly.
++   */
++  canReset2FA: boolean;
+   onOpenChange: (open: boolean) => void;
+   onSave: (id: string, data: { role?: Role; quotas: UpdateUserQuotasInput; permissions?: Permission[] }) => Promise<void>;
++  onReset2FA: (id: string) => Promise<void>;
+ }
+ 
+ type QuotaField = "maxProjects" | "maxDomains" | "maxDatabases" | "maxMailboxes" | "maxSubAccounts";
+ 
+ const QUOTA_FIELDS: { key: QuotaField; label: string }[] = [
+   { key: "maxProjects", label: "Max projects" },
+   { key: "maxDomains", label: "Max domains" },
+   { key: "maxDatabases", label: "Max databases" },
+   { key: "maxMailboxes", label: "Max mailboxes" },
+   { key: "maxSubAccounts", label: "Max sub-accounts" },
+@@ -50,31 +58,33 @@ const PERMISSION_FIELDS: { key: Permission; label: string; description: string }
+ ];
+ 
+ function toFormValue(v: number | null): string {
+   return v === null ? "" : String(v);
+ }
+ 
+ function fromFormValue(v: string): number | null {
+   return v.trim() === "" ? null : Number(v);
+ }
+ 
+-export function EditUserDialog({ user, isSaving, canEditRole, isSelf, onOpenChange, onSave }: EditUserDialogProps) {
++export function EditUserDialog({ user, isSaving, canEditRole, isSelf, canReset2FA, onOpenChange, onSave, onReset2FA }: EditUserDialogProps) {
+   const [role, setRole] = useState<Role>("USER");
+   const [quotas, setQuotas] = useState<Record<QuotaField, string>>({
+     maxProjects: "",
+     maxDomains: "",
+     maxDatabases: "",
+     maxMailboxes: "",
+     maxSubAccounts: "",
+   });
+   const [permissions, setPermissions] = useState<Permission[]>([]);
+   const [oversellingEnabled, setOversellingEnabled] = useState(false);
++  const [showResetConfirm, setShowResetConfirm] = useState(false);
++  const [isResetting, setIsResetting] = useState(false);
+ 
+   useEffect(() => {
+     if (!user) return;
+     setRole(user.role);
+     setQuotas({
+       maxProjects: toFormValue(user.maxProjects),
+       maxDomains: toFormValue(user.maxDomains),
+       maxDatabases: toFormValue(user.maxDatabases),
+       maxMailboxes: toFormValue(user.maxMailboxes),
+       maxSubAccounts: toFormValue(user.maxSubAccounts),
+@@ -100,21 +110,36 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, onOpenChan
+         maxDomains: fromFormValue(quotas.maxDomains),
+         maxDatabases: fromFormValue(quotas.maxDatabases),
+         maxMailboxes: fromFormValue(quotas.maxMailboxes),
+         maxSubAccounts: fromFormValue(quotas.maxSubAccounts),
+         oversellingEnabled: canEditOverselling ? oversellingEnabled : undefined,
+       },
+       permissions: canEditRole ? permissions : undefined,
+     });
+   };
+ 
++  const handleReset2FA = async () => {
++    if (!user) return;
++    setIsResetting(true);
++    try {
++      await onReset2FA(user.id);
++      toast.success("Two-factor authentication reset");
++      setShowResetConfirm(false);
++    } catch (err) {
++      toast.error(err instanceof ApiRequestError ? err.message : "Failed to reset 2FA");
++    } finally {
++      setIsResetting(false);
++    }
++  };
++
+   return (
++    <>
+     <Dialog open={!!user} onOpenChange={onOpenChange}>
+       <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-lg">
+         <DialogHeader>
+           <DialogTitle>Edit user</DialogTitle>
+           <DialogDescription>
+             {isSelf
+               ? "You can't change your own role or permissions — only quotas. Leave a quota blank for unlimited."
+               : canEditRole
+                 ? `Change ${user?.name}'s role and resource quotas. Leave a quota blank for unlimited.`
+                 : `Change ${user?.name}'s resource quotas. Leave a quota blank for unlimited.`}
+@@ -187,25 +212,74 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, onOpenChan
+                   id={`quota-${key}`}
+                   type="number"
+                   min={0}
+                   value={quotas[key]}
+                   onChange={(e) => setQuotas((q) => ({ ...q, [key]: e.target.value }))}
+                   placeholder="Unlimited"
+                 />
+               </div>
+             ))}
+           </div>
++
++          {canReset2FA && (
++            <div className="space-y-1.5">
++              <Label>Two-factor authentication</Label>
++              <div className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
++                <div className="min-w-0">
++                  <p className="text-sm font-medium">Reset 2FA</p>
++                  <p className="text-xs text-muted-foreground">
++                    Clears this account&apos;s authenticator and recovery codes. Use when
++                    they are locked out.
++                  </p>
++                </div>
++                <Button
++                  variant="outline"
++                  size="sm"
++                  className="shrink-0"
++                  onClick={() => setShowResetConfirm(true)}
++                  disabled={isResetting}
++                >
++                  Reset 2FA
++                </Button>
++              </div>
++            </div>
++          )}
+         </div>
+ 
+         <DialogFooter>
+           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={isSaving}>
+             Cancel
+           </Button>
+           <Button size="sm" onClick={handleSave} disabled={isSaving}>
+             {isSaving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+             Save changes
+           </Button>
+         </DialogFooter>
+       </DialogContent>
+     </Dialog>
++
++    <Dialog open={showResetConfirm} onOpenChange={(open) => !isResetting && setShowResetConfirm(open)}>
++      <DialogContent>
++        <DialogHeader>
++          <DialogTitle className="flex items-center gap-2">
++            <ShieldAlert className="h-4 w-4 text-destructive" />
++            Reset 2FA for {user?.name}?
++          </DialogTitle>
++          <DialogDescription>
++            This will permanently clear their authenticator secret and all recovery
++            codes. They will sign in with password alone until they set 2FA up again.
++          </DialogDescription>
++        </DialogHeader>
++        <DialogFooter>
++          <Button variant="outline" size="sm" onClick={() => setShowResetConfirm(false)} disabled={isResetting}>
++            Cancel
++          </Button>
++          <Button variant="destructive" size="sm" onClick={() => void handleReset2FA()} disabled={isResetting}>
++            {isResetting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
++            Reset 2FA
++          </Button>
++        </DialogFooter>
++      </DialogContent>
++    </Dialog>
++    </>
+   );
+ }
+diff --git a/apps/dashboard/src/components/users/UsersPage.tsx b/apps/dashboard/src/components/users/UsersPage.tsx
+index 4f9547d..d9d2104 100644
+--- a/apps/dashboard/src/components/users/UsersPage.tsx
++++ b/apps/dashboard/src/components/users/UsersPage.tsx
+@@ -1,16 +1,17 @@
+ "use client";
+ 
+ import { useState } from "react";
+ import { ShieldAlert } from "lucide-react";
+ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+ import { useAuth } from "@/hooks/useAuth";
++import { useTwoFactor } from "@/hooks/useTwoFactor";
+ import { useUsers } from "@/hooks/useUsers";
+ import { useUsage } from "@/hooks/useUsage";
+ import { QuotaBadge, isQuotaAtLimit } from "@/components/quota/QuotaBadge";
+ import { UserList } from "./UserList";
+ import { CreateSubAccountDialog } from "./CreateSubAccountDialog";
+ import { EditUserDialog } from "./EditUserDialog";
+ import { DeleteUserConfirmDialog } from "./DeleteUserConfirmDialog";
+ import type { UserResponse } from "@vexlyx/shared";
+ 
+ /**
+@@ -25,20 +26,21 @@ export function UsersPage() {
+     isLoading,
+     updateRole,
+     updateQuotas,
+     isSavingQuotas,
+     updatePermissions,
+     deleteUser,
+     createSubAccount,
+     isCreating,
+   } = useUsers();
+   const { usage, isLoading: isUsageLoading } = useUsage();
++  const { adminReset } = useTwoFactor();
+   const [editTarget, setEditTarget] = useState<UserResponse | null>(null);
+   const [deleteTarget, setDeleteTarget] = useState<UserResponse | null>(null);
+ 
+   if (isAuthLoading) return null;
+ 
+   if (user?.role !== "ADMIN" && user?.role !== "RESELLER") {
+     return (
+       <Card>
+         <CardContent className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+           <ShieldAlert className="h-8 w-8 text-muted-foreground" />
+@@ -116,28 +118,30 @@ export function UsersPage() {
+             onEdit={setEditTarget}
+             onDelete={setDeleteTarget}
+           />
+         </CardContent>
+       </Card>
+ 
+       <EditUserDialog
+         user={editTarget}
+         canEditRole={isAdmin && editTarget?.id !== user.id}
+         isSelf={editTarget?.id === user.id}
++        canReset2FA={isAdmin && editTarget?.id !== user.id}
+         onOpenChange={(open) => !open && setEditTarget(null)}
+         isSaving={isSavingQuotas}
+         onSave={async (id, data) => {
+           if (data.role) await updateRole(id, { role: data.role });
+           await updateQuotas(id, data.quotas);
+           if (data.permissions) await updatePermissions(id, { permissions: data.permissions });
+           setEditTarget(null);
+         }}
++        onReset2FA={(id) => adminReset(id).then(() => undefined)}
+       />
+ 
+       <DeleteUserConfirmDialog
+         user={deleteTarget}
+         onOpenChange={(open) => !open && setDeleteTarget(null)}
+         onConfirm={() => {
+           if (deleteTarget) deleteUser(deleteTarget.id);
+         }}
+       />
+     </div>
+diff --git a/apps/dashboard/src/hooks/useAuth.ts b/apps/dashboard/src/hooks/useAuth.ts
+index cc390cd..71c01d4 100644
+--- a/apps/dashboard/src/hooks/useAuth.ts
++++ b/apps/dashboard/src/hooks/useAuth.ts
+@@ -5,20 +5,24 @@ import { useRouter } from "next/navigation";
+ import { useQueryClient } from "@tanstack/react-query";
+ import { fetchAPI } from "@/lib/api";
+ import type { User } from "@vexlyx/shared";
+ 
+ interface AuthState {
+   user: User | null;
+   isLoading: boolean;
+   isAuthenticated: boolean;
+ }
+ 
++export type LoginResult =
++  | { status: "done"; user: User }
++  | { status: "needs2FA"; challengeToken: string };
++
+ export function useAuth() {
+   const router = useRouter();
+   const queryClient = useQueryClient();
+   const [state, setState] = useState<AuthState>({
+     user: null,
+     isLoading: true,
+     isAuthenticated: false,
+   });
+ 
+   const fetchUser = useCallback(async () => {
+@@ -27,33 +31,51 @@ export function useAuth() {
+       setState({ user: data.user, isLoading: false, isAuthenticated: true });
+     } catch {
+       setState({ user: null, isLoading: false, isAuthenticated: false });
+     }
+   }, []);
+ 
+   useEffect(() => {
+     void fetchUser();
+   }, [fetchUser]);
+ 
+-  const login = async (email: string, password: string) => {
+-    const data = await fetchAPI<{ user: User }>("/api/auth/login", {
++  const login = async (email: string, password: string): Promise<LoginResult> => {
++    const data = await fetchAPI<
++      { user: User } | { requires2FA: true; challengeToken: string }
++    >("/api/auth/login", {
+       method: "POST",
+       body: JSON.stringify({ email, password }),
+     });
++    // fetchAPI only throws on non-2xx; the 202 challenge response resolves
++    // here normally, so narrow on the discriminating field.
++    if ("requires2FA" in data) {
++      return { status: "needs2FA", challengeToken: data.challengeToken };
++    }
+     // Drop any cached query results from a previous session in this tab —
+     // the QueryClient persists across client-side navigation (no hard
+     // reload on login/logout), so without this a just-logged-in user could
+     // briefly see the previous account's cached data (e.g. its full user
+     // list) until each query's staleTime naturally expires.
+     queryClient.clear();
+     setState({ user: data.user, isLoading: false, isAuthenticated: true });
+     router.push("/dashboard");
++    return { status: "done", user: data.user };
++  };
++
++  const confirm2FA = async (challengeToken: string, code: string) => {
++    const data = await fetchAPI<{ user: User }>("/api/auth/2fa/challenge", {
++      method: "POST",
++      body: JSON.stringify({ challengeToken, code }),
++    });
++    queryClient.clear();
++    setState({ user: data.user, isLoading: false, isAuthenticated: true });
++    router.push("/dashboard");
+     return data.user;
+   };
+ 
+   const register = async (
+     name: string,
+     email: string,
+     password: string,
+     confirmPassword: string,
+   ) => {
+     const data = await fetchAPI<{ user: User }>("/api/auth/register", {
+@@ -84,16 +106,17 @@ export function useAuth() {
+       // Even if the API call fails, clear local state
+     }
+     queryClient.clear();
+     setState({ user: null, isLoading: false, isAuthenticated: false });
+     router.push("/login");
+   };
+ 
+   return {
+     ...state,
+     login,
++    confirm2FA,
+     register,
+     changePassword,
+     logout,
+     refetch: fetchUser,
+   };
+ }
+diff --git a/apps/dashboard/src/hooks/useTwoFactor.ts b/apps/dashboard/src/hooks/useTwoFactor.ts
+new file mode 100644
+index 0000000..2e217ec
+--- /dev/null
++++ b/apps/dashboard/src/hooks/useTwoFactor.ts
+@@ -0,0 +1,26 @@
++"use client";
++
++import { fetchAPI } from "@/lib/api";
++
++export function useTwoFactor() {
++  const setup = () =>
++    fetchAPI<{ otpauthUrl: string; qrDataUrl: string; manualKey: string }>(
++      "/api/auth/2fa/setup",
++      { method: "POST" },
++    );
++  const confirm = (code: string) =>
++    fetchAPI<{ recoveryCodes: string[] }>("/api/auth/2fa/verify-setup", {
++      method: "POST",
++      body: JSON.stringify({ code }),
++    });
++  const disable = (password: string, codeOrRecovery: string) =>
++    fetchAPI<{ message: string }>("/api/auth/2fa/disable", {
++      method: "POST",
++      body: JSON.stringify({ password, codeOrRecovery }),
++    });
++  const adminReset = (userId: string) =>
++    fetchAPI<{ message: string }>(`/api/users/${userId}/2fa/reset`, {
++      method: "POST",
++    });
++  return { setup, confirm, disable, adminReset };
++}
+diff --git a/docs/dev/two-factor-auth.md b/docs/dev/two-factor-auth.md
+new file mode 100644
+index 0000000..ad6b5de
+--- /dev/null
++++ b/docs/dev/two-factor-auth.md
+@@ -0,0 +1,93 @@
++# Two-Factor Authentication (F5.17)
++
++TOTP second factor (authenticator-app compatible) layered on the existing
++Argon2id + Redis session auth. Sessions are untouched — 2FA adds a
++challenge step *before* session creation.
++
++## How it works
++
++1. `POST /api/auth/login` verifies email + password as before.
++2. If the user has `totpEnabled`, the API does **not** create a session.
++   Instead it stores a challenge (`2fa-challenge:<token>` → `{ userId }` in
++   Redis, 32 random bytes, single-use, 5-min TTL) and returns
++   `202 { requires2FA: true, challengeToken }`.
++3. The frontend shows a code form. `POST /api/auth/2fa/challenge` with
++   `{ challengeToken, code }` verifies the code (TOTP first, then unused
++   recovery code, which is marked used) and only then calls
++   `createSession()`. Failures return `401 2FA_INVALID_CODE` with no cookie.
++4. Users without 2FA log in exactly as before (password → session).
++
++Setup is a separate authenticated flow: `POST /api/auth/2fa/setup`
++generates a secret (encrypted with AES-256-GCM via
++`apps/api/src/utils/encryption.ts`, stored with `totpEnabled: false`),
++returns `{ otpauthUrl, qrDataUrl, manualKey }`. `POST /api/auth/2fa/verify-setup`
++with a valid 6-digit code flips `totpEnabled: true` and returns the
++recovery codes once. Disable (`POST /api/auth/2fa/disable`) requires
++`{ password, codeOrRecovery }` and wipes secret + codes.
++
++Core logic lives in `apps/api/src/modules/auth/two-factor-service.ts`
++(`TwoFactorService`); routes stay thin per CLAUDE.md §6. Challenge and
++verify-setup endpoints are rate-limited at the login tier (5 per 15 min
++per IP). Secrets, TOTP codes, and recovery codes are never logged;
++`PUBLIC_USER_SELECT` is unchanged so `/me` leaks no secret material.
++
++## Env: `REQUIRE_ADMIN_2FA`
++
++```bash
++# Require TOTP 2FA for the ADMIN role at login. "false" = optional for everyone.
++REQUIRE_ADMIN_2FA=false
++```
++
++Validated in `apps/api/src/config/env.ts` (boolean after transform) and
++surfaced to the frontend via `GET /api/auth/config` as `requireAdmin2FA`.
++When `true`, an ADMIN without 2FA gets `403 ADMIN_2FA_REQUIRED` at login
++instead of a session — non-admin users are unaffected.
++
++## Recovery model
++
++- 10 codes generated at setup, shown **once** in the Settings UI (copy
++  button, "I saved these" dismiss). Only argon2 hashes persist
++  (`recovery_codes` table, `onDelete: Cascade`); plaintext never touches
++  the DB.
++- Each code is single-use: `verifyLoginCode()` marks the row `usedAt` on
++  success, so reuse returns `401`.
++- Lost authenticator + lost codes = ADMIN reset (below). There is no
++  email-based recovery (out of scope until F5.23 transactional email).
++
++## Admin reset + audit
++
++`POST /api/users/:id/2fa/reset` (ADMIN only, `requireRole("ADMIN")`)
++clears the target's secret + codes and forces `totpEnabled: false`.
++Audit-logged with actor attribution:
++
++| Event | Action string |
++|---|---|
++| User enables 2FA | `user.2fa_enabled` |
++| User disables 2FA | `user.2fa_disabled` |
++| ADMIN resets a user's 2FA | `user.2fa_reset` |
++
++No secret material lands in audit metadata. Resetting your own 2FA via
++this endpoint is allowed but logged like any other reset.
++
++## Test checklist (from spec §8)
++
++Per CLAUDE.md: happy + error + auth paths.
++
++1. Enable → login requires code; valid TOTP → session; `/me` works.
++2. Wrong/expired code → `401`, no cookie; reused recovery code → `401`.
++3. No-2FA user → login unchanged (password → session).
++4. `REQUIRE_ADMIN_2FA=true` → ADMIN without 2FA blocked with
++   `ADMIN_2FA_REQUIRED`.
++5. ADMIN reset → target's 2FA cleared, audit entry attributed to the admin.
++6. Manual: two authenticator apps (Google Authenticator + 1Password) +
++   QR and manual-key setup paths.
++
++Unit/integration coverage: `two-factor-service.test.ts` (service +
++challenge store) and `two-factor-routes.test.ts` (challenge shape),
++run via `pnpm --filter @vexlyx/api test`.
++
++## Note for future workers: shared package builds
++
++`apps/api` imports 2FA Zod schemas from `@vexlyx/shared`. If typecheck
++complains about unbuilt shared `dist`, run
++`pnpm --filter @vexlyx/shared build` first, then re-run typecheck.
+diff --git a/docs/superpowers/plans/2026-09-25-2fa.md b/docs/superpowers/plans/2026-09-25-2fa.md
+new file mode 100644
+index 0000000..c5002b4
+--- /dev/null
++++ b/docs/superpowers/plans/2026-09-25-2fa.md
+@@ -0,0 +1,713 @@
++# F5.17 Two-Factor Auth (TOTP) Implementation Plan
++
++> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
++
++**Goal:** Add optional TOTP 2FA with backup codes and ADMIN reset on top of existing password+Redis sessions.
++
++**Architecture:** New `TwoFactorService` inside the existing `auth` module; `POST /login` returns a short-lived Redis challenge instead of a session when 2FA is on; TOTP via `otplib`, QR via `qrcode`, secrets encrypted with existing AES-256-GCM util.
++
++**Tech Stack:** Fastify 5, Prisma 6, Redis (ioredis), `otplib@12`, `qrcode`, argon2, Zod 4, Vitest 5, Next.js 15 + shadcn/ui.
++
++**Spec:** `docs/superpowers/specs/2026-09-25-2fa-design.md`
++
++## Global Constraints
++
++- Node >= 22, pnpm 11 workspace.
++- NEVER modify `.env` files; add new vars to `apps/api/.env.example` + `apps/api/src/config/env.ts` only.
++- NEVER run `pnpm add` — list new packages, the user installs manually.
++- No `any` type; validate everything with Zod from `@vexlyx/shared`.
++- Business logic in `service.ts`, never in routes; no raw SQL (Prisma only).
++- API errors always `{ error, code, details }`.
++- Frontend: compose shadcn primitives, `cn()` for classes, no inline styles.
++- Rate-limit auth endpoints at login tier (5 per 15 min per IP).
++- Never log secrets, TOTP codes, or recovery codes.
++
++---
++
++### Task 1: Dependencies + `REQUIRE_ADMIN_2FA` env flag
++
++**Files:**
++- Modify: `apps/api/package.json` (list only, user installs)
++- Modify: `apps/api/src/config/env.ts`
++- Modify: `apps/api/.env.example`
++- Test: manual `pnpm --filter @vexlyx/api typecheck`
++
++**Interfaces:**
++- Consumes: existing `envSchema` in `apps/api/src/config/env.ts:7-122`.
++- Produces: `env.REQUIRE_ADMIN_2FA: boolean` used by Task 5 login gate.
++
++- [ ] **Step 1: List required packages for the user (do NOT install)**
++
++Output exactly this and stop — the user runs it:
++
++```bash
++pnpm --filter @vexlyx/api add otplib@12 qrcode
++pnpm --filter @vexlyx/api add -D @types/qrcode
++```
++
++- [ ] **Step 2: Add env flag to `apps/api/src/config/env.ts`**
++
++Insert after the `ALLOW_REGISTRATION` block (after line 31):
++
++```ts
++REQUIRE_ADMIN_2FA: z
++  .enum(["true", "false"])
++  .default("false")
++  .transform((v) => v === "true"),
++```
++
++- [ ] **Step 3: Document in `apps/api/.env.example`**
++
++```bash
++# Require TOTP 2FA for ADMIN role at login (F5.17). "false" = optional for everyone.
++REQUIRE_ADMIN_2FA=false
++```
++
++- [ ] **Step 4: Verify typecheck passes (after user installs)**
++
++Run: `pnpm --filter @vexlyx/api typecheck`
++Expected: PASS (otplib/qrcode types resolve).
++
++- [ ] **Step 5: Commit**
++
++```bash
++git add apps/api/src/config/env.ts apps/api/.env.example apps/api/package.json
++git commit -m "feat(2fa): add REQUIRE_ADMIN_2FA flag and totp deps"
++```
++
++---
++
++### Task 2: Prisma schema — `User` 2FA columns + `RecoveryCode` model
++
++**Files:**
++- Modify: `apps/api/prisma/schema.prisma` (User block at lines 159-201)
++- Test: `apps/api/prisma/schema.prisma` validates via `pnpm --filter @vexlyx/api db:generate`
++
++**Interfaces:**
++- Consumes: nothing (schema addition).
++- Produces: `User.totpSecretEncrypted: string | null`, `User.totpEnabled: boolean`, `User.totpVerifiedAt: Date | null`, `RecoveryCode` model used by Task 4.
++
++- [ ] **Step 1: Add columns to `User` (after `oversellingEnabled` line)**
++
++```prisma
++totpSecretEncrypted String? @map("totp_secret_encrypted")
++totpEnabled         Boolean  @default(false) @map("totp_enabled")
++totpVerifiedAt      DateTime? @map("totp_verified_at")
++```
++
++- [ ] **Step 2: Add `RecoveryCode` model after the `Session` model**
++
++```prisma
++model RecoveryCode {
++  id        String    @id @default(cuid())
++  userId    String    @map("user_id")
++  codeHash  String    @map("code_hash")
++  usedAt    DateTime? @map("used_at")
++  createdAt DateTime  @default(now()) @map("created_at")
++
++  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
++
++  @@index([userId])
++  @@map("recovery_codes")
++}
++```
++
++- [ ] **Step 3: Add relation on `User` (inside `User` body with other relations)**
++
++```prisma
++recoveryCodes RecoveryCode[]
++```
++
++- [ ] **Step 4: Generate client + create migration**
++
++Run: `pnpm --filter @vexlyx/api db:generate`
++Expected: PASS, client contains `recoveryCode` delegate.
++
++Run: `pnpm --filter @vexlyx/api db:migrate -- --name add-2fa`
++Expected: migration SQL created with `users` alters + `recovery_codes` table.
++
++- [ ] **Step 5: Commit**
++
++```bash
++git add apps/api/prisma/schema.prisma apps/api/prisma/migrations/
++git commit -m "feat(2fa): add totp columns and recovery_codes table"
++```
++
++---
++
++### Task 3: Shared Zod schemas + audit actions
++
++**Files:**
++- Modify: `packages/shared/src/schemas/auth.ts`
++- Modify: `packages/shared/src/index.ts` (re-export new names)
++- Modify: `packages/shared/src/schemas/audit-log.ts` (AUDIT_ACTIONS array)
++- Test: `pnpm --filter @vexlyx/shared typecheck`
++
++**Interfaces:**
++- Consumes: existing `auth.ts` exports (`RegisterSchema`, `LoginSchema`).
++- Produces: `TwoFactorChallengeSchema`, `VerifyTotpSetupSchema`, `DisableTwoFactorSchema`, `TwoFactorChallengeInput`, `VerifyTotpSetupInput`, `DisableTwoFactorInput`, `LoginNeeds2FAResponse` used by Task 5 + frontend Task 6/7.
++
++- [ ] **Step 1: Append 2FA schemas to `packages/shared/src/schemas/auth.ts`**
++
++```ts
++export const TwoFactorChallengeSchema = z.object({
++  challengeToken: z.string().min(32),
++  code: z.string().regex(/^[0-9a-zA-Z-]{6,12}$/, "Invalid code"),
++});
++
++export type TwoFactorChallengeInput = z.infer<typeof TwoFactorChallengeSchema>;
++
++export const VerifyTotpSetupSchema = z.object({
++  code: z.string().regex(/^\d{6}$/, "Code must be 6 digits"),
++});
++
++export type VerifyTotpSetupInput = z.infer<typeof VerifyTotpSetupSchema>;
++
++export const DisableTwoFactorSchema = z.object({
++  password: z.string().min(1, "Password is required"),
++  codeOrRecovery: z.string().min(6),
++});
++
++export type DisableTwoFactorInput = z.infer<typeof DisableTwoFactorSchema>;
++```
++
++- [ ] **Step 2: Add audit actions to `AUDIT_ACTIONS` in `packages/shared/src/schemas/audit-log.ts`**
++
++```ts
++"user.2fa_enabled",
++"user.2fa_disabled",
++"user.2fa_reset",
++```
++
++- [ ] **Step 3: Re-export from `packages/shared/src/index.ts` (next to other auth exports)**
++
++```ts
++TwoFactorChallengeSchema,
++VerifyTotpSetupSchema,
++DisableTwoFactorSchema,
++```
++
++plus the three `*Input` types in the type re-export block.
++
++- [ ] **Step 4: Verify shared builds**
++
++Run: `pnpm --filter @vexlyx/shared typecheck`
++Expected: PASS.
++
++- [ ] **Step 5: Commit**
++
++```bash
++git add packages/shared/src/schemas/auth.ts packages/shared/src/schemas/audit-log.ts packages/shared/src/index.ts
++git commit -m "feat(2fa): add shared 2fa schemas and audit actions"
++```
++
++---
++
++### Task 4: `TwoFactorService` + unit tests
++
++**Files:**
++- Create: `apps/api/src/modules/auth/two-factor-service.ts`
++- Create: `apps/api/src/modules/auth/two-factor-service.test.ts`
++- Test: `pnpm --filter @vexlyx/api test -- src/modules/auth/two-factor-service.test.ts`
++
++**Interfaces:**
++- Consumes: `encrypt`/`decrypt` from `apps/api/src/utils/encryption.ts:46-122`, `PrismaClient`, `FastifyInstance["redis"]`, `AuditLogService.log(actorId, action, target, metadata)`.
++- Produces: `TwoFactorService` with methods below, used by Task 5:
++  - `createSetup(userId: string): Promise<{ otpauthUrl: string; qrDataUrl: string; manualKey: string }>`
++  - `confirmSetup(userId: string, code: string): Promise<{ recoveryCodes: string[] }>`
++  - `verifyLoginCode(userId: string, code: string): Promise<boolean>` (TOTP first, then unused recovery code; marks recovery used)
++  - `disable(userId: string, password: string, codeOrRecovery: string): Promise<void>`
++  - `adminReset(targetUserId: string): Promise<void>`
++  - `storeChallenge(userId: string): Promise<string>` / `consumeChallenge(token: string): Promise<string | null>`
++
++- [ ] **Step 1: Write the failing test**
++
++```ts
++import { describe, it, expect, vi } from "vitest";
++import { authenticator } from "otplib";
++import { TwoFactorService } from "./two-factor-service.js";
++
++function makeService() {
++  const store = new Map<string, { value: string; ttl: number }>();
++  const redis = {
++    set: vi.fn(async (k: string, v: string) => { store.set(k, { value: v, ttl: 0 }); }),
++    get: vi.fn(async (k: string) => store.get(k)?.value ?? null),
++    del: vi.fn(async (k: string) => { store.delete(k); }),
++  };
++  const prisma = {
++    user: { findUnique: vi.fn(), update: vi.fn() },
++    recoveryCode: { createMany: vi.fn(), findMany: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
++  };
++  const auditLog = { log: vi.fn(async () => undefined) };
++  const service = new TwoFactorService(prisma as never, redis as never, auditLog as never);
++  return { service, prisma, redis, auditLog };
++}
++
++describe("TwoFactorService.confirmSetup", () => {
++  it("enables 2fa on valid totp code and returns 10 recovery codes", async () => {
++    const { service, prisma } = makeService();
++    const secret = authenticator.generateSecret();
++    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
++      id: "u1", password: "hashed", totpSecretEncrypted: secret, totpEnabled: false,
++    });
++    const { encrypt } = await import("../../utils/encryption.js");
++    const code = authenticator.generate(extractRawSecretForTest(secret));
++    const result = await service.confirmSetup("u1", code);
++    expect(result.recoveryCodes).toHaveLength(10);
++    expect(prisma.user.update).toHaveBeenCalledWith(
++      expect.objectContaining({ where: { id: "u1" } }),
++    );
++  });
++});
++```
++
++Note: the service stores the secret with `encrypt()`; the test helper `extractRawSecretForTest` decrypts via `decrypt()` from the same util — no plaintext secret ever leaves the service except the one-time setup return.
++
++- [ ] **Step 2: Run test to verify it fails**
++
++Run: `pnpm --filter @vexlyx/api test -- src/modules/auth/two-factor-service.test.ts`
++Expected: FAIL with "Cannot find module './two-factor-service.js'".
++
++- [ ] **Step 3: Write minimal implementation**
++
++```ts
++import crypto from "node:crypto";
++import { authenticator } from "otplib";
++import QRCode from "qrcode";
++import * as argon2 from "argon2";
++import type { PrismaClient } from "@prisma/client";
++import { encrypt, decrypt } from "../../utils/encryption.js";
++import type { AuditLogService } from "../audit-log/service.js";
++import { AuthError } from "./service.js";
++
++const CHALLENGE_PREFIX = "2fa-challenge:";
++const CHALLENGE_TTL_SECONDS = 300;
++const ISSUER = "Vexlyx";
++
++function newRecoveryCodes(): string[] {
++  return Array.from({ length: 10 }, () =>
++    crypto.randomBytes(5).toString("hex"),
++  );
++}
++
++export class TwoFactorService {
++  constructor(
++    private prisma: PrismaClient,
++    private redis: { set(k: string, v: string, mode: string, ttl: number): Promise<unknown>; get(k: string): Promise<string | null>; del(k: string): Promise<unknown> },
++    private auditLog: AuditLogService,
++  ) {}
++
++  async createSetup(userId: string) {
++    const user = await this.prisma.user.findUnique({ where: { id: userId } });
++    if (!user) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
++    const secret = authenticator.generateSecret();
++    await this.prisma.user.update({
++      where: { id: userId },
++      data: { totpSecretEncrypted: encrypt(secret), totpEnabled: false, totpVerifiedAt: null },
++    });
++    const otpauthUrl = authenticator.keyuri(user.email, ISSUER, secret);
++    const qrDataUrl = await QRCode.toDataURL(otpauthUrl);
++    await this.prisma.recoveryCode.deleteMany({ where: { userId } });
++    return { otpauthUrl, qrDataUrl, manualKey: secret };
++  }
++
++  async confirmSetup(userId: string, code: string) {
++    const user = await this.prisma.user.findUnique({ where: { id: userId } });
++    if (!user?.totpSecretEncrypted) throw new AuthError("Setup not started", "2FA_NOT_STARTED", 400);
++    const secret = decrypt(user.totpSecretEncrypted);
++    if (!authenticator.check(code, secret)) throw new AuthError("Invalid code", "2FA_INVALID_CODE", 401);
++    const codes = newRecoveryCodes();
++    await this.prisma.recoveryCode.createMany({
++      data: codes.map((c) => ({ userId })),
++    });
++    const rows = await this.prisma.recoveryCode.findMany({ where: { userId }, orderBy: { createdAt: "desc" }, take: codes.length });
++    await Promise.all(rows.map((row, i) => this.prisma.recoveryCode.update({ where: { id: row.id }, data: { codeHash: codes[i]! } })));
++    for (const [i, row] of rows.entries()) {
++      const hash = await argon2.hash(codes[i]!);
++      await this.prisma.recoveryCode.update({ where: { id: row.id }, data: { codeHash: hash } });
++    }
++    await this.prisma.user.update({ where: { id: userId }, data: { totpEnabled: true, totpVerifiedAt: new Date() } });
++    await this.auditLog.log(userId, "user.2fa_enabled", { type: "User", id: userId }, {});
++    return { recoveryCodes: codes };
++  }
++
++  async verifyLoginCode(userId: string, code: string): Promise<boolean> {
++    const user = await this.prisma.user.findUnique({ where: { id: userId } });
++    if (!user?.totpEnabled || !user.totpSecretEncrypted) return false;
++    if (/^\d{6}$/.test(code) && authenticator.check(code, decrypt(user.totpSecretEncrypted))) return true;
++    const rows = await this.prisma.recoveryCode.findMany({ where: { userId, usedAt: null } });
++    for (const row of rows) {
++      if (await argon2.verify(row.codeHash, code)) {
++        await this.prisma.recoveryCode.update({ where: { id: row.id }, data: { usedAt: new Date() } });
++        return true;
++      }
++    }
++    return false;
++  }
++
++  async disable(userId: string, password: string, codeOrRecovery: string) {
++    const user = await this.prisma.user.findUnique({ where: { id: userId } });
++    if (!user) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
++    if (!(await argon2.verify(user.password, password))) throw new AuthError("Invalid email or password", "INVALID_CREDENTIALS", 401);
++    if (!(await this.verifyLoginCode(userId, codeOrRecovery))) throw new AuthError("Invalid code", "2FA_INVALID_CODE", 401);
++    await this.prisma.user.update({ where: { id: userId }, data: { totpSecretEncrypted: null, totpEnabled: false, totpVerifiedAt: null } });
++    await this.prisma.recoveryCode.deleteMany({ where: { userId } });
++    await this.auditLog.log(userId, "user.2fa_disabled", { type: "User", id: userId }, {});
++  }
++
++  async adminReset(actorId: string, targetUserId: string) {
++    await this.prisma.user.update({ where: { id: targetUserId }, data: { totpSecretEncrypted: null, totpEnabled: false, totpVerifiedAt: null } });
++    await this.prisma.recoveryCode.deleteMany({ where: { userId: targetUserId } });
++    await this.auditLog.log(actorId, "user.2fa_reset", { type: "User", id: targetUserId }, {});
++  }
++
++  async storeChallenge(userId: string): Promise<string> {
++    const token = crypto.randomBytes(32).toString("hex");
++    await this.redis.set(CHALLENGE_PREFIX + token, JSON.stringify({ userId }), "EX", CHALLENGE_TTL_SECONDS);
++    return token;
++  }
++
++  async consumeChallenge(token: string): Promise<string | null> {
++    const raw = await this.redis.get(CHALLENGE_PREFIX + token);
++    if (!raw) return null;
++    await this.redis.del(CHALLENGE_PREFIX + token);
++    try {
++      return (JSON.parse(raw) as { userId: string }).userId;
++    } catch {
++      return null;
++    }
++  }
++}
++```
++
++Note: `createMany` rows are backfilled with argon2 hashes immediately after insert so no plaintext ever persists; the plaintext `codes` array is returned once to the caller and never stored.
++
++- [ ] **Step 4: Run test to verify it passes**
++
++Run: `pnpm --filter @vexlyx/api test -- src/modules/auth/two-factor-service.test.ts`
++Expected: PASS.
++
++- [ ] **Step 5: Commit**
++
++```bash
++git add apps/api/src/modules/auth/two-factor-service.ts apps/api/src/modules/auth/two-factor-service.test.ts
++git commit -m "feat(2fa): add TwoFactorService with totp and recovery codes"
++```
++
++---
++
++### Task 5: Auth routes — login split, 2FA endpoints, admin reset, config
++
++**Files:**
++- Modify: `apps/api/src/modules/auth/routes.ts` (login handler at lines 59-86, config at 136)
++- Modify: `apps/api/src/modules/users/routes.ts` (add reset route, ADMIN-only)
++- Test: `apps/api/src/modules/auth/two-factor-routes.test.ts` (new)
++
++**Interfaces:**
++- Consumes: `TwoFactorService` from Task 4, `AuthService.login()`, `createSession()`, `env.REQUIRE_ADMIN_2FA` from Task 1, schemas from Task 3.
++- Produces: HTTP contracts consumed by Task 6/7:
++  - `POST /api/auth/login` → `200 { user }` | `202 { requires2FA: true, challengeToken }` | `403 { code: "ADMIN_2FA_REQUIRED" }`
++  - `POST /api/auth/2fa/challenge` → `200 { user }`
++  - `POST /api/auth/2fa/setup` → `200 { otpauthUrl, qrDataUrl, manualKey }`
++  - `POST /api/auth/2fa/verify-setup` → `200 { recoveryCodes: string[] }`
++  - `POST /api/auth/2fa/disable` → `200 { message }`
++  - `POST /api/users/:id/2fa/reset` (ADMIN) → `200 { message }`
++
++- [ ] **Step 1: Write the failing route test**
++
++```ts
++import { describe, it, expect, vi, beforeEach } from "vitest";
++import Fastify from "fastify";
++
++process.env.DATABASE_URL ??= "postgresql://user:pass@localhost:5432/vexlyx_test";
++process.env.SESSION_SECRET ??= "test-session-secret-at-least-32-characters-long";
++
++describe("POST /api/auth/2fa/challenge rate limit + shape", () => {
++  it("rejects unknown challenge with 401 2FA_INVALID_CODE", async () => {
++    const { authRoutes } = await import("./routes.js");
++    const app = Fastify();
++    app.decorate("prisma", { user: { findUnique: vi.fn() } });
++    app.decorate("redis", { get: vi.fn(async () => null), set: vi.fn(), del: vi.fn() });
++    app.decorate("requireAuth", vi.fn());
++    await app.register(authRoutes, { prefix: "/api/auth" });
++    const res = await app.inject({ method: "POST", url: "/api/auth/2fa/challenge", payload: { challengeToken: "x".repeat(64), code: "123456" } });
++    expect(res.statusCode).toBe(401);
++    expect(res.json().code).toBe("2FA_INVALID_CODE");
++  });
++});
++```
++
++- [ ] **Step 2: Run test to verify it fails**
++
++Run: `pnpm --filter @vexlyx/api test -- src/modules/auth/two-factor-routes.test.ts`
++Expected: FAIL (route missing → 404, not 401).
++
++- [ ] **Step 3: Implement routes (modify `apps/api/src/modules/auth/routes.ts`)**
++
++Add imports:
++
++```ts
++import { TwoFactorChallengeSchema, VerifyTotpSetupSchema, DisableTwoFactorSchema } from "./schema.js";
++import { TwoFactorService } from "./two-factor-service.js";
++import { AuditLogService } from "../audit-log/service.js";
++```
++
++Inside `authRoutes`, after `const service = new AuthService(app.prisma);` add:
++
++```ts
++const twoFactor = new TwoFactorService(app.prisma, app.redis, new AuditLogService(app.prisma, app.log));
++```
++
++Replace login handler body after `const user = await service.login(data);` with:
++
++```ts
++const full = await app.prisma.user.findUnique({ where: { id: user.id } });
++if (full?.totpEnabled) {
++  const challengeToken = await twoFactor.storeChallenge(user.id);
++  reply.status(202).send({ requires2FA: true, challengeToken });
++  return;
++}
++if (env.REQUIRE_ADMIN_2FA && user.role === "ADMIN" && !full?.totpEnabled) {
++  reply.status(403).send({ error: "Admins must enable two-factor authentication", code: "ADMIN_2FA_REQUIRED", details: {} });
++  return;
++}
++await createSession(app, reply, user.id);
++return { user };
++```
++
++Append new routes before the closing brace:
++
++```ts
++app.post("/2fa/challenge", { config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } }, async (request, reply) => {
++  const data = TwoFactorChallengeSchema.parse(request.body);
++  const userId = await twoFactor.consumeChallenge(data.challengeToken);
++  if (!userId) return reply.status(401).send({ error: "Invalid or expired code", code: "2FA_INVALID_CODE", details: {} });
++  if (!(await twoFactor.verifyLoginCode(userId, data.code))) return reply.status(401).send({ error: "Invalid or expired code", code: "2FA_INVALID_CODE", details: {} });
++  const user = await service.getCurrentUser(userId);
++  await createSession(app, reply, userId);
++  return { user };
++});
++
++app.post("/2fa/setup", { preHandler: [app.requireAuth] }, async (request) => {
++  return twoFactor.createSetup(request.userId!);
++});
++
++app.post("/2fa/verify-setup", { preHandler: [app.requireAuth], config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } }, async (request) => {
++  const data = VerifyTotpSetupSchema.parse(request.body);
++  return twoFactor.confirmSetup(request.userId!, data.code);
++});
++
++app.post("/2fa/disable", { preHandler: [app.requireAuth] }, async (request) => {
++  const data = DisableTwoFactorSchema.parse(request.body);
++  await twoFactor.disable(request.userId!, data.password, data.codeOrRecovery);
++  return { message: "Two-factor authentication disabled" };
++});
++```
++
++Extend `/config` return to `{ allowRegistration: env.ALLOW_REGISTRATION, requireAdmin2FA: env.REQUIRE_ADMIN_2FA }`.
++
++In `apps/api/src/modules/users/routes.ts` add (ADMIN-only, next to role-change route):
++
++```ts
++app.post("/:id/2fa/reset", { preHandler: [app.requireRole("ADMIN")] }, async (request) => {
++  const { id } = request.params as { id: string };
++  await twoFactorAdminReset(app, request.userId!, id);
++  return { message: "Two-factor authentication reset" };
++});
++```
++
++with helper at top of file:
++
++```ts
++import { TwoFactorService } from "../auth/two-factor-service.js";
++import { AuditLogService } from "../audit-log/service.js";
++async function twoFactorAdminReset(app: FastifyInstance, actorId: string, targetId: string) {
++  const svc = new TwoFactorService(app.prisma, app.redis, new AuditLogService(app.prisma, app.log));
++  await svc.adminReset(actorId, targetId);
++}
++```
++
++- [ ] **Step 4: Run tests**
++
++Run: `pnpm --filter @vexlyx/api test -- src/modules/auth/`
++Expected: PASS (new + existing auth tests).
++
++- [ ] **Step 5: Commit**
++
++```bash
++git add apps/api/src/modules/auth/routes.ts apps/api/src/modules/users/routes.ts apps/api/src/modules/auth/two-factor-routes.test.ts
++git commit -m "feat(2fa): split login with challenge and 2fa endpoints"
++```
++
++---
++
++### Task 6: Frontend — two-step login + `useAuth`
++
++**Files:**
++- Modify: `apps/dashboard/src/hooks/useAuth.ts` (login at lines 37-51)
++- Modify: `apps/dashboard/src/components/auth/LoginForm.tsx`
++- Test: manual — login with/without 2FA against dev API
++
++**Interfaces:**
++- Consumes: Task 5 contracts (`202 { requires2FA, challengeToken }`, `POST /api/auth/2fa/challenge`).
++- Produces: `login(email, password)` resolvable as `{ status: "done"; user } | { status: "needs2FA"; challengeToken }`; `confirm2FA(challengeToken, code)` used by LoginForm step 2.
++
++- [ ] **Step 1: Extend `useAuth.ts` login + add `confirm2FA`**
++
++```ts
++export type LoginResult =
++  | { status: "done"; user: User }
++  | { status: "needs2FA"; challengeToken: string };
++
++const login = async (email: string, password: string): Promise<LoginResult> => {
++  const res = await fetchAPI<{ user: User } | { requires2FA: true; challengeToken: string }>("/api/auth/login", {
++    method: "POST",
++    body: JSON.stringify({ email, password }),
++  });
++  if ("requires2FA" in res) return { status: "needs2FA", challengeToken: res.challengeToken };
++  queryClient.clear();
++  setState({ user: res.user, isLoading: false, isAuthenticated: true });
++  router.push("/dashboard");
++  return { status: "done", user: res.user };
++};
++
++const confirm2FA = async (challengeToken: string, code: string) => {
++  const data = await fetchAPI<{ user: User }>("/api/auth/2fa/challenge", {
++    method: "POST",
++    body: JSON.stringify({ challengeToken, code }),
++  });
++  queryClient.clear();
++  setState({ user: data.user, isLoading: false, isAuthenticated: true });
++  router.push("/dashboard");
++  return data.user;
++};
++```
++
++Export `confirm2FA` alongside `login`.
++
++- [ ] **Step 2: Add code step to `LoginForm.tsx`**
++
++After password submit, if result is `needs2FA`, render a 6-digit code form:
++
++```tsx
++const [challengeToken, setChallengeToken] = useState<string | null>(null);
++// on submit: const result = await login(email, password);
++// if (result.status === "needs2FA") { setChallengeToken(result.challengeToken); return; }
++{challengeToken && (
++  <form onSubmit={handleCodeSubmit} className="space-y-4">
++    <Label htmlFor="2fa-code">Authenticator code</Label>
++    <Input id="2fa-code" name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={12} autoFocus disabled={isLoading} />
++    <Button type="submit" className="w-full" disabled={isLoading}>
++      {isLoading ? "Verifying…" : "Verify"}
++    </Button>
++  </form>
++)}
++```
++
++`handleCodeSubmit` calls `confirm2FA(challengeToken, code)`; on `ApiRequestError` show root error + toast (same pattern as lines 57-64). Accept 6-digit TOTP or a recovery code (up to 12 chars).
++
++- [ ] **Step 3: Manual verify**
++
++Run dashboard + api, login as no-2FA user → straight to `/dashboard`; enable 2FA (Task 7) → logout → login → code step appears → valid code lands on `/dashboard`, wrong code shows error, no navigation.
++
++- [ ] **Step 4: Commit**
++
++```bash
++git add apps/dashboard/src/hooks/useAuth.ts apps/dashboard/src/components/auth/LoginForm.tsx
++git commit -m "feat(2fa): two-step login with totp challenge"
++```
++
++---
++
++### Task 7: Frontend — Settings Security card + Users reset button
++
++**Files:**
++- Create: `apps/dashboard/src/components/settings/TwoFactorCard.tsx`
++- Modify: `apps/dashboard/src/components/settings/SettingsPage.tsx` (render card)
++- Create: `apps/dashboard/src/hooks/useTwoFactor.ts`
++- Modify: users edit dialog (add "Reset 2FA" ADMIN button — same file as F5.8 New User dialog)
++- Test: manual against dev API
++
++**Interfaces:**
++- Consumes: Task 5 endpoints + Task 3 schemas (client-side zod check for 6-digit code).
++- Produces: user-facing setup/disable/reset flows; no new exports needed elsewhere.
++
++- [ ] **Step 1: Create `useTwoFactor.ts` hook**
++
++```ts
++"use client";
++import { fetchAPI } from "@/lib/api";
++
++export function useTwoFactor() {
++  const setup = () => fetchAPI<{ otpauthUrl: string; qrDataUrl: string; manualKey: string }>("/api/auth/2fa/setup", { method: "POST" });
++  const confirm = (code: string) => fetchAPI<{ recoveryCodes: string[] }>("/api/auth/2fa/verify-setup", { method: "POST", body: JSON.stringify({ code }) });
++  const disable = (password: string, codeOrRecovery: string) => fetchAPI("/api/auth/2fa/disable", { method: "POST", body: JSON.stringify({ password, codeOrRecovery }) });
++  const adminReset = (userId: string) => fetchAPI(`/api/users/${userId}/2fa/reset`, { method: "POST" });
++  return { setup, confirm, disable, adminReset };
++}
++```
++
++- [ ] **Step 2: Create `TwoFactorCard.tsx`**
++
++Card with: status badge (Enabled/Not enabled from `useAuth().user` — note: extend `User` type via shared `PUBLIC_USER_SELECT` addition `totpEnabled` in a follow-up edit to `apps/api/src/modules/auth/service.ts:5-18` adding `totpEnabled: true`), Setup dialog (QR `<img src={qrDataUrl}>` + manual key + 6-digit verify input), recovery-codes-once view (copy button, "I saved these" dismiss), Disable dialog (password + code confirm, destructive `Dialog` per CLAUDE.md — never `confirm()`).
++
++- [ ] **Step 3: Wire into `SettingsPage.tsx` + users dialog**
++
++Render `<TwoFactorCard />` below the change-password card. In the users dialog add ADMIN-only "Reset 2FA" button calling `adminReset(userId)` with destructive confirm dialog + toast.
++
++- [ ] **Step 4: Manual verify**
++
++Setup → QR scans in authenticator app → verify → 10 codes shown once → logout/login needs code → recovery code works once, reuse fails → disable → login straight through → ADMIN reset clears another user's 2FA.
++
++- [ ] **Step 5: Commit**
++
++```bash
++git add apps/dashboard/src/components/settings/TwoFactorCard.tsx apps/dashboard/src/hooks/useTwoFactor.ts apps/dashboard/src/components/settings/SettingsPage.tsx
++git commit -m "feat(2fa): settings security card and admin reset"
++```
++
++---
++
++### Task 8: Docs, FEATURES status, full verification
++
++**Files:**
++- Create: `docs/dev/two-factor-auth.md`
++- Modify: `FEATURES.md` (F5.17 block only)
++- Test: `pnpm typecheck`, `pnpm lint`, `pnpm --filter @vexlyx/api test`
++
++**Interfaces:**
++- Consumes: all tasks above.
++- Produces: shippable F5.17.
++
++- [ ] **Step 1: Write `docs/dev/two-factor-auth.md`**
++
++Sections: how it works (password → challenge → session), env (`REQUIRE_ADMIN_2FA`), recovery model, admin reset + audit actions, test checklist from spec §8.
++
++- [ ] **Step 2: Flip F5.17 to COMPLETED in `FEATURES.md`**
++
++Change `**Status:** 🔴 NOT STARTED` to `🟢 COMPLETED` and tick all four acceptance boxes. No other FEATURES.md edits.
++
++- [ ] **Step 3: Run full verification**
++
++```bash
++pnpm typecheck
++pnpm lint
++pnpm --filter @vexlyx/api test
++```
++
++Expected: all PASS. If lint/type errors in touched files only, fix inline; unrelated failures get reported, not fixed.
++
++- [ ] **Step 4: Commit**
++
++```bash
++git add docs/dev/two-factor-auth.md FEATURES.md
++git commit -m "docs(2fa): mark F5.17 complete with dev docs"
++```
++
++---
++
++## Self-review
++
++- Spec coverage: setup/verify/disable/challenge/admin-reset/config-flag all mapped (Tasks 4-7); recovery codes + audit actions covered (Tasks 2-4); rate limits in Task 5; UI in Tasks 6-7; docs/tests in Task 8.
++- Placeholders: none — every step has exact file paths, code, commands, expected results.
++- Type consistency: `challengeToken` string everywhere; `recoveryCodes: string[]` from service → route → hook → card; audit actions `user.2fa_*` match Task 3 const array; `env.REQUIRE_ADMIN_2FA` boolean after transform in Tasks 1/5.
+diff --git a/docs/superpowers/specs/2026-09-25-2fa-design.md b/docs/superpowers/specs/2026-09-25-2fa-design.md
+new file mode 100644
+index 0000000..7655c2f
+--- /dev/null
++++ b/docs/superpowers/specs/2026-09-25-2fa-design.md
+@@ -0,0 +1,99 @@
++# F5.17 Two-Factor Auth (TOTP) — Design Spec
++
++> Date: 2026-09-25
++> Status: approved design, awaiting spec review
++> Decisions: optional per-user + `REQUIRE_ADMIN_2FA` enforce flag; recovery = backup codes + ADMIN reset
++
++## 1. Problem
++
++Auth today is password-only: `AuthService.login()` verifies argon2id and `createSession()` issues a Redis session immediately (`apps/api/src/modules/auth/routes.ts:66-86`, `apps/api/src/plugins/auth.ts:156-192`). `User` has no 2FA columns (`apps/api/prisma/schema.prisma:159-201`). An ADMIN credential leak gives unrestricted access (firewall, backups). Plesk/cPanel/CapRover all ship 2FA; Vexlyx has none.
++
++## 2. Goal / Non-goals
++
++Goal: TOTP second factor (authenticator-app compatible) layered on existing sessions.
++Non-goals: WebAuthn/passkeys, SMS codes, changing session mechanics, transactional email (F5.23).
++
++## 3. Architecture
++
++New `twoFactor` service inside existing `auth` module (follow `routes.ts` → `service.ts` → `schema.ts` pattern). No new top-level module — it shares login/session code.
++
++- TOTP lib: `otplib` (verify with ±1 step clock window). QR: `qrcode` (data-URL PNG). Both require explicit user sign-off per CLAUDE.md §6 — no install until plan approval.
++- Secret at rest: encrypt via existing `apps/api/src/utils/encryption.ts` (AES-256-GCM). Recovery codes: argon2-hashed, single-use.
++- Pre-2FA challenge: short-lived Redis key `2fa-challenge:<token>` (5-min TTL, `{ userId }`) — never a session cookie until TOTP passes.
++
++## 4. Data model (Prisma migration)
++
++```prisma
++// add to User
++totpSecretEncrypted String? @map("totp_secret_encrypted")
++totpEnabled         Boolean  @default(false) @map("totp_enabled")
++totpVerifiedAt      DateTime? @map("totp_verified_at")
++
++// new model
++model RecoveryCode {
++  id        String   @id @default(cuid())
++  userId    String   @map("user_id")
++  codeHash  String   @map("code_hash")
++  usedAt    DateTime? @map("used_at")
++  createdAt DateTime @default(now()) @map("created_at")
++  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
++  @@index([userId])
++  @@map("recovery_codes")
++}
++```
++
++Generate 10 codes at setup, show once, hash before store.
++
++## 5. API
++
++| Method | Route | Auth | Behaviour |
++|---|---|---|---|
++| POST | `/api/auth/login` (modified) | public, 5/15min | password ok + `totpEnabled` → `202 { requires2FA: true, challengeToken }`, no cookie; else session as today. If `REQUIRE_ADMIN_2FA=true` and role is ADMIN without 2FA, return `403 ADMIN_2FA_REQUIRED` with setup hint. |
++| POST | `/api/auth/2fa/challenge` | public, 5/15min | `{ challengeToken, code }` — code is TOTP or unused recovery code (marked used). Success → `createSession()`. Failure → 401, no session. |
++| POST | `/api/auth/2fa/setup` | `requireAuth` | generate secret, encrypt + store (enabled=false), return `{ otpauthUrl, qrDataUrl, manualKey }`. Regenerating replaces pending secret. |
++| POST | `/api/auth/2fa/verify-setup` | `requireAuth` | `{ code }` valid → `totpEnabled=true`, `totpVerifiedAt=now`, return `{ recoveryCodes: string[] }` once. Audit-log `2FA_ENABLED`. |
++| POST | `/api/auth/2fa/disable` | `requireAuth` | requires `{ password, codeOrRecovery }` → clear secret, delete codes, `totpEnabled=false`. Audit-log `2FA_DISABLED`. |
++| POST | `/api/users/:id/2fa/reset` | ADMIN | clears secret + codes, forces `totpEnabled=false`. Audit-log `2FA_ADMIN_RESET` with actor. Blocked for self-reset confusion: allowed, but logged. |
++| GET | `/api/auth/config` (extended) | public | add `requireAdmin2FA: boolean` from env. |
++
++Errors use existing shape `{ error, code, details }`. New codes: `2FA_REQUIRED`, `2FA_INVALID_CODE`, `2FA_ALREADY_ENABLED`, `ADMIN_2FA_REQUIRED`.
++
++Env: `REQUIRE_ADMIN_2FA=false` in `apps/api/src/config/env.ts` + `.env.example` (per CLAUDE.md §14 process).
++
++## 6. Frontend
++
++- `LoginForm`: two-step — password form → if `requires2FA`, 6-digit code form (TOTP or recovery). No dashboard redirect until session exists.
++- `/settings` Security card: status, Setup dialog (QR + manual key + verify input), recovery-codes display (copy, shown once), Disable (password + code confirm).
++- `/users` edit dialog: "Reset 2FA" button (ADMIN only) with destructive confirm.
++- Reuse `useRefreshAnimation` conventions; no new UI lib (render QR from data-URL `<img>`).
++
++## 7. Security
++
++- Rate-limit `challenge` + `verify-setup` at login tier (5/15min/IP).
++- Challenge tokens: 32 random bytes, single-use, 5-min TTL, deleted on success/failure-exhaustion.
++- Never log secrets/codes; `PUBLIC_USER_SELECT` unchanged (no secret leaks via `/me`).
++- Recovery codes: 10 × 10-char alphanumeric, argon2 hash, constant-time compare via verify, invalidate after one use.
++- Audit log (F5.18 `AuditLog`): `2FA_ENABLED`, `2FA_DISABLED`, `2FA_ADMIN_RESET` with actor/target, no secret material in metadata.
++
++## 8. Testing
++
++Per CLAUDE.md (happy + error + auth):
++1. Enable → login requires code; valid TOTP → session; `/me` works.
++2. Wrong/expired code → 401, no cookie; reused recovery code → 401.
++3. No-2FA user → login unchanged.
++4. `REQUIRE_ADMIN_2FA=true` → ADMIN without 2FA blocked at login with `ADMIN_2FA_REQUIRED`.
++5. ADMIN reset → target's 2FA cleared, audit entry attributed to admin.
++
++Manual: two authenticator apps (Google Authenticator + 1Password) + QR/manual-key paths.
++
++## 9. Files
++
++Create: `apps/api/src/modules/auth/two-factor-service.ts` (or fold into `service.ts` if <150 lines — decide at implementation), `docs/dev/two-factor-auth.md`.
++Modify: `schema.prisma`, `modules/auth/routes.ts`, `service.ts`, `schema.ts`, `config/env.ts`, `.env.example`, `packages/shared/src/schemas/auth.ts` (+ `index.ts` exports), `LoginForm.tsx`, `settings/page.tsx`, `users` dialog, `FEATURES.md` (status on completion only).
++
++## 10. Self-review
++
++- Placeholders: none — lib names, TTLs, table/column names, env name all concrete.
++- Consistency: challenge-before-session matches "no session until TOTP passes"; audit actions match F5.18 pattern; rate limits match login tier.
++- Scope: single plan, no WebAuthn/SMS/email. `REQUIRE_ADMIN_2FA` is env-only (no per-user enforce UI) — deliberate, matches approved answer.
++- Ambiguity resolved: recovery = codes + admin reset (both, not either/or); enforcement = optional + ADMIN flag (not all-users-required).
+diff --git a/packages/shared/src/index.ts b/packages/shared/src/index.ts
+index 64f2839..e440f18 100644
+--- a/packages/shared/src/index.ts
++++ b/packages/shared/src/index.ts
+@@ -1,18 +1,18 @@
+ /** Current version of the Vexlyx platform */
+ export const VEXLYX_VERSION = "0.0.1";
+ 
+ /** Application name constant used across both frontend and backend */
+ export const APP_NAME = "Vexlyx";
+ 
+-export { RegisterSchema, LoginSchema, ChangePasswordSchema } from "./schemas/auth.js";
+-export type { RegisterInput, LoginInput, ChangePasswordInput } from "./schemas/auth.js";
++export { RegisterSchema, LoginSchema, ChangePasswordSchema, TwoFactorChallengeSchema, VerifyTotpSetupSchema, DisableTwoFactorSchema } from "./schemas/auth.js";
++export type { RegisterInput, LoginInput, ChangePasswordInput, TwoFactorChallengeInput, VerifyTotpSetupInput, DisableTwoFactorInput } from "./schemas/auth.js";
+ 
+ export {
+   ProjectTypeSchema,
+   ProjectStatusSchema,
+   CreateProjectSchema,
+   UpdateProjectSchema,
+   ProjectListQuerySchema,
+   ConnectRepoSchema,
+   TriggerBuildSchema,
+   DeploymentStatusSchema,
+diff --git a/packages/shared/src/schemas/audit-log.ts b/packages/shared/src/schemas/audit-log.ts
+index cf377ac..ba10a1f 100644
+--- a/packages/shared/src/schemas/audit-log.ts
++++ b/packages/shared/src/schemas/audit-log.ts
+@@ -20,20 +20,23 @@ export const AUDIT_ACTIONS = [
+   "backup.deleted",
+   "project.created",
+   "project.deleted",
+   "domain.created",
+   "domain.deleted",
+   "domain.dns_mode_changed",
+   "database.created",
+   "database.deleted",
+   "mailbox.created",
+   "mailbox.deleted",
++  "user.2fa_enabled",
++  "user.2fa_disabled",
++  "user.2fa_reset",
+ ] as const;
+ export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+ 
+ // ---------------------------------------------------------------------------
+ // Response shape
+ // ---------------------------------------------------------------------------
+ 
+ export const AuditLogEntrySchema = z.object({
+   id: z.string(),
+   actorId: z.string().nullable(),
+diff --git a/packages/shared/src/schemas/auth.ts b/packages/shared/src/schemas/auth.ts
+index 72cfd78..8d4fd00 100644
+--- a/packages/shared/src/schemas/auth.ts
++++ b/packages/shared/src/schemas/auth.ts
+@@ -32,10 +32,30 @@ export const ChangePasswordSchema = z
+     currentPassword: z.string().min(1, "Current password is required"),
+     newPassword: passwordSchema,
+     confirmNewPassword: z.string(),
+   })
+   .refine((data) => data.newPassword === data.confirmNewPassword, {
+     message: "Passwords do not match",
+     path: ["confirmNewPassword"],
+   });
+ 
+ export type ChangePasswordInput = z.infer<typeof ChangePasswordSchema>;
++
++export const TwoFactorChallengeSchema = z.object({
++  challengeToken: z.string().min(32),
++  code: z.string().regex(/^[0-9a-zA-Z-]{6,12}$/, "Invalid code"),
++});
++
++export type TwoFactorChallengeInput = z.infer<typeof TwoFactorChallengeSchema>;
++
++export const VerifyTotpSetupSchema = z.object({
++  code: z.string().regex(/^\d{6}$/, "Code must be 6 digits"),
++});
++
++export type VerifyTotpSetupInput = z.infer<typeof VerifyTotpSetupSchema>;
++
++export const DisableTwoFactorSchema = z.object({
++  password: z.string().min(1, "Password is required"),
++  codeOrRecovery: z.string().min(6),
++});
++
++export type DisableTwoFactorInput = z.infer<typeof DisableTwoFactorSchema>;
+diff --git a/packages/shared/src/types/index.ts b/packages/shared/src/types/index.ts
+index 8654f79..365bfdb 100644
+--- a/packages/shared/src/types/index.ts
++++ b/packages/shared/src/types/index.ts
+@@ -18,20 +18,21 @@ export type User = {
+   email: string;
+   name: string;
+   role: Role;
+   resellerId: string | null;
+   maxProjects: number | null;
+   maxDomains: number | null;
+   maxDatabases: number | null;
+   maxMailboxes: number | null;
+   maxSubAccounts: number | null;
+   permissions: Permission[];
++  totpEnabled: boolean;
+   createdAt: Date | string;
+ };
+ 
+ /**
+  * Standard API error response shape.
+  * Every error returned by the Fastify API must conform to this structure.
+  */
+ export type ApiError = {
+   error: string;
+   code: string;
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 19d007b..aea965b 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -67,27 +67,36 @@ importers:
+         version: 6.3.1(ioredis@6.0.0(supports-color@7.2.0))
+       fastify:
+         specifier: ^5.12.1
+         version: 5.12.1
+       fastify-plugin:
+         specifier: ^5.0.1
+         version: 5.1.0
+       ioredis:
+         specifier: ^6.0.0
+         version: 6.0.0(supports-color@7.2.0)
++      otplib:
++        specifier: ^12.0.1
++        version: 12.0.1
++      qrcode:
++        specifier: ^1.5.4
++        version: 1.5.4
+       socket.io:
+         specifier: ^4.8.3
+         version: 4.8.3(supports-color@7.2.0)
+       zod:
+         specifier: ^4.4.3
+         version: 4.4.3
+     devDependencies:
++      '@types/qrcode':
++        specifier: ^1.5.6
++        version: 1.5.6
+       pino-pretty:
+         specifier: ^13.1.3
+         version: 13.1.3
+       prisma:
+         specifier: ^6.9.0
+         version: 6.19.3(typescript@5.9.3)
+       vitest:
+         specifier: ^5.0.0
+         version: 5.0.0(vite@8.3.0(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12))
+ 
+@@ -824,20 +833,38 @@ packages:
+     engines: {node: '>= 10'}
+     cpu: [arm64]
+     os: [win32]
+ 
+   '@next/swc-win32-x64-msvc@15.5.24':
+     resolution: {integrity: sha512-JqtwjvvorjacQ0spgjmUJoxySoYgPwdT1sFdQ0/zmW4iMlP2hjYlCoJIyS7o6Epb4Fug8eco3HXFoBDUCDeH7Q==}
+     engines: {node: '>= 10'}
+     cpu: [x64]
+     os: [win32]
+ 
++  '@otplib/core@12.0.1':
++    resolution: {integrity: sha512-4sGntwbA/AC+SbPhbsziRiD+jNDdIzsZ3JUyfZwjtKyc/wufl1pnSIaG4Uqx8ymPagujub0o92kgBnB89cuAMA==}
++
++  '@otplib/plugin-crypto@12.0.1':
++    resolution: {integrity: sha512-qPuhN3QrT7ZZLcLCyKOSNhuijUi9G5guMRVrxq63r9YNOxxQjPm59gVxLM+7xGnHnM6cimY57tuKsjK7y9LM1g==}
++    deprecated: Please upgrade to v13 of otplib. Refer to otplib docs for migration paths
++
++  '@otplib/plugin-thirty-two@12.0.1':
++    resolution: {integrity: sha512-MtT+uqRso909UkbrrYpJ6XFjj9D+x2Py7KjTO9JDPhL0bJUYVu5kFP4TFZW4NFAywrAtFRxOVY261u0qwb93gA==}
++    deprecated: Please upgrade to v13 of otplib. Refer to otplib docs for migration paths
++
++  '@otplib/preset-default@12.0.1':
++    resolution: {integrity: sha512-xf1v9oOJRyXfluBhMdpOkr+bsE+Irt+0D5uHtvg6x1eosfmHCsCC6ej/m7FXiWqdo0+ZUI6xSKDhJwc8yfiOPQ==}
++    deprecated: Please upgrade to v13 of otplib. Refer to otplib docs for migration paths
++
++  '@otplib/preset-v11@12.0.1':
++    resolution: {integrity: sha512-9hSetMI7ECqbFiKICrNa4w70deTUfArtwXykPUvSHWOdzOlfa9ajglu7mNCntlvxycTiOAXkQGwjQCzzDEMRMg==}
++
+   '@oxc-project/types@0.149.0':
+     resolution: {integrity: sha512-Efcc+iF0j3Bf67YjEqIqWXbX5XddXoK/Mw4K1/JuXwRCZ8N16VR7iT23nlCc9XrveFVh/E5Rqs2StT0V8v9LdA==}
+ 
+   '@phc/format@1.0.0':
+     resolution: {integrity: sha512-m7X9U6BG2+J+R1lSOdCiITLLrxm+cWlNI3HUFA92oLO77ObGNzaKdh8pMLqdZcshtkKuV84olNNXDfMc4FezBQ==}
+     engines: {node: '>=10'}
+ 
+   '@pinojs/redact@0.4.0':
+     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
+ 
+@@ -1851,20 +1878,23 @@ packages:
+ 
+   '@types/estree@1.0.9':
+     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
+ 
+   '@types/json-schema@7.0.15':
+     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
+ 
+   '@types/node@20.17.6':
+     resolution: {integrity: sha512-VEI7OdvK2wP7XHnsuXbAJnEpEkF6NjSN45QJlL4VGqZSXsnicpesdTWsg9RISeSdYd3yeRj/y3k5KGjUXYnFwQ==}
+ 
++  '@types/qrcode@1.5.6':
++    resolution: {integrity: sha512-te7NQcV2BOvdj2b1hCAHzAoMNuj65kNBMz0KBaxM6c3VGBOhU0dURQKOtH8CFNI/dsKkwlv32p26qYQTWoB5bw==}
++
+   '@types/react-dom@19.2.5':
+     resolution: {integrity: sha512-fMPwH9v7r/pp43yUd2/Mbiex5KouJwwR3dzHkhLREUC6764VyDsqxhAxv6OFEYR1RhjOyD1naqba8ECDBe7ZQg==}
+     peerDependencies:
+       '@types/react': ^19.2.0
+ 
+   '@types/react@19.2.18':
+     resolution: {integrity: sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w==}
+ 
+   '@types/use-sync-external-store@0.0.6':
+     resolution: {integrity: sha512-zFDAD+tlpf2r4asuHEj0XH6pY6i0g5NeAHPn+15wk3BV6JA69eERFXC1gyGThDkVa1zCyKr5jox1+2LbV/AMLg==}
+@@ -1991,20 +2021,24 @@ packages:
+     peerDependenciesMeta:
+       ajv:
+         optional: true
+ 
+   ajv@6.15.0:
+     resolution: {integrity: sha512-fgFx7Hfoq60ytK2c7DhnF8jIvzYgOMxfugjLOSMHjLIPgenqa7S7oaagATUq99mV6IYvN2tRmC0wnTYX6iPbMw==}
+ 
+   ajv@8.20.0:
+     resolution: {integrity: sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA==}
+ 
++  ansi-regex@5.0.1:
++    resolution: {integrity: sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==}
++    engines: {node: '>=8'}
++
+   ansi-styles@4.3.0:
+     resolution: {integrity: sha512-zbB9rCJAT1rbjiVDb2hqKFHNYLxgtk8NURxZ3IZwD3F6NtxbXZQCnnSi1Lkx+IDohdPlFp222wVALIheZJQSEg==}
+     engines: {node: '>=8'}
+ 
+   argon2@0.45.1:
+     resolution: {integrity: sha512-skm+/WCjkGqCQxF7FG1LuZXM5yvbFjgbfiCGsud2oLgaDhh6b6dbH0b1EkghbM+xx4Bj8Ape+KKgixoIlWZicQ==}
+     engines: {node: '>=16.17.0'}
+ 
+   argparse@2.0.1:
+     resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
+@@ -2065,20 +2099,24 @@ packages:
+     peerDependencies:
+       magicast: ^0.3.5
+     peerDependenciesMeta:
+       magicast:
+         optional: true
+ 
+   callsites@3.1.0:
+     resolution: {integrity: sha512-P8BjAsXvZS+VIDUI11hHCQEv74YT67YUi5JJFNWIqL235sBmjX4+qx9Muvls5ivyNENctx46xQLQ3aTuE7ssaQ==}
+     engines: {node: '>=6'}
+ 
++  camelcase@5.3.1:
++    resolution: {integrity: sha512-L28STB170nwWS63UjtlEOE3dldQApaJXZkOI1uMFfzf3rRuPegHaHesyee+YxQ+W6SvRDQV6UrdOdRiR153wJg==}
++    engines: {node: '>=6'}
++
+   caniuse-lite@1.0.30001810:
+     resolution: {integrity: sha512-TITQPUkaz+aVk5GL6NhOdwk1aEaNTSDPsGFWrTuhKGtjTF70jL/Oht2W4c6rXUe5fu7Ie19VIahAXHIIiWWNeg==}
+ 
+   chai@6.2.2:
+     resolution: {integrity: sha512-NUPRluOfOiTKBKvWPtSD4PhFvWCqOi0BGStNWs57X9js7XGTprSmFoz5F0tWhR4WPjNeR9jXqdC7/UpSJTnlRg==}
+     engines: {node: '>=18'}
+ 
+   chalk@4.1.2:
+     resolution: {integrity: sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA==}
+     engines: {node: '>=10'}
+@@ -2092,20 +2130,23 @@ packages:
+ 
+   citty@0.2.2:
+     resolution: {integrity: sha512-+6vJA3L98yv+IdfKGZHBNiGW5KHn22e/JwID0Strsz8h4S/csAu/OuICwxrg44k5MRiZHWIo8XXuJgQTriRP4w==}
+ 
+   class-variance-authority@0.7.1:
+     resolution: {integrity: sha512-Ka+9Trutv7G8M6WT6SeiRWz792K5qEqIGEGzXKhAE6xOWAY6pPH8U+9IY3oCMv6kqTmLsv7Xh/2w2RigkePMsg==}
+ 
+   client-only@0.0.1:
+     resolution: {integrity: sha512-IV3Ou0jSMzZrd3pZ48nLkT9DA7Ag1pnPzaiQhpW7c3RbcqqzvzzVu+L8gfqMp/8IM2MQtSiqaCxrrcfu8I8rMA==}
+ 
++  cliui@6.0.0:
++    resolution: {integrity: sha512-t6wbgtoCXvAzst7QgXxJYqPt0usEfbgQdftEPbLL/cvv6HPE5VgvqCuAIDR0NgU52ds6rFwqrgakNLrHEjCbrQ==}
++
+   clsx@2.1.1:
+     resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
+     engines: {node: '>=6'}
+ 
+   cluster-key-slot@1.1.1:
+     resolution: {integrity: sha512-rwHwUfXL40Chm1r08yrhU3qpUvdVlgkKNeyeGPOxnW8/SyVDvgRaed/Uz54AqWNaTCAThlj6QAs3TZcKI0xDEw==}
+     engines: {node: '>=0.10.0'}
+ 
+   cn@0.2.5:
+     resolution: {integrity: sha512-OCjZtMeQfXbI4Es1+EIjkd77gvWzaE689gD8KhfexlqjClC06qR1MQBR+Z35ZMSPNEBWyHiItW1Soy0UvwNv9w==}
+@@ -2219,20 +2260,24 @@ packages:
+ 
+   debug@4.4.3:
+     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
+     engines: {node: '>=6.0'}
+     peerDependencies:
+       supports-color: '*'
+     peerDependenciesMeta:
+       supports-color:
+         optional: true
+ 
++  decamelize@1.2.0:
++    resolution: {integrity: sha512-z2S+W9X73hAUUki+N+9Za2lBlun89zigOyGrsax+KUQ6wKW4ZoWpEYBkGhQjwAjjDCkWxhY0VKEhk8wzY7F5cA==}
++    engines: {node: '>=0.10.0'}
++
+   decimal.js-light@2.5.1:
+     resolution: {integrity: sha512-qIMFpTMZmny+MMIitAB6D7iVPEorVw6YQRWkvarTkT4tBeSLLiHzcwj6q0MmYSFCiVpiqPJTJEYIrpcPzVEIvg==}
+ 
+   deep-is@0.1.4:
+     resolution: {integrity: sha512-oIPzksmTg4/MriiaYGO+okXDT7ztn/w3Eptv/+gSIdMdKsJo0u4CfYNFJPy+4SKMuCqGw2wxnA+URMg3t8a/bQ==}
+ 
+   deepmerge-ts@7.1.5:
+     resolution: {integrity: sha512-HOJkrhaYsweh+W+e74Yn7YStZOilkoPb6fycpwNLKzSPtruFs48nYis0zy5yJz1+ktUhHxoRDJ27RQAWLIJVJw==}
+     engines: {node: '>=16.0.0'}
+ 
+@@ -2250,27 +2295,33 @@ packages:
+   destr@2.0.5:
+     resolution: {integrity: sha512-ugFTXCtDZunbzasqBxrK93Ik/DRYsO6S/fedkWEMKqt04xZ4csmnmwGDBAb07QWNaGMAmnTIemsYZCksjATwsA==}
+ 
+   detect-libc@2.1.2:
+     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
+     engines: {node: '>=8'}
+ 
+   detect-node-es@1.1.0:
+     resolution: {integrity: sha512-ypdmJU/TbBby2Dxibuv7ZLW3Bs1QEmM7nHjEANfohJLvE0XVujisn1qPJcZxg+qDucsr+bP6fLD1rPS3AhJ7EQ==}
+ 
++  dijkstrajs@1.0.3:
++    resolution: {integrity: sha512-qiSlmBq9+BCdCA/L46dw8Uy93mloxsPSbwnm5yrKn2vMPiy8KyAskTF6zuV/j5BMsmOGZDPs7KjU+mjb670kfA==}
++
+   dotenv@16.6.1:
+     resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
+     engines: {node: '>=12'}
+ 
+   effect@3.21.0:
+     resolution: {integrity: sha512-PPN80qRokCd1f015IANNhrwOnLO7GrrMQfk4/lnZRE/8j7UPWrNNjPV0uBrZutI/nHzernbW+J0hdqQysHiSnQ==}
+ 
++  emoji-regex@8.0.0:
++    resolution: {integrity: sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A==}
++
+   empathic@2.0.0:
+     resolution: {integrity: sha512-i6UzDscO/XfAcNYD75CfICkmfLedpyPDdozrLMmQc5ORaQcdMoc21OnlEylMIqI7U8eniKrPMxxtj8k0vhmJhA==}
+     engines: {node: '>=14'}
+ 
+   end-of-stream@1.4.5:
+     resolution: {integrity: sha512-ooEGc6HP26xXq/N+GCGOT0JKCLDGrq2bQUZrQ7gyrJiZANJ/8YDTxTpQBXGMn+WbIQXNVpyWymm7KYVICQnyOg==}
+ 
+   engine.io-client@6.6.6:
+     resolution: {integrity: sha512-iY6QdftLQ9pyiPoX082bpf/u1UewnOaJrtJIF9T0++QB34lZrj0uP+Q/bj8AlUsAxqhnkTV2BS8SBZSxOmoV5Q==}
+ 
+@@ -2423,36 +2474,44 @@ packages:
+         optional: true
+ 
+   file-entry-cache@8.0.0:
+     resolution: {integrity: sha512-XXTUwCvisa5oacNGRP9SfNtYBNAMi+RPwBFmblZEF7N7swHYQS6/Zfk7SRwx4D5j3CH211YNRco1DEMNVfZCnQ==}
+     engines: {node: '>=16.0.0'}
+ 
+   find-my-way@9.9.0:
+     resolution: {integrity: sha512-sJsgZ1sQH2UDuowPuMKg8az7Qc8F0jnj+SKkFWU/+T0xcFlgV5skgXOGUqmQzOdmW6ALA7AhJINWx3qFBkbLHA==}
+     engines: {node: '>=20'}
+ 
++  find-up@4.1.0:
++    resolution: {integrity: sha512-PpOwAdQ/YlXQ2vj8a3h8IipDuYRi3wceVQQGYWxNINccq40Anw7BlsEXCMbt1Zt+OLA6Fq9suIpIWD0OsnISlw==}
++    engines: {node: '>=8'}
++
+   find-up@5.0.0:
+     resolution: {integrity: sha512-78/PXT1wlLLDgTzDs7sjq9hzz0vXD+zn+7wypEe4fXQxCmdmqfGsEPQxmiCSQI3ajFV91bVSsvNtrJRiW6nGng==}
+     engines: {node: '>=10'}
+ 
+   flat-cache@4.0.1:
+     resolution: {integrity: sha512-f7ccFPK3SXFHpx15UIGyRJ/FJQctuKZ0zVuN3frBo4HnK3cay9VEW0R6yPYFHC0AgqhukPzKjq22t5DmAyqGyw==}
+     engines: {node: '>=16'}
+ 
+   flatted@3.4.4:
+     resolution: {integrity: sha512-5+ybhBZANEJxaH3X5evAFatUxLfEHSr7n6kYJ+1Qd0mUqr4eu9gIf6GDbWHf8RJijHrjjO8G+la14SlL2SeS1Q==}
+ 
+   fsevents@2.3.3:
+     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
+     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
+     os: [darwin]
+ 
++  get-caller-file@2.0.5:
++    resolution: {integrity: sha512-DyFP3BM/3YHTQOCUL/w0OZHR0lpKeGrxotcHWcqNEdnltqFwXVfhEBQ94eIo34AfQpo0rGki4cyIiftY06h2Fg==}
++    engines: {node: 6.* || 8.* || >= 10.*}
++
+   get-nonce@1.0.1:
+     resolution: {integrity: sha512-FJhYRoDaiatfEkUK8HKlicmu/3SGFD51q3itKDGoSTysQJBnfOcxU5GxnhE1E6soB76MbT0MBtnKJuXyAx+96Q==}
+     engines: {node: '>=6'}
+ 
+   giget@2.0.0:
+     resolution: {integrity: sha512-L5bGsVkxJbJgdnwyuheIunkGatUF/zssUoxxjACCseZYAVbaqdh9Tsmmlkl8vYan09H7sbvKt4pS8GqKLBrEzA==}
+     hasBin: true
+ 
+   glob-parent@6.0.2:
+     resolution: {integrity: sha512-XxwI8EOhVQgWp6iDL+3b0r86f4d6AX6zSU55HfB4ydCEuXLXc5FcYeOu+nnGftS4TEju/11rt4KJPTMgbfmv4A==}
+@@ -2504,20 +2563,24 @@ packages:
+     engines: {node: '>= 12'}
+ 
+   ipaddr.js@2.5.0:
+     resolution: {integrity: sha512-aq+t5NAc+cS6rZQQVWC2x98CPqGtKKTMDd4Gaodv0wShnItdKg/51djkGJ1hqH+Oy0ivDftCbSLCQob8zso01w==}
+     engines: {node: '>= 10'}
+ 
+   is-extglob@2.1.1:
+     resolution: {integrity: sha512-SbKbANkN603Vi4jEZv49LeVJMn4yGwsbzZworEoyEiutsN3nJYdbO36zfhGJ6QEDpOZIFkDtnq5JRxmvl3jsoQ==}
+     engines: {node: '>=0.10.0'}
+ 
++  is-fullwidth-code-point@3.0.0:
++    resolution: {integrity: sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==}
++    engines: {node: '>=8'}
++
+   is-glob@4.0.3:
+     resolution: {integrity: sha512-xelSayHH36ZgE7ZWhli7pW34hNbNl8Ojv5KVmkJD4hBdD3th8Tfk9vYasLM+mXWOZhFkgZfxhLSnrwRr4elSSg==}
+     engines: {node: '>=0.10.0'}
+ 
+   isexe@2.0.0:
+     resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==}
+ 
+   jiti@2.7.0:
+     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
+     hasBin: true
+@@ -2696,20 +2759,24 @@ packages:
+     os: [win32]
+ 
+   lightningcss@1.32.0:
+     resolution: {integrity: sha512-NXYBzinNrblfraPGyrbPoD19C1h9lfI/1mzgWYvXUTe414Gz/X1FD2XBZSZM7rRTrMA8JL3OtAaGifrIKhQ5yQ==}
+     engines: {node: '>= 12.0.0'}
+ 
+   lightningcss@1.33.0:
+     resolution: {integrity: sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA==}
+     engines: {node: '>= 12.0.0'}
+ 
++  locate-path@5.0.0:
++    resolution: {integrity: sha512-t7hw9pI+WvuwNJXwk5zVHpyhIqzg2qTlklJOf0mVxGSbe3Fp2VieZcduNYjaLDoy6p9uGpQEGWG87WpMKlNq8g==}
++    engines: {node: '>=8'}
++
+   locate-path@6.0.0:
+     resolution: {integrity: sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==}
+     engines: {node: '>=10'}
+ 
+   lodash.merge@4.6.2:
+     resolution: {integrity: sha512-0KpjqXRVvrYyCsX1swR/XTK0va6VQkQM6MNo7PqW77ByjAhoARA8EfrP1N4+KlKj8YS0ZUCtRT/YUuhyYDujIQ==}
+ 
+   lucide-react@0.511.0:
+     resolution: {integrity: sha512-VK5a2ydJ7xm8GvBeKLS9mu1pVK6ucef9780JVUjw6bAjJL/QXnd4Y0p7SPeOUMC27YhzNCZvm5d/QX0Tp3rc0w==}
+     peerDependencies:
+@@ -2830,28 +2897,43 @@ packages:
+     resolution: {integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==}
+     engines: {node: '>=14.0.0'}
+ 
+   once@1.4.0:
+     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
+ 
+   optionator@0.9.4:
+     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
+     engines: {node: '>= 0.8.0'}
+ 
++  otplib@12.0.1:
++    resolution: {integrity: sha512-xDGvUOQjop7RDgxTQ+o4pOol0/3xSZzawTiPKRrHnQWAy0WjhNs/5HdIDJCrqC4MBynmjXgULc6YfioaxZeFgg==}
++
++  p-limit@2.3.0:
++    resolution: {integrity: sha512-//88mFWSJx8lxCzwdAABTJL2MyWB12+eIY7MDL2SqLmAkeKU9qxRvWuSyTjm3FUmpBEMuFfckAIqEaVGUDxb6w==}
++    engines: {node: '>=6'}
++
+   p-limit@3.1.0:
+     resolution: {integrity: sha512-TYOanM3wGwNGsZN2cVTYPArw454xnXj5qmWF1bEoAc4+cU/ol7GVh7odevjp1FNHduHc3KZMcFduxU5Xc6uJRQ==}
+     engines: {node: '>=10'}
+ 
++  p-locate@4.1.0:
++    resolution: {integrity: sha512-R79ZZ/0wAxKGu3oYMlz8jy/kbhsNrS7SKZ7PxEHBgJ5+F2mtFW2fK2cOtBh1cHYkQsbzFV7I+EoRKe6Yt0oK7A==}
++    engines: {node: '>=8'}
++
+   p-locate@5.0.0:
+     resolution: {integrity: sha512-LaNjtRWUBY++zB5nE/NwcaoMylSPk+S+ZHNB1TzdbMJMny6dynpAGt7X/tl/QYq3TIeE6nxHppbo2LGymrG5Pw==}
+     engines: {node: '>=10'}
+ 
++  p-try@2.2.0:
++    resolution: {integrity: sha512-R4nPAVTAU0B9D35/Gk3uJf/7XYbQcyohSKdvAxIRSNghFl4e71hVoGnBNQz9cWaXxO2I10KTC+3jMdvvoKw6dQ==}
++    engines: {node: '>=6'}
++
+   parent-module@1.0.1:
+     resolution: {integrity: sha512-GQ2EWRpQV8/o+Aw8YqtfZZPfNRWZYkbidE9k5rpl/hC3vtHHBfGm2Ifi6qWV+coDGkrUKZAxE3Lot5kcsRlh+g==}
+     engines: {node: '>=6'}
+ 
+   path-exists@4.0.0:
+     resolution: {integrity: sha512-ak9Qy5Q7jYb2Wwcey5Fpvg2KoAc/ZIhLSLOSBmRmygPsGwkVVt0fZa0qrtMz+m6tJTAHfZQ8FnmB4MG4LWy7/w==}
+     engines: {node: '>=8'}
+ 
+   path-key@3.1.1:
+     resolution: {integrity: sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q==}
+@@ -2880,20 +2962,24 @@ packages:
+   pino-std-serializers@7.1.0:
+     resolution: {integrity: sha512-BndPH67/JxGExRgiX1dX0w1FvZck5Wa4aal9198SrRhZjH3GxKQUKIBnYJTdj2HDN3UQAS06HlfcSbQj2OHmaw==}
+ 
+   pino@10.3.1:
+     resolution: {integrity: sha512-r34yH/GlQpKZbU1BvFFqOjhISRo1MNx1tWYsYvmj6KIRHSPMT2+yHOEb1SG6NMvRoHRF0a07kCOox/9yakl1vg==}
+     hasBin: true
+ 
+   pkg-types@2.3.1:
+     resolution: {integrity: sha512-y+ichcgc2LrADuhLNAx8DFjVfgz91pRxfZdI3UDhxHvcVEZsenLO+7XaU5vOp0u/7V/wZ+plyuQxtrDlZJ+yeg==}
+ 
++  pngjs@5.0.0:
++    resolution: {integrity: sha512-40QW5YalBNfQo5yRYmiw7Yz6TKKVr3h6970B2YE+3fQpsWcrbj1PzJgxeJ19DRQjhMbKPIuMY8rFaXc8moolVw==}
++    engines: {node: '>=10.13.0'}
++
+   postcss@8.4.31:
+     resolution: {integrity: sha512-PS08Iboia9mts/2ygV3eLpY5ghnUcfLV/EXTOW1E2qYxJKGGBUtNjN76FYHnMs36RmARn41bC0AZmn+rR0OVpQ==}
+     engines: {node: ^10 || ^12 || >=14}
+ 
+   postcss@8.5.26:
+     resolution: {integrity: sha512-u82N74LFzG8ca+dD8puPnplTXoGH4fTPpVGuIbt36G3qvNlkvfD0lEAZSxaly3KX8TS/L1A1gsCEmvKmBcVbkQ==}
+     engines: {node: ^10 || ^12 || >=14}
+ 
+   postcss@8.5.28:
+     resolution: {integrity: sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A==}
+@@ -2927,20 +3013,25 @@ packages:
+   pump@3.0.4:
+     resolution: {integrity: sha512-VS7sjc6KR7e1ukRFhQSY5LM2uBWAUPiOPa/A3mkKmiMwSmRFUITt0xuj+/lesgnCv+dPIEYlkzrcyXgquIHMcA==}
+ 
+   punycode@2.3.1:
+     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
+     engines: {node: '>=6'}
+ 
+   pure-rand@6.1.0:
+     resolution: {integrity: sha512-bVWawvoZoBYpp6yIoQtQXHZjmz35RSVHnUOTefl8Vcjr8snTPY1wnpSPMWekcFwbxI6gtmT7rSYPFvz71ldiOA==}
+ 
++  qrcode@1.5.4:
++    resolution: {integrity: sha512-1ca71Zgiu6ORjHqFBDpnSMTR2ReToX4l1Au1VFLyVeBTFavzQnv5JxMFr3ukHVKpSrSA2MCk0lNJSykjUfz7Zg==}
++    engines: {node: '>=10.13.0'}
++    hasBin: true
++
+   quick-format-unescaped@4.0.4:
+     resolution: {integrity: sha512-tYC1Q1hgyRuHgloV/YXs2w15unPVh8qfu/qCTfhTYamaw7fyhumKa2yGpdSo87vY32rIclj+4fWYQXUMs9EHvg==}
+ 
+   radix-ui@1.6.7:
+     resolution: {integrity: sha512-QBdhh1arIEUvPC0dQ5+nwWAxt7+N+oP/9jPwjJkGFoSk/sqxg32gJtSXGtFh8frAIcS6oC9cx2Q+7KYCQLOAeA==}
+     peerDependencies:
+       '@types/react': '*'
+       '@types/react-dom': '*'
+       react: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+       react-dom: ^16.8 || ^17.0 || ^18.0 || ^19.0 || ^19.0.0-rc
+@@ -3031,24 +3122,31 @@ packages:
+     engines: {node: '>=4'}
+ 
+   redux-thunk@3.1.0:
+     resolution: {integrity: sha512-NW2r5T6ksUKXCabzhL9z+h206HQw/NJkcLm1GPImRQ8IzfXwRGqjVhKJGauHirT0DAuyy6hjdnMZaRoAcy0Klw==}
+     peerDependencies:
+       redux: ^5.0.0
+ 
+   redux@5.0.1:
+     resolution: {integrity: sha512-M9/ELqF6fy8FwmkpnF0S3YKOqMyoWJ4+CS5Efg2ct3oY9daQvd/Pc71FpGZsVsbl3Cpb+IIcjBDUnnyBdQbq4w==}
+ 
++  require-directory@2.1.1:
++    resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
++    engines: {node: '>=0.10.0'}
++
+   require-from-string@2.0.2:
+     resolution: {integrity: sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==}
+     engines: {node: '>=0.10.0'}
+ 
++  require-main-filename@2.0.0:
++    resolution: {integrity: sha512-NKN5kMDylKuldxYLSUfrbo5Tuzh4hd+2E8NPPX02mZtn1VuREQToYe/ZdlJy+J3uCpfaiGF05e7B8W0iXbQHmg==}
++
+   reselect@5.2.0:
+     resolution: {integrity: sha512-AgZ3UOZm3YndfrJ4OYjgrT7bmCm/1iqkjvEfH/oYjzh6PD2qw4QuT3jjnXIrpdt4MTpMXclMT3lXbmRY+XRakw==}
+ 
+   resolve-from@4.0.0:
+     resolution: {integrity: sha512-pb/MYmXstAkysRFx8piNI1tGFNQIFA3vkE3Gq4EuA1dF6gHp/+vgZqsCGJapvy8N3Q+4o7FwvquPJcnZ7RYy4g==}
+     engines: {node: '>=4'}
+ 
+   ret@0.5.0:
+     resolution: {integrity: sha512-I1XxrZSQ+oErkRR4jYbAyEEu2I0avBvvMM5JN+6EBprOGRCs63ENqZ3vjavq8fBw2+62G5LF5XelKwuJpcvcxw==}
+     engines: {node: '>=10'}
+@@ -3077,20 +3175,23 @@ packages:
+     resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
+ 
+   secure-json-parse@4.1.0:
+     resolution: {integrity: sha512-l4KnYfEyqYJxDwlNVyRfO2E4NTHfMKAWdUuA8J0yve2Dz/E/PdBepY03RvyJpssIpRFwJoCD55wA+mEDs6ByWA==}
+ 
+   semver@7.8.5:
+     resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
+     engines: {node: '>=10'}
+     hasBin: true
+ 
++  set-blocking@2.0.0:
++    resolution: {integrity: sha512-KiKBS8AnWGEyLzofFfmvKwpdPzqiy16LvQfK3yv/fVH7Bj13/wl3JSR1J+rfgRE9q7xUJK4qvgS8raSOeLUehw==}
++
+   set-cookie-parser@2.7.2:
+     resolution: {integrity: sha512-oeM1lpU/UvhTxw+g3cIfxXHyJRc/uidd3yK1P242gzHds0udQBYzs3y8j4gCCW+ZJ7ad0yctld8RYO+bdurlvw==}
+ 
+   sharp@0.35.4:
+     resolution: {integrity: sha512-n++8XWcj+jCOr2IOl7h8LbKnGBDY4aPbmprMONBNFdn0ImXqpGVv5zliDs0V9HbmbCQLpbuo2ej9rAoOQTvMDA==}
+     engines: {node: '>=20.9.0'}
+     peerDependencies:
+       '@types/node': '*'
+     peerDependenciesMeta:
+       '@types/node':
+@@ -3145,20 +3246,28 @@ packages:
+ 
+   stackback@0.0.2:
+     resolution: {integrity: sha512-1XMJE5fQo1jGH6Y/7ebnwPOBEkIEnT4QF32d5R1+VXdXveM0IBMJt8zfaxX1P3QhVwrYe+576+jkANtSS2mBbw==}
+ 
+   standard-as-callback@2.1.0:
+     resolution: {integrity: sha512-qoRRSyROncaz1z0mvYqIE4lCd9p2R90i6GxW3uZv5ucSu8tU7B5HXUP1gG8pVZsYNVaXjk8ClXHPttLyxAL48A==}
+ 
+   std-env@4.2.0:
+     resolution: {integrity: sha512-oCUKSupKTHX53EyjDtuZQ64pjLJ6yYCtpmEw0goYxtjG9KpbRe8KAsl2tBUGU9DyMcJ0RwJ8GqJAFzMXcXW1Rw==}
+ 
++  string-width@4.2.3:
++    resolution: {integrity: sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==}
++    engines: {node: '>=8'}
++
++  strip-ansi@6.0.1:
++    resolution: {integrity: sha512-Y38VPSHcqkFrCpFnQ9vuSXmquuv5oXOKpGeT6aGrr3o3Gc9AlVa6JBfUSOCnbxGGZF+/0ooI7KrPuUSztUdU5A==}
++    engines: {node: '>=8'}
++
+   strip-json-comments@3.1.1:
+     resolution: {integrity: sha512-6fPc+R4ihwqP6N/aIv2f1gMH8lOVtWQHoqC4yK6oSDVVocumAsfCqjkXnqiYMhmMwS/mEHLp7Vehlt3ql6lEig==}
+     engines: {node: '>=8'}
+ 
+   strip-json-comments@5.0.3:
+     resolution: {integrity: sha512-1tB5mhVo7U+ETBKNf92xT4hrQa3pm0MZ0PQvuDnWgAAGHDsfp4lPSpiS6psrSiet87wyGPh9ft6wmhOMQ0hDiw==}
+     engines: {node: '>=14.16'}
+ 
+   style-mod@4.1.3:
+     resolution: {integrity: sha512-i/n8VsZydrugj3Iuzll8+x/00GH2vnYsk1eomD8QiRrSAeW6ItbCQDtfXCeJHd0iwiNagqjQkvpvREEPtW3IoQ==}
+@@ -3183,20 +3292,24 @@ packages:
+   tailwind-merge@3.6.0:
+     resolution: {integrity: sha512-uxL7qAVQriqRQPAyK3pj66VqskWqoZ37PW94jwOTwNfq/z9oyu1V+eqrZqtR2+fCiXdYOZe/Modt8GtvqNzu+w==}
+ 
+   tailwindcss@4.3.3:
+     resolution: {integrity: sha512-gOhV3P7ufE62QDGg1zVaTgCR+EtPv92k2nIhVcVKcLmxT1sUBsQGhnZj175j+MqRt4zLF7ic+sCYjfhxMxj7YQ==}
+ 
+   tapable@2.3.3:
+     resolution: {integrity: sha512-uxc/zpqFg6x7C8vOE7lh6Lbda8eEL9zmVm/PLeTPBRhh1xCgdWaQ+J1CUieGpIfm2HdtsUpRv+HshiasBMcc6A==}
+     engines: {node: '>=6'}
+ 
++  thirty-two@1.0.2:
++    resolution: {integrity: sha512-OEI0IWCe+Dw46019YLl6V10Us5bi574EvlJEOcAkB29IzQ/mYD1A6RyNHLjZPiHCmuodxvgF6U+vZO1L15lxVA==}
++    engines: {node: '>=0.2.6'}
++
+   thread-stream@4.2.0:
+     resolution: {integrity: sha512-e2zZ96wSChazBsbENf/Pcm/4swHt2cEKQ92rhUjkL9GCKiTDJIaTBenjE/m9DXi0QBmTMDkFDdOomUy20A1tDQ==}
+     engines: {node: '>=20'}
+ 
+   tiny-invariant@1.3.3:
+     resolution: {integrity: sha512-+FbBPE1o9QAYvviau/qC5SE3caw21q3xkvWKBtja5vgqOWIHHJ3ioaq1VPfn/Szqctz2bU/oYeKd9/z5BL+PVg==}
+ 
+   tinybench@6.1.4:
+     resolution: {integrity: sha512-9APumHG7r4yOk4X4WlkmE71aZcv1gvin1czO3OQ1U9iJcFA5Ja/ygyb0vPOVHTthFozUYs8CLoLUlM8grb2lTQ==}
+     engines: {node: '>=20.0.0'}
+@@ -3365,53 +3478,71 @@ packages:
+       '@vitest/ui':
+         optional: true
+       happy-dom:
+         optional: true
+       jsdom:
+         optional: true
+ 
+   w3c-keyname@2.2.8:
+     resolution: {integrity: sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ==}
+ 
++  which-module@2.0.1:
++    resolution: {integrity: sha512-iBdZ57RDvnOR9AGBhML2vFZf7h8vmBjhoaZqODJBFWHVtKkDmKuHai3cx5PgVMrX5YDNp27AofYbAwctSS+vhQ==}
++
+   which@2.0.2:
+     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
+     engines: {node: '>= 8'}
+     hasBin: true
+ 
+   why-is-node-running@2.3.0:
+     resolution: {integrity: sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w==}
+     engines: {node: '>=8'}
+     hasBin: true
+ 
+   word-wrap@1.2.5:
+     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==}
+     engines: {node: '>=0.10.0'}
+ 
++  wrap-ansi@6.2.0:
++    resolution: {integrity: sha512-r6lPcBGxZXlIcymEu7InxDMhdW0KDxpLgoFLcguasxCaJ/SOIZwINatK9KY/tf+ZrlywOKU0UDj3ATXUBfxJXA==}
++    engines: {node: '>=8'}
++
+   wrappy@1.0.2:
+     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
+ 
+   ws@8.21.3:
+     resolution: {integrity: sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==}
+     engines: {node: '>=10.0.0'}
+     peerDependencies:
+       bufferutil: ^4.0.1
+       utf-8-validate: '>=5.0.2'
+     peerDependenciesMeta:
+       bufferutil:
+         optional: true
+       utf-8-validate:
+         optional: true
+ 
+   xmlhttprequest-ssl@2.1.2:
+     resolution: {integrity: sha512-TEU+nJVUUnA4CYJFLvK5X9AOeH4KvDvhIfm0vV1GaQRtchnG0hgK5p8hw/xjv8cunWYCsiPCSDzObPyhEwq3KQ==}
+     engines: {node: '>=0.4.0'}
+ 
++  y18n@4.0.3:
++    resolution: {integrity: sha512-JKhqTOwSrqNA1NY5lSztJ1GrBiUodLMmIZuLiDaMRJ+itFd+ABVE8XBjOvIWL+rSqNDC74LCSFmlb/U4UZ4hJQ==}
++
++  yargs-parser@18.1.3:
++    resolution: {integrity: sha512-o50j0JeToy/4K6OZcaQmW6lyXXKhq7csREXcDwk2omFPJEwUNOVtJKvmDr9EI1fAJZUyZcRF7kxGBWmRXudrCQ==}
++    engines: {node: '>=6'}
++
++  yargs@15.4.1:
++    resolution: {integrity: sha512-aePbxDmcYW++PaqBsJ+HYUFwCdv4LVvdnhBy78E57PIor8/OVvhMrADFFEDh8DHDFRv/O9i3lPhsENjO7QX0+A==}
++    engines: {node: '>=8'}
++
+   yocto-queue@0.1.0:
+     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
+     engines: {node: '>=10'}
+ 
+   zod@4.4.3:
+     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+ 
+ snapshots:
+ 
+   '@alloc/quick-lru@5.2.0': {}
+@@ -3984,20 +4115,43 @@ snapshots:
+ 
+   '@next/swc-linux-x64-musl@15.5.24':
+     optional: true
+ 
+   '@next/swc-win32-arm64-msvc@15.5.24':
+     optional: true
+ 
+   '@next/swc-win32-x64-msvc@15.5.24':
+     optional: true
+ 
++  '@otplib/core@12.0.1': {}
++
++  '@otplib/plugin-crypto@12.0.1':
++    dependencies:
++      '@otplib/core': 12.0.1
++
++  '@otplib/plugin-thirty-two@12.0.1':
++    dependencies:
++      '@otplib/core': 12.0.1
++      thirty-two: 1.0.2
++
++  '@otplib/preset-default@12.0.1':
++    dependencies:
++      '@otplib/core': 12.0.1
++      '@otplib/plugin-crypto': 12.0.1
++      '@otplib/plugin-thirty-two': 12.0.1
++
++  '@otplib/preset-v11@12.0.1':
++    dependencies:
++      '@otplib/core': 12.0.1
++      '@otplib/plugin-crypto': 12.0.1
++      '@otplib/plugin-thirty-two': 12.0.1
++
+   '@oxc-project/types@0.149.0': {}
+ 
+   '@phc/format@1.0.0': {}
+ 
+   '@pinojs/redact@0.4.0': {}
+ 
+   '@prisma/client@6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)':
+     optionalDependencies:
+       prisma: 6.19.3(typescript@5.9.3)
+       typescript: 5.9.3
+@@ -4978,20 +5132,24 @@ snapshots:
+   '@types/deep-eql@4.0.2': {}
+ 
+   '@types/estree@1.0.9': {}
+ 
+   '@types/json-schema@7.0.15': {}
+ 
+   '@types/node@20.17.6':
+     dependencies:
+       undici-types: 6.19.8
+ 
++  '@types/qrcode@1.5.6':
++    dependencies:
++      '@types/node': 20.17.6
++
+   '@types/react-dom@19.2.5(@types/react@19.2.18)':
+     dependencies:
+       '@types/react': 19.2.18
+ 
+   '@types/react@19.2.18':
+     dependencies:
+       csstype: 3.2.3
+ 
+   '@types/use-sync-external-store@0.0.6': {}
+ 
+@@ -5152,20 +5310,22 @@ snapshots:
+       json-schema-traverse: 0.4.1
+       uri-js: 4.4.1
+ 
+   ajv@8.20.0:
+     dependencies:
+       fast-deep-equal: 3.1.3
+       fast-uri: 3.1.6
+       json-schema-traverse: 1.0.0
+       require-from-string: 2.0.2
+ 
++  ansi-regex@5.0.1: {}
++
+   ansi-styles@4.3.0:
+     dependencies:
+       color-convert: 2.0.1
+ 
+   argon2@0.45.1:
+     dependencies:
+       '@phc/format': 1.0.0
+       cross-env: 10.1.0
+       node-addon-api: 8.9.2
+       node-gyp-build: 4.8.4
+@@ -5220,20 +5380,22 @@ snapshots:
+       giget: 2.0.0
+       jiti: 2.7.0
+       ohash: 2.0.12
+       pathe: 2.0.3
+       perfect-debounce: 1.0.0
+       pkg-types: 2.3.1
+       rc9: 2.1.2
+ 
+   callsites@3.1.0: {}
+ 
++  camelcase@5.3.1: {}
++
+   caniuse-lite@1.0.30001810: {}
+ 
+   chai@6.2.2: {}
+ 
+   chalk@4.1.2:
+     dependencies:
+       ansi-styles: 4.3.0
+       supports-color: 7.2.0
+ 
+   chokidar@4.0.3:
+@@ -5245,20 +5407,26 @@ snapshots:
+       consola: 3.4.2
+ 
+   citty@0.2.2: {}
+ 
+   class-variance-authority@0.7.1:
+     dependencies:
+       clsx: 2.1.1
+ 
+   client-only@0.0.1: {}
+ 
++  cliui@6.0.0:
++    dependencies:
++      string-width: 4.2.3
++      strip-ansi: 6.0.1
++      wrap-ansi: 6.2.0
++
+   clsx@2.1.1: {}
+ 
+   cluster-key-slot@1.1.1: {}
+ 
+   cn@0.2.5: {}
+ 
+   codemirror@6.0.2:
+     dependencies:
+       '@codemirror/autocomplete': 6.20.3
+       '@codemirror/commands': 6.11.0
+@@ -5351,45 +5519,51 @@ snapshots:
+   d3-timer@3.0.1: {}
+ 
+   dateformat@4.6.3: {}
+ 
+   debug@4.4.3(supports-color@7.2.0):
+     dependencies:
+       ms: 2.1.3
+     optionalDependencies:
+       supports-color: 7.2.0
+ 
++  decamelize@1.2.0: {}
++
+   decimal.js-light@2.5.1: {}
+ 
+   deep-is@0.1.4: {}
+ 
+   deepmerge-ts@7.1.5: {}
+ 
+   defu@6.1.7: {}
+ 
+   denque@2.1.0: {}
+ 
+   dequal@2.0.3: {}
+ 
+   destr@2.0.5: {}
+ 
+   detect-libc@2.1.2: {}
+ 
+   detect-node-es@1.1.0: {}
+ 
++  dijkstrajs@1.0.3: {}
++
+   dotenv@16.6.1: {}
+ 
+   effect@3.21.0:
+     dependencies:
+       '@standard-schema/spec': 1.1.0
+       fast-check: 3.23.2
+ 
++  emoji-regex@8.0.0: {}
++
+   empathic@2.0.0: {}
+ 
+   end-of-stream@1.4.5:
+     dependencies:
+       once: 1.4.0
+ 
+   engine.io-client@6.6.6(supports-color@7.2.0):
+     dependencies:
+       '@socket.io/component-emitter': 3.1.2
+       debug: 4.4.3(supports-color@7.2.0)
+@@ -5610,35 +5784,42 @@ snapshots:
+   file-entry-cache@8.0.0:
+     dependencies:
+       flat-cache: 4.0.1
+ 
+   find-my-way@9.9.0:
+     dependencies:
+       fast-deep-equal: 3.1.3
+       fast-querystring: 1.1.2
+       safe-regex2: 5.1.1
+ 
++  find-up@4.1.0:
++    dependencies:
++      locate-path: 5.0.0
++      path-exists: 4.0.0
++
+   find-up@5.0.0:
+     dependencies:
+       locate-path: 6.0.0
+       path-exists: 4.0.0
+ 
+   flat-cache@4.0.1:
+     dependencies:
+       flatted: 3.4.4
+       keyv: 4.5.4
+ 
+   flatted@3.4.4: {}
+ 
+   fsevents@2.3.3:
+     optional: true
+ 
++  get-caller-file@2.0.5: {}
++
+   get-nonce@1.0.1: {}
+ 
+   giget@2.0.0:
+     dependencies:
+       citty: 0.1.6
+       consola: 3.4.2
+       defu: 6.1.7
+       node-fetch-native: 1.6.7
+       nypm: 0.6.9
+       pathe: 2.0.3
+@@ -5680,20 +5861,22 @@ snapshots:
+       standard-as-callback: 2.1.0
+     transitivePeerDependencies:
+       - supports-color
+ 
+   ip-address@10.5.0: {}
+ 
+   ipaddr.js@2.5.0: {}
+ 
+   is-extglob@2.1.1: {}
+ 
++  is-fullwidth-code-point@3.0.0: {}
++
+   is-glob@4.0.3:
+     dependencies:
+       is-extglob: 2.1.1
+ 
+   isexe@2.0.0: {}
+ 
+   jiti@2.7.0: {}
+ 
+   joycon@3.1.1: {}
+ 
+@@ -5819,20 +6002,24 @@ snapshots:
+       lightningcss-darwin-x64: 1.33.0
+       lightningcss-freebsd-x64: 1.33.0
+       lightningcss-linux-arm-gnueabihf: 1.33.0
+       lightningcss-linux-arm64-gnu: 1.33.0
+       lightningcss-linux-arm64-musl: 1.33.0
+       lightningcss-linux-x64-gnu: 1.33.0
+       lightningcss-linux-x64-musl: 1.33.0
+       lightningcss-win32-arm64-msvc: 1.33.0
+       lightningcss-win32-x64-msvc: 1.33.0
+ 
++  locate-path@5.0.0:
++    dependencies:
++      p-locate: 4.1.0
++
+   locate-path@6.0.0:
+     dependencies:
+       p-locate: 5.0.0
+ 
+   lodash.merge@4.6.2: {}
+ 
+   lucide-react@0.511.0(react@19.2.8):
+     dependencies:
+       react: 19.2.8
+ 
+@@ -5948,28 +6135,44 @@ snapshots:
+ 
+   optionator@0.9.4:
+     dependencies:
+       deep-is: 0.1.4
+       fast-levenshtein: 2.0.6
+       levn: 0.4.1
+       prelude-ls: 1.2.1
+       type-check: 0.4.0
+       word-wrap: 1.2.5
+ 
++  otplib@12.0.1:
++    dependencies:
++      '@otplib/core': 12.0.1
++      '@otplib/preset-default': 12.0.1
++      '@otplib/preset-v11': 12.0.1
++
++  p-limit@2.3.0:
++    dependencies:
++      p-try: 2.2.0
++
+   p-limit@3.1.0:
+     dependencies:
+       yocto-queue: 0.1.0
+ 
++  p-locate@4.1.0:
++    dependencies:
++      p-limit: 2.3.0
++
+   p-locate@5.0.0:
+     dependencies:
+       p-limit: 3.1.0
+ 
++  p-try@2.2.0: {}
++
+   parent-module@1.0.1:
+     dependencies:
+       callsites: 3.1.0
+ 
+   path-exists@4.0.0: {}
+ 
+   path-key@3.1.1: {}
+ 
+   pathe@2.0.3: {}
+ 
+@@ -6014,20 +6217,22 @@ snapshots:
+       safe-stable-stringify: 2.5.0
+       sonic-boom: 4.2.1
+       thread-stream: 4.2.0
+ 
+   pkg-types@2.3.1:
+     dependencies:
+       confbox: 0.2.4
+       exsolve: 1.1.1
+       pathe: 2.0.3
+ 
++  pngjs@5.0.0: {}
++
+   postcss@8.4.31:
+     dependencies:
+       nanoid: 3.3.18
+       picocolors: 1.1.1
+       source-map-js: 1.2.1
+ 
+   postcss@8.5.26:
+     dependencies:
+       nanoid: 3.3.18
+       picocolors: 1.1.1
+@@ -6058,20 +6263,26 @@ snapshots:
+ 
+   pump@3.0.4:
+     dependencies:
+       end-of-stream: 1.4.5
+       once: 1.4.0
+ 
+   punycode@2.3.1: {}
+ 
+   pure-rand@6.1.0: {}
+ 
++  qrcode@1.5.4:
++    dependencies:
++      dijkstrajs: 1.0.3
++      pngjs: 5.0.0
++      yargs: 15.4.1
++
+   quick-format-unescaped@4.0.4: {}
+ 
+   radix-ui@1.6.7(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+     dependencies:
+       '@radix-ui/primitive': 1.1.7
+       '@radix-ui/react-accessible-icon': 1.1.15(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+       '@radix-ui/react-accordion': 1.2.20(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+       '@radix-ui/react-alert-dialog': 1.1.23(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+       '@radix-ui/react-arrow': 1.1.15(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+       '@radix-ui/react-aspect-ratio': 1.1.15(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+@@ -6207,22 +6418,26 @@ snapshots:
+       - redux
+ 
+   redis-errors@1.2.0: {}
+ 
+   redux-thunk@3.1.0(redux@5.0.1):
+     dependencies:
+       redux: 5.0.1
+ 
+   redux@5.0.1: {}
+ 
++  require-directory@2.1.1: {}
++
+   require-from-string@2.0.2: {}
+ 
++  require-main-filename@2.0.0: {}
++
+   reselect@5.2.0: {}
+ 
+   resolve-from@4.0.0: {}
+ 
+   ret@0.5.0: {}
+ 
+   reusify@1.1.0: {}
+ 
+   rfdc@1.4.1: {}
+ 
+@@ -6252,20 +6467,22 @@ snapshots:
+       ret: 0.5.0
+ 
+   safe-stable-stringify@2.5.0: {}
+ 
+   scheduler@0.27.0: {}
+ 
+   secure-json-parse@4.1.0: {}
+ 
+   semver@7.8.5: {}
+ 
++  set-blocking@2.0.0: {}
++
+   set-cookie-parser@2.7.2: {}
+ 
+   sharp@0.35.4(@types/node@20.17.6):
+     dependencies:
+       '@img/colour': 1.1.0
+       detect-libc: 2.1.2
+       semver: 7.8.5
+     optionalDependencies:
+       '@img/sharp-darwin-arm64': 0.35.4
+       '@img/sharp-darwin-x64': 0.35.4
+@@ -6358,20 +6575,30 @@ snapshots:
+   source-map-js@1.2.1: {}
+ 
+   split2@4.2.0: {}
+ 
+   stackback@0.0.2: {}
+ 
+   standard-as-callback@2.1.0: {}
+ 
+   std-env@4.2.0: {}
+ 
++  string-width@4.2.3:
++    dependencies:
++      emoji-regex: 8.0.0
++      is-fullwidth-code-point: 3.0.0
++      strip-ansi: 6.0.1
++
++  strip-ansi@6.0.1:
++    dependencies:
++      ansi-regex: 5.0.1
++
+   strip-json-comments@3.1.1: {}
+ 
+   strip-json-comments@5.0.3: {}
+ 
+   style-mod@4.1.3: {}
+ 
+   styled-jsx@5.1.6(react@19.2.8):
+     dependencies:
+       client-only: 0.0.1
+       react: 19.2.8
+@@ -6379,20 +6606,22 @@ snapshots:
+   supports-color@7.2.0:
+     dependencies:
+       has-flag: 4.0.0
+ 
+   tailwind-merge@3.6.0: {}
+ 
+   tailwindcss@4.3.3: {}
+ 
+   tapable@2.3.3: {}
+ 
++  thirty-two@1.0.2: {}
++
+   thread-stream@4.2.0:
+     dependencies:
+       real-require: 1.0.0
+ 
+   tiny-invariant@1.3.3: {}
+ 
+   tinybench@6.1.4: {}
+ 
+   tinyexec@1.3.0: {}
+ 
+@@ -6512,30 +6741,59 @@ snapshots:
+       tinybench: 6.1.4
+       tinyexec: 1.3.0
+       tinyglobby: 0.2.17
+       vite: 8.3.0(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.12)
+       why-is-node-running: 2.3.0
+     transitivePeerDependencies:
+       - msw
+ 
+   w3c-keyname@2.2.8: {}
+ 
++  which-module@2.0.1: {}
++
+   which@2.0.2:
+     dependencies:
+       isexe: 2.0.0
+ 
+   why-is-node-running@2.3.0:
+     dependencies:
+       siginfo: 2.0.0
+       stackback: 0.0.2
+ 
+   word-wrap@1.2.5: {}
+ 
++  wrap-ansi@6.2.0:
++    dependencies:
++      ansi-styles: 4.3.0
++      string-width: 4.2.3
++      strip-ansi: 6.0.1
++
+   wrappy@1.0.2: {}
+ 
+   ws@8.21.3: {}
+ 
+   xmlhttprequest-ssl@2.1.2: {}
+ 
++  y18n@4.0.3: {}
++
++  yargs-parser@18.1.3:
++    dependencies:
++      camelcase: 5.3.1
++      decamelize: 1.2.0
++
++  yargs@15.4.1:
++    dependencies:
++      cliui: 6.0.0
++      decamelize: 1.2.0
++      find-up: 4.1.0
++      get-caller-file: 2.0.5
++      require-directory: 2.1.1
++      require-main-filename: 2.0.0
++      set-blocking: 2.0.0
++      string-width: 4.2.3
++      which-module: 2.0.1
++      y18n: 4.0.3
++      yargs-parser: 18.1.3
++
+   yocto-queue@0.1.0: {}
+ 
+   zod@4.4.3: {}

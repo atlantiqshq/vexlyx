@@ -11,6 +11,7 @@ import {
 
 import type {
   CreateDomainInput,
+  UpdateDomainInput,
   DomainListQuery,
   DomainResponse,
   DomainVerificationInstructions,
@@ -20,7 +21,7 @@ import type {
   CertType,
 } from "@vexlyx/shared";
 import { env } from "../../config/env.js";
-import { assertUnderQuota } from "../../utils/quota.js";
+import { assertUnderQuota, notifyQuotaThreshold } from "../../utils/quota.js";
 import type { AuditLogService } from "../audit-log/service.js";
 import { PUBLIC_RESOLVER_IPS } from "./resolvers.js";
 
@@ -190,7 +191,7 @@ export class DomainService {
     const configPath = getTraefikConfigFile(domain.id);
 
     if (domain.status !== "ACTIVE" || !domain.project) {
-      this.removeTraefikRouter(domain.id);
+      this.removeTraefikRouter(domain.id, false);
       return;
     }
 
@@ -287,7 +288,7 @@ http:
   /**
    * Removes Traefik dynamic router configuration file for a domain.
    */
-  public removeTraefikRouter(domainId: string): void {
+  public removeTraefikRouter(domainId: string, removeCertificates = true): void {
     const configPath = getTraefikConfigFile(domainId);
     if (fs.existsSync(configPath)) {
       try {
@@ -297,6 +298,8 @@ http:
         console.error(`[DomainService] Failed to remove Traefik config for domain ${domainId}:`, err);
       }
     }
+
+    if (!removeCertificates) return;
 
     // Clean up any custom certificate files
     try {
@@ -321,13 +324,6 @@ http:
    * verification is automatically inherited and status is set directly to ACTIVE.
    */
   public async create(userId: string, input: CreateDomainInput): Promise<DomainResponse> {
-    await assertUnderQuota(
-      this.prisma,
-      userId,
-      "domain",
-      (message, code, statusCode) => new DomainError(message, code, statusCode),
-    );
-
     const existing = await this.prisma.domain.findUnique({
       where: { hostname: input.hostname },
     });
@@ -339,6 +335,13 @@ http:
         409,
       );
     }
+
+    await assertUnderQuota(
+      this.prisma,
+      userId,
+      "domain",
+      (message, code, statusCode) => new DomainError(message, code, statusCode),
+    );
 
     let project: Project | null = null;
     if (input.projectId) {
@@ -403,6 +406,7 @@ http:
         certificate: true,
       },
     });
+    void notifyQuotaThreshold(this.prisma, userId, "domain");
 
     // If automatically active (inherited), sync Traefik dynamic router immediately
     if (domain.status === "ACTIVE" && domain.project) {
@@ -426,8 +430,36 @@ http:
   }
 
   /**
-   * Lists domains belonging to the user with optional project, parent, and search filters.
+   * Changes only the project assignment while preserving domain resources.
    */
+  public async update(userId: string, domainId: string, input: UpdateDomainInput): Promise<DomainResponse> {
+    const domain = await this.prisma.domain.findFirst({ where: { id: domainId, userId } });
+    if (!domain) throw new DomainError("Domain not found", "DOMAIN_NOT_FOUND", 404);
+
+    if (input.projectId !== null) {
+      const project = await this.prisma.project.findFirst({
+        where: { id: input.projectId, userId, deletedAt: null },
+      });
+      if (!project) throw new DomainError("Associated project not found", "PROJECT_NOT_FOUND", 404);
+    }
+
+    const updated = await this.prisma.domain.update({
+      where: { id: domain.id, userId },
+      data: { projectId: input.projectId },
+      include: {
+        project: { select: { id: true, name: true, type: true, status: true, port: true, internalPort: true } },
+        certificate: true,
+      },
+    });
+    this.syncTraefikRouter(updated);
+    await this.auditLog?.log(userId, "domain.updated", { type: "Domain", id: domain.id }, {
+      before: { projectId: domain.projectId },
+      after: { projectId: updated.projectId },
+    });
+    return this.getById(userId, domainId);
+  }
+
+  /** Lists owned domains with optional project, parent, and search filters. */
   public async list(userId: string, query: DomainListQuery): Promise<DomainResponse[]> {
     const where: {
       userId: string;

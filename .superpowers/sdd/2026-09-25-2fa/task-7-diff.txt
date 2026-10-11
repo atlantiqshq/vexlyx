@@ -1,0 +1,805 @@
+diff --git a/apps/api/src/modules/auth/service.ts b/apps/api/src/modules/auth/service.ts
+index 75ac2bf..c68658e 100644
+--- a/apps/api/src/modules/auth/service.ts
++++ b/apps/api/src/modules/auth/service.ts
+@@ -7,20 +7,21 @@ const PUBLIC_USER_SELECT = {
+   email: true,
+   name: true,
+   role: true,
+   resellerId: true,
+   maxProjects: true,
+   maxDomains: true,
+   maxDatabases: true,
+   maxMailboxes: true,
+   maxSubAccounts: true,
+   permissions: true,
++  totpEnabled: true,
+   createdAt: true,
+ } as const;
+ 
+ export class AuthService {
+   constructor(private prisma: PrismaClient) {}
+ 
+   async register(data: RegisterInput) {
+     const existing = await this.prisma.user.findUnique({
+       where: { email: data.email },
+     });
+diff --git a/apps/dashboard/src/components/settings/SettingsPage.tsx b/apps/dashboard/src/components/settings/SettingsPage.tsx
+index 822058b..938be88 100644
+--- a/apps/dashboard/src/components/settings/SettingsPage.tsx
++++ b/apps/dashboard/src/components/settings/SettingsPage.tsx
+@@ -24,20 +24,21 @@ import { Badge } from "@/components/ui/badge";
+ import { Skeleton } from "@/components/ui/skeleton";
+ import { Separator } from "@/components/ui/separator";
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+ import { useAuth } from "@/hooks/useAuth";
+ import { useDnsInfo } from "@/hooks/useDnsInfo";
+ import { useSystemSettings } from "@/hooks/useSystemSettings";
+ import { ApiRequestError } from "@/lib/api";
+ import { cn } from "@/lib/utils";
+ import { formatTime } from "@/lib/datetime";
+ import { useRefreshAnimation, refreshIconClassName } from "@/hooks/useRefreshAnimation";
++import { TwoFactorCard } from "./TwoFactorCard";
+ import type { DnsRecordVerification } from "@vexlyx/shared";
+ 
+ // IANA timezone identifiers, sourced from the runtime's own tz database
+ // rather than a hardcoded list. Falls back to a short common set on very
+ // old browsers that lack Intl.supportedValuesOf.
+ function listTimezones(): string[] {
+   try {
+     return Intl.supportedValuesOf("timeZone");
+   } catch {
+     return ["UTC", "America/New_York", "America/Los_Angeles", "Europe/London", "Europe/Berlin", "Asia/Tokyo"];
+@@ -223,20 +224,23 @@ export function SettingsPage() {
+                 required
+               />
+             </div>
+             <Button type="submit" disabled={isChangingPassword}>
+               {isChangingPassword ? "Changing…" : "Change password"}
+             </Button>
+           </form>
+         </CardContent>
+       </Card>
+ 
++      {/* Two-Factor Authentication (F5.17) */}
++      <TwoFactorCard />
++
+       {/* Server Timezone (F5.13) — governs the backup cron's wall-clock time
+           and (where adopted) how timestamps are displayed across the dashboard. */}
+       <Card>
+         <CardHeader>
+           <CardTitle className="flex items-center gap-2 text-base">
+             <Globe className="h-4 w-4" />
+             Server Timezone
+           </CardTitle>
+           <CardDescription>
+             {isAdmin
+diff --git a/apps/dashboard/src/components/settings/TwoFactorCard.tsx b/apps/dashboard/src/components/settings/TwoFactorCard.tsx
+new file mode 100644
+index 0000000..fbe9d23
+--- /dev/null
++++ b/apps/dashboard/src/components/settings/TwoFactorCard.tsx
+@@ -0,0 +1,387 @@
++"use client";
++
++import { useState } from "react";
++import { toast } from "sonner";
++import { Check, Copy, Loader2, ShieldCheck } from "lucide-react";
++import { Button } from "@/components/ui/button";
++import { Input } from "@/components/ui/input";
++import { Label } from "@/components/ui/label";
++import {
++  Card,
++  CardContent,
++  CardHeader,
++  CardTitle,
++  CardDescription,
++} from "@/components/ui/card";
++import { Badge } from "@/components/ui/badge";
++import {
++  Dialog,
++  DialogContent,
++  DialogDescription,
++  DialogFooter,
++  DialogHeader,
++  DialogTitle,
++} from "@/components/ui/dialog";
++import { useAuth } from "@/hooks/useAuth";
++import { useTwoFactor } from "@/hooks/useTwoFactor";
++import { ApiRequestError } from "@/lib/api";
++import { cn } from "@/lib/utils";
++
++type DialogMode = "setup" | "codes" | "disable" | null;
++
++function errorMessage(err: unknown, fallback: string): string {
++  return err instanceof ApiRequestError ? err.message : fallback;
++}
++
++export function TwoFactorCard() {
++  const { user, refetch } = useAuth();
++  const { setup, confirm, disable } = useTwoFactor();
++
++  const [mode, setMode] = useState<DialogMode>(null);
++  const [isBusy, setIsBusy] = useState(false);
++  const [formError, setFormError] = useState<string | null>(null);
++
++  const [qrDataUrl, setQrDataUrl] = useState("");
++  const [manualKey, setManualKey] = useState("");
++  const [verifyCode, setVerifyCode] = useState("");
++
++  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
++  const [copiedCodes, setCopiedCodes] = useState(false);
++  const [copiedKey, setCopiedKey] = useState(false);
++
++  const [password, setPassword] = useState("");
++  const [codeOrRecovery, setCodeOrRecovery] = useState("");
++
++  const enabled = user?.totpEnabled ?? false;
++
++  const closeDialog = () => {
++    if (isBusy) return;
++    setMode(null);
++    setFormError(null);
++    setVerifyCode("");
++    setPassword("");
++    setCodeOrRecovery("");
++  };
++
++  const handleStartSetup = async () => {
++    setIsBusy(true);
++    setFormError(null);
++    try {
++      const data = await setup();
++      setQrDataUrl(data.qrDataUrl);
++      setManualKey(data.manualKey);
++      setVerifyCode("");
++      setMode("setup");
++    } catch (err) {
++      const message = errorMessage(err, "Failed to start 2FA setup");
++      setFormError(message);
++      toast.error(message);
++    } finally {
++      setIsBusy(false);
++    }
++  };
++
++  const handleConfirmSetup = async (e: React.FormEvent<HTMLFormElement>) => {
++    e.preventDefault();
++    if (!/^\d{6}$/.test(verifyCode)) {
++      setFormError("Code must be 6 digits");
++      return;
++    }
++    setIsBusy(true);
++    setFormError(null);
++    try {
++      const data = await confirm(verifyCode);
++      setRecoveryCodes(data.recoveryCodes);
++      setCopiedCodes(false);
++      setMode("codes");
++      await refetch();
++    } catch (err) {
++      const message = errorMessage(err, "Invalid code");
++      setFormError(message);
++      toast.error(message);
++    } finally {
++      setIsBusy(false);
++    }
++  };
++
++  const handleDisable = async (e: React.FormEvent<HTMLFormElement>) => {
++    e.preventDefault();
++    if (codeOrRecovery.trim().length < 6) {
++      setFormError("Enter your 6-digit code or a recovery code");
++      return;
++    }
++    setIsBusy(true);
++    setFormError(null);
++    try {
++      await disable(password, codeOrRecovery.trim());
++      toast.success("Two-factor authentication disabled");
++      setMode(null);
++      setPassword("");
++      setCodeOrRecovery("");
++      await refetch();
++    } catch (err) {
++      const message = errorMessage(err, "Failed to disable 2FA");
++      setFormError(message);
++      toast.error(message);
++    } finally {
++      setIsBusy(false);
++    }
++  };
++
++  const handleDismissCodes = () => {
++    setMode(null);
++    setRecoveryCodes([]);
++    setQrDataUrl("");
++    setManualKey("");
++    setVerifyCode("");
++  };
++
++  const copyText = async (text: string, onCopied: () => void) => {
++    try {
++      await navigator.clipboard.writeText(text);
++      onCopied();
++      toast.success("Copied to clipboard");
++    } catch {
++      toast.error("Failed to copy");
++    }
++  };
++
++  return (
++    <>
++      <Card>
++        <CardHeader className="flex flex-row items-center justify-between">
++          <div>
++            <CardTitle className="flex items-center gap-2 text-base">
++              <ShieldCheck className="h-4 w-4" />
++              Two-Factor Authentication
++            </CardTitle>
++            <CardDescription>
++              Add an authenticator-app code on top of your password at sign-in.
++            </CardDescription>
++          </div>
++          <Badge
++            variant="outline"
++            className={cn(
++              enabled
++                ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
++                : "border-slate-500/20 bg-slate-500/10 text-muted-foreground",
++            )}
++          >
++            {enabled ? "Enabled" : "Not enabled"}
++          </Badge>
++        </CardHeader>
++        <CardContent>
++          {enabled ? (
++            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
++              <p className="text-sm text-muted-foreground">
++                Your account requires an authenticator code or recovery code at sign-in.
++              </p>
++              <Button
++                variant="outline"
++                size="sm"
++                onClick={() => {
++                  setFormError(null);
++                  setMode("disable");
++                }}
++              >
++                Disable 2FA
++              </Button>
++            </div>
++          ) : (
++            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
++              <p className="text-sm text-muted-foreground">
++                Protect your account with a time-based one-time code from any authenticator app.
++              </p>
++              <Button size="sm" onClick={() => void handleStartSetup()} disabled={isBusy}>
++                {isBusy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
++                Set up 2FA
++              </Button>
++            </div>
++          )}
++          {formError && !mode && (
++            <p className="mt-3 text-sm text-destructive">{formError}</p>
++          )}
++        </CardContent>
++      </Card>
++
++      {/* Setup: QR + manual key + 6-digit verify */}
++      <Dialog open={mode === "setup"} onOpenChange={(open) => !open && closeDialog()}>
++        <DialogContent className="sm:max-w-md">
++          <DialogHeader>
++            <DialogTitle>Set up authenticator app</DialogTitle>
++            <DialogDescription>
++              Scan the code with your authenticator app, then enter the 6-digit code to
++              confirm.
++            </DialogDescription>
++          </DialogHeader>
++          <div className="space-y-4">
++            {qrDataUrl && (
++              <div className="flex justify-center rounded-lg border border-border bg-white p-4">
++                <img src={qrDataUrl} alt="2FA setup QR code" className="h-48 w-48" />
++              </div>
++            )}
++            {manualKey && (
++              <div className="space-y-1.5">
++                <Label>Manual key</Label>
++                <div className="flex items-center gap-2">
++                  <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs">
++                    {manualKey}
++                  </code>
++                  <Button
++                    variant="ghost"
++                    size="sm"
++                    onClick={() => void copyText(manualKey, () => setCopiedKey(true))}
++                  >
++                    {copiedKey ? (
++                      <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
++                    ) : (
++                      <Copy className="h-3.5 w-3.5" />
++                    )}
++                  </Button>
++                </div>
++              </div>
++            )}
++            <form onSubmit={(e) => void handleConfirmSetup(e)} className="space-y-3">
++              {formError && (
++                <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
++                  {formError}
++                </div>
++              )}
++              <div className="space-y-1.5">
++                <Label htmlFor="2fa-verify-code">6-digit code</Label>
++                <Input
++                  id="2fa-verify-code"
++                  inputMode="numeric"
++                  autoComplete="one-time-code"
++                  maxLength={6}
++                  autoFocus
++                  value={verifyCode}
++                  onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, ""))}
++                  disabled={isBusy}
++                  required
++                />
++              </div>
++              <DialogFooter>
++                <Button
++                  type="button"
++                  variant="outline"
++                  size="sm"
++                  onClick={closeDialog}
++                  disabled={isBusy}
++                >
++                  Cancel
++                </Button>
++                <Button type="submit" size="sm" disabled={isBusy}>
++                  {isBusy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
++                  Verify &amp; enable
++                </Button>
++              </DialogFooter>
++            </form>
++          </div>
++        </DialogContent>
++      </Dialog>
++
++      {/* Recovery codes, shown exactly once */}
++      <Dialog open={mode === "codes"} onOpenChange={() => {}}>
++        <DialogContent className="sm:max-w-md">
++          <DialogHeader>
++            <DialogTitle>Save your recovery codes</DialogTitle>
++            <DialogDescription>
++              Each code works once if you lose your authenticator. They will never be
++              shown again.
++            </DialogDescription>
++          </DialogHeader>
++          <div className="space-y-3">
++            <div className="grid grid-cols-1 gap-1.5 rounded-lg border border-border bg-muted/40 p-3 font-mono text-sm sm:grid-cols-2">
++              {recoveryCodes.map((code) => (
++                <span key={code} className="px-1">
++                  {code}
++                </span>
++              ))}
++            </div>
++            <div className="flex gap-2">
++              <Button
++                variant="outline"
++                size="sm"
++                onClick={() =>
++                  void copyText(recoveryCodes.join("\n"), () => setCopiedCodes(true))
++                }
++              >
++                {copiedCodes ? (
++                  <Check className="mr-1.5 h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
++                ) : (
++                  <Copy className="mr-1.5 h-3.5 w-3.5" />
++                )}
++                Copy all
++              </Button>
++            </div>
++          </div>
++          <DialogFooter>
++            <Button size="sm" onClick={handleDismissCodes}>
++              I saved these
++            </Button>
++          </DialogFooter>
++        </DialogContent>
++      </Dialog>
++
++      {/* Disable: password + code confirm */}
++      <Dialog open={mode === "disable"} onOpenChange={(open) => !open && closeDialog()}>
++        <DialogContent className="sm:max-w-md">
++          <DialogHeader>
++            <DialogTitle>Disable two-factor authentication?</DialogTitle>
++            <DialogDescription>
++              Your account will be protected by password alone. Confirm with your
++              password and a current authenticator or recovery code.
++            </DialogDescription>
++          </DialogHeader>
++          <form onSubmit={(e) => void handleDisable(e)} className="space-y-3">
++            {formError && (
++              <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
++                {formError}
++              </div>
++            )}
++            <div className="space-y-1.5">
++              <Label htmlFor="2fa-disable-password">Password</Label>
++              <Input
++                id="2fa-disable-password"
++                type="password"
++                autoComplete="current-password"
++                value={password}
++                onChange={(e) => setPassword(e.target.value)}
++                disabled={isBusy}
++                required
++              />
++            </div>
++            <div className="space-y-1.5">
++              <Label htmlFor="2fa-disable-code">Authenticator or recovery code</Label>
++              <Input
++                id="2fa-disable-code"
++                autoComplete="one-time-code"
++                maxLength={12}
++                value={codeOrRecovery}
++                onChange={(e) => setCodeOrRecovery(e.target.value)}
++                disabled={isBusy}
++                required
++              />
++            </div>
++            <DialogFooter>
++              <Button
++                type="button"
++                variant="outline"
++                size="sm"
++                onClick={closeDialog}
++                disabled={isBusy}
++              >
++                Cancel
++              </Button>
++              <Button type="submit" variant="destructive" size="sm" disabled={isBusy}>
++                {isBusy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
++                Disable 2FA
++              </Button>
++            </DialogFooter>
++          </form>
++        </DialogContent>
++      </Dialog>
++    </>
++  );
++}
+diff --git a/apps/dashboard/src/components/users/EditUserDialog.tsx b/apps/dashboard/src/components/users/EditUserDialog.tsx
+index d66c5d6..2f44efc 100644
+--- a/apps/dashboard/src/components/users/EditUserDialog.tsx
++++ b/apps/dashboard/src/components/users/EditUserDialog.tsx
+@@ -1,42 +1,50 @@
+ "use client";
+ 
+ import { useEffect, useState } from "react";
+-import { Loader2 } from "lucide-react";
++import { toast } from "sonner";
++import { Loader2, ShieldAlert } from "lucide-react";
+ import { Button } from "@/components/ui/button";
+ import {
+   Dialog,
+   DialogContent,
+   DialogDescription,
+   DialogFooter,
+   DialogHeader,
+   DialogTitle,
+ } from "@/components/ui/dialog";
+ import { Input } from "@/components/ui/input";
+ import { Label } from "@/components/ui/label";
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+ import { Switch } from "@/components/ui/switch";
++import { ApiRequestError } from "@/lib/api";
+ import type { Role, Permission, UserResponse, UpdateUserQuotasInput } from "@vexlyx/shared";
+ 
+ interface EditUserDialogProps {
+   user: UserResponse | null;
+   isSaving: boolean;
+   /**
+    * Only an ADMIN may change roles or grant permissions — a RESELLER
+    * editing their own sub-account never sees these fields, and neither does
+    * an ADMIN editing their own account (see `isSelf`).
+    */
+   canEditRole: boolean;
+   /** True when the signed-in user is editing their own account. An ADMIN can never change their own role — it could lock them (and everyone) out — so the role/permissions fields are hidden and this drives the explanatory copy instead. */
+   isSelf: boolean;
++  /**
++   * ADMIN-only 2FA reset (F5.17). Never shown for self — an ADMIN who lost
++   * their own authenticator must be reset by another ADMIN directly.
++   */
++  canReset2FA: boolean;
+   onOpenChange: (open: boolean) => void;
+   onSave: (id: string, data: { role?: Role; quotas: UpdateUserQuotasInput; permissions?: Permission[] }) => Promise<void>;
++  onReset2FA: (id: string) => Promise<void>;
+ }
+ 
+ type QuotaField = "maxProjects" | "maxDomains" | "maxDatabases" | "maxMailboxes" | "maxSubAccounts";
+ 
+ const QUOTA_FIELDS: { key: QuotaField; label: string }[] = [
+   { key: "maxProjects", label: "Max projects" },
+   { key: "maxDomains", label: "Max domains" },
+   { key: "maxDatabases", label: "Max databases" },
+   { key: "maxMailboxes", label: "Max mailboxes" },
+   { key: "maxSubAccounts", label: "Max sub-accounts" },
+@@ -50,31 +58,33 @@ const PERMISSION_FIELDS: { key: Permission; label: string; description: string }
+ ];
+ 
+ function toFormValue(v: number | null): string {
+   return v === null ? "" : String(v);
+ }
+ 
+ function fromFormValue(v: string): number | null {
+   return v.trim() === "" ? null : Number(v);
+ }
+ 
+-export function EditUserDialog({ user, isSaving, canEditRole, isSelf, onOpenChange, onSave }: EditUserDialogProps) {
++export function EditUserDialog({ user, isSaving, canEditRole, isSelf, canReset2FA, onOpenChange, onSave, onReset2FA }: EditUserDialogProps) {
+   const [role, setRole] = useState<Role>("USER");
+   const [quotas, setQuotas] = useState<Record<QuotaField, string>>({
+     maxProjects: "",
+     maxDomains: "",
+     maxDatabases: "",
+     maxMailboxes: "",
+     maxSubAccounts: "",
+   });
+   const [permissions, setPermissions] = useState<Permission[]>([]);
+   const [oversellingEnabled, setOversellingEnabled] = useState(false);
++  const [showResetConfirm, setShowResetConfirm] = useState(false);
++  const [isResetting, setIsResetting] = useState(false);
+ 
+   useEffect(() => {
+     if (!user) return;
+     setRole(user.role);
+     setQuotas({
+       maxProjects: toFormValue(user.maxProjects),
+       maxDomains: toFormValue(user.maxDomains),
+       maxDatabases: toFormValue(user.maxDatabases),
+       maxMailboxes: toFormValue(user.maxMailboxes),
+       maxSubAccounts: toFormValue(user.maxSubAccounts),
+@@ -100,21 +110,36 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, onOpenChan
+         maxDomains: fromFormValue(quotas.maxDomains),
+         maxDatabases: fromFormValue(quotas.maxDatabases),
+         maxMailboxes: fromFormValue(quotas.maxMailboxes),
+         maxSubAccounts: fromFormValue(quotas.maxSubAccounts),
+         oversellingEnabled: canEditOverselling ? oversellingEnabled : undefined,
+       },
+       permissions: canEditRole ? permissions : undefined,
+     });
+   };
+ 
++  const handleReset2FA = async () => {
++    if (!user) return;
++    setIsResetting(true);
++    try {
++      await onReset2FA(user.id);
++      toast.success("Two-factor authentication reset");
++      setShowResetConfirm(false);
++    } catch (err) {
++      toast.error(err instanceof ApiRequestError ? err.message : "Failed to reset 2FA");
++    } finally {
++      setIsResetting(false);
++    }
++  };
++
+   return (
++    <>
+     <Dialog open={!!user} onOpenChange={onOpenChange}>
+       <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-lg">
+         <DialogHeader>
+           <DialogTitle>Edit user</DialogTitle>
+           <DialogDescription>
+             {isSelf
+               ? "You can't change your own role or permissions — only quotas. Leave a quota blank for unlimited."
+               : canEditRole
+                 ? `Change ${user?.name}'s role and resource quotas. Leave a quota blank for unlimited.`
+                 : `Change ${user?.name}'s resource quotas. Leave a quota blank for unlimited.`}
+@@ -187,25 +212,74 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, onOpenChan
+                   id={`quota-${key}`}
+                   type="number"
+                   min={0}
+                   value={quotas[key]}
+                   onChange={(e) => setQuotas((q) => ({ ...q, [key]: e.target.value }))}
+                   placeholder="Unlimited"
+                 />
+               </div>
+             ))}
+           </div>
++
++          {canReset2FA && (
++            <div className="space-y-1.5">
++              <Label>Two-factor authentication</Label>
++              <div className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
++                <div className="min-w-0">
++                  <p className="text-sm font-medium">Reset 2FA</p>
++                  <p className="text-xs text-muted-foreground">
++                    Clears this account&apos;s authenticator and recovery codes. Use when
++                    they are locked out.
++                  </p>
++                </div>
++                <Button
++                  variant="outline"
++                  size="sm"
++                  className="shrink-0"
++                  onClick={() => setShowResetConfirm(true)}
++                  disabled={isResetting}
++                >
++                  Reset 2FA
++                </Button>
++              </div>
++            </div>
++          )}
+         </div>
+ 
+         <DialogFooter>
+           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={isSaving}>
+             Cancel
+           </Button>
+           <Button size="sm" onClick={handleSave} disabled={isSaving}>
+             {isSaving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+             Save changes
+           </Button>
+         </DialogFooter>
+       </DialogContent>
+     </Dialog>
++
++    <Dialog open={showResetConfirm} onOpenChange={(open) => !isResetting && setShowResetConfirm(open)}>
++      <DialogContent>
++        <DialogHeader>
++          <DialogTitle className="flex items-center gap-2">
++            <ShieldAlert className="h-4 w-4 text-destructive" />
++            Reset 2FA for {user?.name}?
++          </DialogTitle>
++          <DialogDescription>
++            This will permanently clear their authenticator secret and all recovery
++            codes. They will sign in with password alone until they set 2FA up again.
++          </DialogDescription>
++        </DialogHeader>
++        <DialogFooter>
++          <Button variant="outline" size="sm" onClick={() => setShowResetConfirm(false)} disabled={isResetting}>
++            Cancel
++          </Button>
++          <Button variant="destructive" size="sm" onClick={() => void handleReset2FA()} disabled={isResetting}>
++            {isResetting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
++            Reset 2FA
++          </Button>
++        </DialogFooter>
++      </DialogContent>
++    </Dialog>
++    </>
+   );
+ }
+diff --git a/apps/dashboard/src/components/users/UsersPage.tsx b/apps/dashboard/src/components/users/UsersPage.tsx
+index 4f9547d..d9d2104 100644
+--- a/apps/dashboard/src/components/users/UsersPage.tsx
++++ b/apps/dashboard/src/components/users/UsersPage.tsx
+@@ -1,16 +1,17 @@
+ "use client";
+ 
+ import { useState } from "react";
+ import { ShieldAlert } from "lucide-react";
+ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+ import { useAuth } from "@/hooks/useAuth";
++import { useTwoFactor } from "@/hooks/useTwoFactor";
+ import { useUsers } from "@/hooks/useUsers";
+ import { useUsage } from "@/hooks/useUsage";
+ import { QuotaBadge, isQuotaAtLimit } from "@/components/quota/QuotaBadge";
+ import { UserList } from "./UserList";
+ import { CreateSubAccountDialog } from "./CreateSubAccountDialog";
+ import { EditUserDialog } from "./EditUserDialog";
+ import { DeleteUserConfirmDialog } from "./DeleteUserConfirmDialog";
+ import type { UserResponse } from "@vexlyx/shared";
+ 
+ /**
+@@ -25,20 +26,21 @@ export function UsersPage() {
+     isLoading,
+     updateRole,
+     updateQuotas,
+     isSavingQuotas,
+     updatePermissions,
+     deleteUser,
+     createSubAccount,
+     isCreating,
+   } = useUsers();
+   const { usage, isLoading: isUsageLoading } = useUsage();
++  const { adminReset } = useTwoFactor();
+   const [editTarget, setEditTarget] = useState<UserResponse | null>(null);
+   const [deleteTarget, setDeleteTarget] = useState<UserResponse | null>(null);
+ 
+   if (isAuthLoading) return null;
+ 
+   if (user?.role !== "ADMIN" && user?.role !== "RESELLER") {
+     return (
+       <Card>
+         <CardContent className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+           <ShieldAlert className="h-8 w-8 text-muted-foreground" />
+@@ -116,28 +118,30 @@ export function UsersPage() {
+             onEdit={setEditTarget}
+             onDelete={setDeleteTarget}
+           />
+         </CardContent>
+       </Card>
+ 
+       <EditUserDialog
+         user={editTarget}
+         canEditRole={isAdmin && editTarget?.id !== user.id}
+         isSelf={editTarget?.id === user.id}
++        canReset2FA={isAdmin && editTarget?.id !== user.id}
+         onOpenChange={(open) => !open && setEditTarget(null)}
+         isSaving={isSavingQuotas}
+         onSave={async (id, data) => {
+           if (data.role) await updateRole(id, { role: data.role });
+           await updateQuotas(id, data.quotas);
+           if (data.permissions) await updatePermissions(id, { permissions: data.permissions });
+           setEditTarget(null);
+         }}
++        onReset2FA={(id) => adminReset(id).then(() => undefined)}
+       />
+ 
+       <DeleteUserConfirmDialog
+         user={deleteTarget}
+         onOpenChange={(open) => !open && setDeleteTarget(null)}
+         onConfirm={() => {
+           if (deleteTarget) deleteUser(deleteTarget.id);
+         }}
+       />
+     </div>
+diff --git a/apps/dashboard/src/hooks/useTwoFactor.ts b/apps/dashboard/src/hooks/useTwoFactor.ts
+new file mode 100644
+index 0000000..2e217ec
+--- /dev/null
++++ b/apps/dashboard/src/hooks/useTwoFactor.ts
+@@ -0,0 +1,26 @@
++"use client";
++
++import { fetchAPI } from "@/lib/api";
++
++export function useTwoFactor() {
++  const setup = () =>
++    fetchAPI<{ otpauthUrl: string; qrDataUrl: string; manualKey: string }>(
++      "/api/auth/2fa/setup",
++      { method: "POST" },
++    );
++  const confirm = (code: string) =>
++    fetchAPI<{ recoveryCodes: string[] }>("/api/auth/2fa/verify-setup", {
++      method: "POST",
++      body: JSON.stringify({ code }),
++    });
++  const disable = (password: string, codeOrRecovery: string) =>
++    fetchAPI<{ message: string }>("/api/auth/2fa/disable", {
++      method: "POST",
++      body: JSON.stringify({ password, codeOrRecovery }),
++    });
++  const adminReset = (userId: string) =>
++    fetchAPI<{ message: string }>(`/api/users/${userId}/2fa/reset`, {
++      method: "POST",
++    });
++  return { setup, confirm, disable, adminReset };
++}
+diff --git a/packages/shared/src/types/index.ts b/packages/shared/src/types/index.ts
+index 8654f79..365bfdb 100644
+--- a/packages/shared/src/types/index.ts
++++ b/packages/shared/src/types/index.ts
+@@ -18,20 +18,21 @@ export type User = {
+   email: string;
+   name: string;
+   role: Role;
+   resellerId: string | null;
+   maxProjects: number | null;
+   maxDomains: number | null;
+   maxDatabases: number | null;
+   maxMailboxes: number | null;
+   maxSubAccounts: number | null;
+   permissions: Permission[];
++  totpEnabled: boolean;
+   createdAt: Date | string;
+ };
+ 
+ /**
+  * Standard API error response shape.
+  * Every error returned by the Fastify API must conform to this structure.
+  */
+ export type ApiError = {
+   error: string;
+   code: string;

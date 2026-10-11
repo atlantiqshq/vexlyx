@@ -6,8 +6,9 @@ import type {
   UpdateUserQuotasInput,
   UpdateUserPermissionsInput,
 } from "./schema.js";
-import { assertNominalPoolWithinCap, assertUnderQuota, getUsageSummary } from "../../utils/quota.js";
+import { assertNominalPoolWithinCap, assertUnderQuota, getUsageSummary, notifyQuotaThreshold } from "../../utils/quota.js";
 import type { AuditLogService } from "../audit-log/service.js";
+import { notifyUser } from "../system-email/notifier.js";
 
 export class UserError extends Error {
   constructor(
@@ -94,6 +95,8 @@ export class UserService {
       { type: "User", id },
       { before: { role: target.role }, after: { role: data.role } },
     );
+
+    notifyUser("role_changed", updated.email, { name: updated.name, newRole: data.role });
 
     return updated;
   }
@@ -256,6 +259,8 @@ export class UserService {
     await this.auditLog.log(requester.id, "user.created", { type: "User", id: created.id }, {
       after: { email: created.email, role: created.role },
     });
+
+    if (!isAdmin) void notifyQuotaThreshold(this.prisma, requester.id, "subAccount");
 
     return created;
   }

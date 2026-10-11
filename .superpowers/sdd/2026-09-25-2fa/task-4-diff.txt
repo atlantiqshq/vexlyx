@@ -1,0 +1,202 @@
+diff --git a/apps/api/src/modules/auth/two-factor-service.test.ts b/apps/api/src/modules/auth/two-factor-service.test.ts
+new file mode 100644
+index 0000000..79d5f73
+--- /dev/null
++++ b/apps/api/src/modules/auth/two-factor-service.test.ts
+@@ -0,0 +1,88 @@
++import { describe, it, expect, vi } from "vitest";
++import { authenticator } from "otplib";
++
++// config/env.ts validates process.env eagerly at import time, so these must
++// be set before two-factor-service.ts (which imports encryption.ts → env.ts)
++// is loaded — static imports would be hoisted ahead of any assignment here.
++process.env.DATABASE_URL ??= "postgresql://user:pass@localhost:5432/vexlyx_test";
++process.env.SESSION_SECRET ??= "test-session-secret-at-least-32-characters-long";
++
++const { TwoFactorService } = await import("./two-factor-service.js");
++const { encrypt } = await import("../../utils/encryption.js");
++
++function makeService() {
++  const store = new Map<string, string>();
++  const redis = {
++    set: vi.fn(async (k: string, v: string, _mode?: string, _ttl?: number) => {
++      store.set(k, v);
++      return "OK";
++    }),
++    get: vi.fn(async (k: string) => store.get(k) ?? null),
++    del: vi.fn(async (k: string) => {
++      store.delete(k);
++    }),
++  };
++  const prisma = {
++    user: { findUnique: vi.fn(), update: vi.fn() },
++    recoveryCode: { createMany: vi.fn(), findMany: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
++  };
++  const auditLog = { log: vi.fn(async () => undefined) };
++  const service = new TwoFactorService(prisma as never, redis as never, auditLog as never);
++  return { service, prisma, redis, auditLog };
++}
++
++describe("TwoFactorService.confirmSetup", () => {
++  it("enables 2fa on valid totp code and returns 10 recovery codes", async () => {
++    const { service, prisma } = makeService();
++    const secret = authenticator.generateSecret();
++    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
++      id: "u1", email: "u1@example.com", password: "hashed", totpSecretEncrypted: encrypt(secret), totpEnabled: false,
++    });
++    const code = authenticator.generate(secret);
++    const result = await service.confirmSetup("u1", code);
++    expect(result.recoveryCodes).toHaveLength(10);
++    expect(prisma.user.update).toHaveBeenCalledWith(
++      expect.objectContaining({ where: { id: "u1" } }),
++    );
++    expect(prisma.recoveryCode.createMany).toHaveBeenCalledOnce();
++    const rows = (prisma.recoveryCode.createMany as ReturnType<typeof vi.fn>).mock.calls[0]?.[0].data as { userId: string; codeHash: string }[];
++    expect(rows).toHaveLength(10);
++    for (const row of rows) {
++      expect(row.userId).toBe("u1");
++      expect(row.codeHash).not.toContain(result.recoveryCodes[0]);
++    }
++  });
++});
++
++describe("TwoFactorService.verifyLoginCode", () => {
++  it("accepts a valid totp code", async () => {
++    const { service, prisma } = makeService();
++    const secret = authenticator.generateSecret();
++    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
++      id: "u1", totpSecretEncrypted: encrypt(secret), totpEnabled: true,
++    });
++    const ok = await service.verifyLoginCode("u1", authenticator.generate(secret));
++    expect(ok).toBe(true);
++  });
++
++  it("rejects a wrong code with no recovery codes", async () => {
++    const { service, prisma } = makeService();
++    const secret = authenticator.generateSecret();
++    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
++      id: "u1", totpSecretEncrypted: encrypt(secret), totpEnabled: true,
++    });
++    (prisma.recoveryCode.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
++    const ok = await service.verifyLoginCode("u1", "000000");
++    expect(ok).toBe(false);
++  });
++});
++
++describe("TwoFactorService challenge store", () => {
++  it("round-trips a challenge token single-use", async () => {
++    const { service } = makeService();
++    const token = await service.storeChallenge("u1");
++    expect(token).toHaveLength(64);
++    expect(await service.consumeChallenge(token)).toBe("u1");
++    expect(await service.consumeChallenge(token)).toBeNull();
++  });
++});
+diff --git a/apps/api/src/modules/auth/two-factor-service.ts b/apps/api/src/modules/auth/two-factor-service.ts
+new file mode 100644
+index 0000000..90e2fbe
+--- /dev/null
++++ b/apps/api/src/modules/auth/two-factor-service.ts
+@@ -0,0 +1,102 @@
++import crypto from "node:crypto";
++import { authenticator } from "otplib";
++import QRCode from "qrcode";
++import * as argon2 from "argon2";
++import type { PrismaClient } from "@prisma/client";
++import { encrypt, decrypt } from "../../utils/encryption.js";
++import type { AuditLogService } from "../audit-log/service.js";
++import { AuthError } from "./service.js";
++
++const CHALLENGE_PREFIX = "2fa-challenge:";
++const CHALLENGE_TTL_SECONDS = 300;
++const ISSUER = "Vexlyx";
++
++function newRecoveryCodes(): string[] {
++  return Array.from({ length: 10 }, () =>
++    crypto.randomBytes(5).toString("hex"),
++  );
++}
++
++export class TwoFactorService {
++  constructor(
++    private prisma: PrismaClient,
++    private redis: { set(k: string, v: string, mode: string, ttl: number): Promise<unknown>; get(k: string): Promise<string | null>; del(k: string): Promise<unknown> },
++    private auditLog: AuditLogService,
++  ) {}
++
++  async createSetup(userId: string) {
++    const user = await this.prisma.user.findUnique({ where: { id: userId } });
++    if (!user) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
++    const secret = authenticator.generateSecret();
++    await this.prisma.user.update({
++      where: { id: userId },
++      data: { totpSecretEncrypted: encrypt(secret), totpEnabled: false, totpVerifiedAt: null },
++    });
++    const otpauthUrl = authenticator.keyuri(user.email, ISSUER, secret);
++    const qrDataUrl = await QRCode.toDataURL(otpauthUrl);
++    await this.prisma.recoveryCode.deleteMany({ where: { userId } });
++    return { otpauthUrl, qrDataUrl, manualKey: secret };
++  }
++
++  async confirmSetup(userId: string, code: string) {
++    const user = await this.prisma.user.findUnique({ where: { id: userId } });
++    if (!user?.totpSecretEncrypted) throw new AuthError("Setup not started", "2FA_NOT_STARTED", 400);
++    const secret = decrypt(user.totpSecretEncrypted);
++    if (!authenticator.check(code, secret)) throw new AuthError("Invalid code", "2FA_INVALID_CODE", 401);
++    const codes = newRecoveryCodes();
++    const hashes = await Promise.all(codes.map((c) => argon2.hash(c)));
++    await this.prisma.recoveryCode.createMany({
++      data: codes.map((_c, i) => ({ userId, codeHash: hashes[i] as string })),
++    });
++    await this.prisma.user.update({ where: { id: userId }, data: { totpEnabled: true, totpVerifiedAt: new Date() } });
++    await this.auditLog.log(userId, "user.2fa_enabled", { type: "User", id: userId }, {});
++    return { recoveryCodes: codes };
++  }
++
++  async verifyLoginCode(userId: string, code: string): Promise<boolean> {
++    const user = await this.prisma.user.findUnique({ where: { id: userId } });
++    if (!user?.totpEnabled || !user.totpSecretEncrypted) return false;
++    if (/^\d{6}$/.test(code) && authenticator.check(code, decrypt(user.totpSecretEncrypted))) return true;
++    const rows = await this.prisma.recoveryCode.findMany({ where: { userId, usedAt: null } });
++    for (const row of rows) {
++      if (await argon2.verify(row.codeHash, code)) {
++        await this.prisma.recoveryCode.update({ where: { id: row.id }, data: { usedAt: new Date() } });
++        return true;
++      }
++    }
++    return false;
++  }
++
++  async disable(userId: string, password: string, codeOrRecovery: string) {
++    const user = await this.prisma.user.findUnique({ where: { id: userId } });
++    if (!user) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
++    if (!(await argon2.verify(user.password, password))) throw new AuthError("Invalid email or password", "INVALID_CREDENTIALS", 401);
++    if (!(await this.verifyLoginCode(userId, codeOrRecovery))) throw new AuthError("Invalid code", "2FA_INVALID_CODE", 401);
++    await this.prisma.user.update({ where: { id: userId }, data: { totpSecretEncrypted: null, totpEnabled: false, totpVerifiedAt: null } });
++    await this.prisma.recoveryCode.deleteMany({ where: { userId } });
++    await this.auditLog.log(userId, "user.2fa_disabled", { type: "User", id: userId }, {});
++  }
++
++  async adminReset(actorId: string, targetUserId: string) {
++    await this.prisma.user.update({ where: { id: targetUserId }, data: { totpSecretEncrypted: null, totpEnabled: false, totpVerifiedAt: null } });
++    await this.prisma.recoveryCode.deleteMany({ where: { userId: targetUserId } });
++    await this.auditLog.log(actorId, "user.2fa_reset", { type: "User", id: targetUserId }, {});
++  }
++
++  async storeChallenge(userId: string): Promise<string> {
++    const token = crypto.randomBytes(32).toString("hex");
++    await this.redis.set(CHALLENGE_PREFIX + token, JSON.stringify({ userId }), "EX", CHALLENGE_TTL_SECONDS);
++    return token;
++  }
++
++  async consumeChallenge(token: string): Promise<string | null> {
++    const raw = await this.redis.get(CHALLENGE_PREFIX + token);
++    if (!raw) return null;
++    await this.redis.del(CHALLENGE_PREFIX + token);
++    try {
++      return (JSON.parse(raw) as { userId: string }).userId;
++    } catch {
++      return null;
++    }
++  }
++}

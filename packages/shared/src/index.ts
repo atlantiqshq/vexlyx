@@ -4,8 +4,26 @@ export const VEXLYX_VERSION = "0.0.1";
 /** Application name constant used across both frontend and backend */
 export const APP_NAME = "Vexlyx";
 
-export { RegisterSchema, LoginSchema, ChangePasswordSchema } from "./schemas/auth.js";
-export type { RegisterInput, LoginInput, ChangePasswordInput } from "./schemas/auth.js";
+export {
+  RegisterSchema,
+  LoginSchema,
+  ChangePasswordSchema,
+  TwoFactorChallengeSchema,
+  VerifyTotpSetupSchema,
+  DisableTwoFactorSchema,
+  ForgotPasswordSchema,
+  ResetPasswordSchema,
+} from "./schemas/auth.js";
+export type {
+  RegisterInput,
+  LoginInput,
+  ChangePasswordInput,
+  TwoFactorChallengeInput,
+  VerifyTotpSetupInput,
+  DisableTwoFactorInput,
+  ForgotPasswordInput,
+  ResetPasswordInput,
+} from "./schemas/auth.js";
 
 export {
   ProjectTypeSchema,
@@ -61,6 +79,8 @@ export type {
   CreateDatabaseInput,
   DatabaseListQuery,
   DatabaseDetail,
+  AdminerAvailability,
+  DatabaseListResponse,
   DatabaseConnectionTestResult,
 } from "./schemas/databases.js";
 
@@ -84,6 +104,7 @@ export {
   SetDnsModeSchema,
   HostnameSchema,
   CreateDomainSchema,
+  UpdateDomainSchema,
   DomainListQuerySchema,
   isWildcardHostname,
   getParentDomain,
@@ -91,6 +112,7 @@ export {
 } from "./schemas/domains.js";
 export type {
   DomainStatus,
+  UpdateDomainInput,
   DnsMode,
   SetDnsModeInput,
   DnsDelegationCheckResponse,
@@ -248,7 +270,6 @@ export type {
   MetricsQuery,
   ThresholdConfig,
 } from "./schemas/monitoring.js";
-
 
 export type {
   User,
@@ -432,3 +453,39 @@ export type {
   AuditLogQuery,
 } from "./schemas/audit-log.js";
 
+export {
+  GitHubAccountTypeSchema,
+  GitHubRepositorySelectionSchema,
+  GitHubConnectionStatusSchema,
+  GitHubAppStatusSchema,
+  ConfigureGitHubAppSchema,
+  GitHubInstallationSchema,
+  GitHubSelectableRepositorySchema,
+  GitHubRepositoryListQuerySchema,
+  GitHubRepositoryListSchema,
+  GitHubBranchSchema,
+  ConnectGitHubRepositorySchema,
+  GitHubCallbackQuerySchema,
+} from "./schemas/github.js";
+export type {
+  GitHubAppStatus,
+  ConfigureGitHubAppInput,
+  GitHubInstallation,
+  GitHubRepository,
+  GitHubRepositoryListQuery,
+  GitHubRepositoryList,
+  GitHubBranch,
+  ConnectGitHubRepositoryInput,
+  GitHubCallbackQuery,
+} from "./schemas/github.js";
+
+export {
+  SystemEmailTestSchema,
+  SYSTEM_EMAIL_EVENTS,
+} from "./schemas/systemEmail.js";
+export type {
+  SystemEmailTestInput,
+  SystemEmailEvent,
+  SystemEmailStatusResponse,
+  SystemEmailDnsRecord,
+} from "./schemas/systemEmail.js";

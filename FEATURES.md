@@ -31,10 +31,10 @@ This document is the **single source of truth** for all Vexlyx features.
 | Phase 2: Multi-Runtime Support | 🟢 COMPLETED | 100% (8/8) |
 | Phase 3: Domain & DNS | 🟡 IN PROGRESS | 80% (4/5) |
 | Phase 4: Email Server | 🟡 IN PROGRESS | 88% (7/8) |
-| Phase 5: System & Administration | 🟡 IN PROGRESS | 45% (9/20) |
-| Phase 6: Ecosystem & Launch | 🔴 NOT STARTED | 0% (0/3) |
+| Phase 5: System & Administration | 🟡 IN PROGRESS | 45% (10/22) |
+| Phase 6: Ecosystem & Launch | 🟡 IN PROGRESS | 33% (1/3) |
 
-**Overall Completion:** 71% (42/59 features)
+**Overall Completion:** 72% (44/61 features)
 
 ---
 
@@ -1006,6 +1006,8 @@ Allow users to attach custom domains to projects. Validate domain ownership and 
 
 **Acceptance Criteria:**
 - [x] `POST /api/domains` — add domain to project
+- [x] `PATCH /api/domains/:id` — assign, move, or unassign an existing owned domain without deleting DNS, certificates, or mail (issue #14)
+- [x] Domain cards provide project assignment; project tabs offer to attach existing owned domains and confirm moves
 - [x] Domain validation via DNS TXT record
 - [x] `GET /api/domains` — list domains
 - [x] `DELETE /api/domains/:id` — remove domain
@@ -2041,16 +2043,16 @@ Comparable tools all solve this: **Coolify** runs configurable automated cleanup
 ---
 
 ### F5.17 — Two-Factor Authentication (2FA/TOTP)
-**Status:** 🔴 NOT STARTED
+**Status:** 🟢 COMPLETED
 
 **Description:**
 Competitor audit (F5.5 follow-up): Plesk, cPanel/WHM, and CapRover all support 2FA on login, tied to their access-control system — Vexlyx currently has none, at any role. Given Vexlyx's ADMIN role has unrestricted access (including firewall and backups), this is a meaningfully higher-value security feature than for a typical SaaS app.
 
 **Acceptance Criteria:**
-- [ ] TOTP-based 2FA (compatible with standard authenticator apps), optional per-user, enforceable-by-policy for ADMIN (e.g. an env flag requiring it for the ADMIN role specifically)
-- [ ] Setup flow: QR code + manual secret entry, backup/recovery codes shown once
-- [ ] Login flow: password, then TOTP challenge if enabled, before session creation
-- [ ] Works alongside the existing Argon2id + Redis session auth (`apps/api/src/plugins/auth.ts`) without replacing it
+- [x] TOTP-based 2FA (compatible with standard authenticator apps), optional per-user, enforceable-by-policy for ADMIN (e.g. an env flag requiring it for the ADMIN role specifically)
+- [x] Setup flow: QR code + manual secret entry, backup/recovery codes shown once
+- [x] Login flow: password, then TOTP challenge if enabled, before session creation
+- [x] Works alongside the existing Argon2id + Redis session auth (`apps/api/src/plugins/auth.ts`) without replacing it
 
 **Test Plan:**
 1. Enable 2FA on an account → login requires password + valid TOTP code
@@ -2192,7 +2194,7 @@ Found live while testing custom domain attachment on `panel.mindgera.site`: afte
 ---
 
 ### F5.23 — System Transactional Email (Panel-to-User Notifications)
-**Status:** 🔴 NOT STARTED
+**Status:** 🟢 COMPLETED
 
 **Description:**
 Surfaced while planning F5.18 (Audit Log): Vexlyx has no way to email its own panel users for critical/informational events (password reset, security alerts like a new-role/2FA change, quota-warning notices, backup-failure notices, audit events, etc.). This is distinct from the existing `docker/postfix` stack (F4.1, completed), which is customer-facing mail *hosting* — it lets Vexlyx-hosted domains send/receive mail via their own mailboxes, with no involvement from the Vexlyx application itself. There is currently no password-reset flow, no email-verification flow, and no notification/email-template model in the schema at all — this would need to be built from scratch, not just wired up.
@@ -2205,13 +2207,13 @@ Surfaced while planning F5.18 (Audit Log): Vexlyx has no way to email its own pa
 - `User` model (`apps/api/prisma/schema.prisma:142`) has no `resetToken`, `emailVerified`, or similar fields; no `Notification`/`EmailTemplate` model exists anywhere in the schema.
 
 **Acceptance Criteria:**
-- [ ] Decide delivery mechanism (internal Postfix relay vs. third-party provider) — needs explicit user sign-off given CLAUDE.md's "no new dependencies without confirming" rule
-- [ ] Password-reset flow (request → emailed token → reset), since none exists today
-- [ ] Critical/security notifications: role change, 2FA enabled/disabled (once F5.17 ships), new login from unrecognized location (if in scope), backup failure
-- [ ] Quota-warning notification (approaching/at plan limits)
-- [ ] Simple email template system (plain layout + subject/body per event type), no marketing/HTML-builder scope
-- [ ] Per-install SMTP/provider configuration (env vars, documented in `.env.example` per CLAUDE.md §14 process)
-- [ ] Does not duplicate or interfere with the existing customer mail-hosting stack (F4.1)
+- [x] Decide delivery mechanism (internal Postfix relay vs. third-party provider) — needs explicit user sign-off given CLAUDE.md's "no new dependencies without confirming" rule
+- [x] Password-reset flow (request → emailed token → reset), since none exists today
+- [x] Critical/security notifications: role change, 2FA enabled/disabled (once F5.17 ships), backup failure (new login from unrecognized location deferred — needs login history)
+- [x] Quota-warning notification (approaching/at plan limits)
+- [x] Simple email template system (plain layout + subject/body per event type), no marketing/HTML-builder scope
+- [x] Per-install SMTP/provider configuration (env vars, documented in `.env.example` per CLAUDE.md §14 process)
+- [x] Does not duplicate or interfere with the existing customer mail-hosting stack (F4.1)
 
 **Test Plan:**
 1. Trigger password reset → email received with working, single-use, expiring token
@@ -2336,23 +2338,166 @@ Hosted DNS (F5.25) could not actually serve the internet: CoreDNS was bound to l
 
 ---
 
+### F5.28 — Scheduled Tasks (Cron Jobs)
+**Status:** 🔴 NOT STARTED
+
+**Description:**
+Users cannot schedule recurring work for their projects. A Laravel app needs `php artisan schedule:run` every minute, a WordPress site needs `wp-cron.php` triggered on a real schedule instead of on page views, and a Node or Python app often needs a nightly cleanup or report script. Today the only options are an external cron service or shell access to the host, and the panel deliberately gives users neither. The platform already schedules its own work with BullMQ (backups F5.3, Docker cleanup F5.15, both timezone-aware per F5.13), runs each project in its own container, and can email users (F5.23), so this feature adds a user-facing version of the same machinery: a command run **inside a project's container** on a cron schedule, with run history, a "Run now" button and failure emails.
+
+**Competitor research (2026):**
+- **cPanel**: a Cron Jobs page with common-interval presets and a free-form 5-field editor. Output of each run is emailed to the account by default, which is also its biggest annoyance (users silence it with `>/dev/null 2>&1`); the contact address is configurable. ([cPanel cron email behaviour](https://www.inmotionhosting.com/support/email/cron-job-email.md))
+- **Plesk**: "Scheduled Tasks" with three task types (run a command, fetch a URL, run a PHP script) and a notification choice per task: do not notify, errors only, every time. ([Plesk: scheduling tasks](https://www.plesk.com/kb/docs/scheduling-tasks-4/))
+- **HestiaCP**: a basic Cron section (add a command and a schedule, with simple presets); no run history, no output capture, no failure notification. ([Hestia cron guide](https://fornex.com/help/cron-hestia-cp/))
+- **Coolify**: Scheduled Tasks on an application or service, each with a name, command, 5-field cron or named frequency, timeout and target container; runs the command in a shell inside the running container. ([Coolify docs](https://coolify.io/docs/core/automation/scheduled-tasks/overview))
+- **Dokploy**: Schedule Jobs with four scopes (application, compose, server, Dokploy itself); application and compose jobs use `docker exec`, and every run writes a log entry with its output and status. ([Dokploy docs](https://docs.dokploy.com/docs/core/schedule-jobs))
+- **Takeaway**: the traditional panels offer presets and email but little observability; the PaaS tools run commands inside containers with a timeout and per-run logs. Vexlyx can combine both: Plesk-style presets and "errors only" notification on top of Coolify/Dokploy-style container execution and run history. Where it can differ: runs never touch the host, failures email **once per streak** instead of on every run, and the schedule respects the server timezone setting.
+
+**Proposed plan (for whoever picks this up):**
+1. **Data model** (one Prisma migration): `ScheduledTask` (`id`, `projectId`, `userId`, `name`, `command`, `schedule` (5-field cron), `timeoutSeconds` default 300, `enabled` default true, `notifyOnFailure` default true, `consecutiveFailures`, `lastRunAt`, timestamps; cascades with the project) and `ScheduledTaskRun` (`taskId`, `trigger` SCHEDULED or MANUAL, `status` RUNNING/SUCCESS/FAILED/TIMEOUT/SKIPPED, `exitCode`, `output` capped at 64 KB, `startedAt`, `finishedAt`; only the latest 50 runs per task are kept).
+2. **Module** `apps/api/src/modules/scheduled-tasks/` (`routes.ts`, `service.ts`, `schema.ts`, `scheduler.ts`) following the existing layering; Zod schemas shared via `packages/shared/src/schemas/scheduledTasks.ts`. Endpoints: list/create/update/delete under `/api/projects/:id/scheduled-tasks`, `POST .../:taskId/run` (run now), `GET .../:taskId/runs`.
+3. **Scheduling** mirrors `backups/scheduler.ts` and `cleanup/scheduler.ts`: one BullMQ `upsertJobScheduler` per task (`scheduled-task:<id>`) with `tz` from the F5.13 system timezone. All schedulers are re-armed on API boot, removed on disable or delete, and re-upserted when the timezone changes. Missed runs while the API was down are not back-filled (documented).
+4. **Execution goes through the Python system layer**, never from a route: add an `exec` action to `system/python/docker_manager.py` that runs `docker exec <container> sh -c <command>` with the command passed as an argument list (never interpolated into a host shell), a hard timeout, and an output cap. The container name is resolved at run time from the project (the `vexlyx-<service_name>-app-1` convention already used there), so a redeploy that replaces the container does not break the task.
+5. **Guards**: a Redis lock per task so a run never overlaps its predecessor (the new run is recorded as SKIPPED); a run is SKIPPED when the project is not running; minimum interval of one minute (6-field seconds expressions are rejected); command length capped at 2,000 characters; timeout 1 to 3,600 seconds.
+6. **Authorization and limits**: owners manage tasks of their own projects, resellers those of their sub-accounts, admins all (the same ownership scoping as projects). New nullable quota `maxScheduledTasks` on `User` through the F5.20 quota machinery (`assertUnderQuota`, `notifyQuotaThreshold`). Every create/update/delete/run-now is written to the audit log (F5.18).
+7. **Failure emails (F5.23)**: new `scheduled_task_failed` event, sent after 3 consecutive failures and not again until the task succeeds once. A per-task toggle turns it off.
+8. **UI**: a "Scheduled Tasks" panel on the project detail page next to the other panels (`apps/dashboard/src/components/projects/`): list with enable switch, last status and next run; create/edit dialog with presets (every minute, hourly, daily, weekly) plus a custom cron field that previews the next runs and labels the timezone; "Run now"; a run-history drawer showing output in the always-dark terminal style from the design system. Skeleton loading, empty state with a CTA, confirmation before delete, refresh button with the `isRefreshing` animation.
+9. **Presets for common stacks**: Laravel (`php artisan schedule:run`, every minute) and WordPress (`php wp-cron.php`, every 5 minutes; a note recommends setting `DISABLE_WP_CRON`). Confirm in the actual runtime images which binaries exist (for example `wp`) before shipping a preset that needs them.
+10. **Out of scope for the first version**: fetch-URL tasks (webhook style), host-level "server tasks" for admins, second-level schedules, job chaining or dependencies, per-run environment overrides, and importing an existing crontab. Track as follow-ups.
+
+**Risks to handle in the implementation:**
+- Users run arbitrary commands: contained to their own container and its resource limits; never `docker exec` on a container the user does not own (ownership check on every run, including scheduled ones).
+- Output can contain secrets: shown only to the project's owner (and admins), size-capped, never written to the application log at info level.
+- Many tasks firing in the same minute: BullMQ worker concurrency cap, and the one-minute minimum interval.
+- Daylight-saving transitions: rely on the cron library's `tz` handling and document that a 02:30 job may skip or repeat once a year.
+
+**Acceptance Criteria:**
+- [ ] A user can create, edit, enable/disable and delete scheduled tasks for their own project, with a 5-field cron expression and a command that runs inside the project's container
+- [ ] Tasks run on schedule in the configured server timezone (F5.13) and survive an API restart and a project redeploy
+- [ ] "Run now" executes a task immediately and the result appears in its run history
+- [ ] Each run records status, exit code, duration and capped output; only the latest 50 runs per task are kept
+- [ ] Runs are bounded by a timeout, never overlap for the same task, and are SKIPPED (not failed) when the project is not running
+- [ ] Commands execute through the Python system layer with an argument list, never through a host shell, and only in the owning project's container
+- [ ] Authorization: users see and manage only their own tasks, resellers their sub-accounts', admins all; unauthenticated calls return 401 and other users' tasks return 403/404
+- [ ] `maxScheduledTasks` quota enforced and shown like the other quotas, with F5.23 warnings at 80% and 100%
+- [ ] Failure email after 3 consecutive failures, sent once per failure streak, with a per-task opt-out
+- [ ] Create, update, delete and run-now are written to the audit log
+- [ ] Cron expressions faster than once a minute, invalid expressions and over-long commands are rejected with clear errors
+
+**Test Plan:**
+1. Create a task `echo hello` every minute on a running project → after a minute a run appears with status SUCCESS and output `hello`
+2. Create a task that sleeps longer than its timeout → run recorded as TIMEOUT and the process is gone from the container
+3. Create a task that exits non-zero three times in a row → exactly one failure email; succeed once, then fail three times again → a second email
+4. Stop the project → the next run is SKIPPED; start it again → runs resume without editing the task
+5. Redeploy the project (new container) → the task still runs in the new container
+6. Restart the API → schedules are restored; change the server timezone → next-run times shift accordingly
+7. As another user, call the endpoints for the first user's project → 403/404; signed out → 401
+8. Submit `* * * * * *` (seconds) and a 5,000-character command → both rejected
+9. Hit the `maxScheduledTasks` quota → creation refused with `QUOTA_EXCEEDED`
+
+**Developer Docs:**
+- **Location:** `docs/dev/scheduled-tasks.md`
+- **Contents:** data model, how scheduling and execution work (BullMQ to Python `exec`), guards and limits, how the timezone is applied, how to add a preset, how to test
+
+**Files to Create:**
+- `apps/api/src/modules/scheduled-tasks/{routes,service,schema,scheduler}.ts`
+- `packages/shared/src/schemas/scheduledTasks.ts`
+- `apps/api/prisma/migrations/<timestamp>_add_scheduled_tasks/migration.sql`
+- `apps/dashboard/src/components/projects/ScheduledTasksPanel.tsx` and `src/hooks/useScheduledTasks.ts`
+
+---
+
+### F5.29 — GitHub Integration (Connect Your GitHub Account, Pick a Repo, Auto-Deploy)
+**Status:** 🟢 COMPLETED
+
+**Description:**
+Connecting a repository today is manual and per project (F1.3, F2.7): the user pastes a Git URL, copies a generated SSH deploy key into the repository's settings on GitHub, then copies the webhook URL and secret into GitHub as well, and repeats all of it for every project. There is no way to sign in to GitHub from Vexlyx, so users cannot browse their repositories, private repositories need a deploy key each, and a mistyped URL is only discovered when the clone fails. This feature adds a first-class GitHub connection: the operator creates a GitHub App for the install once (one click), each user installs it on their GitHub account or organization, and from then on projects are created by **picking a repository and branch from a list**. Cloning uses short-lived tokens, and push-to-deploy webhooks are delivered by the App with nothing to copy by hand. The existing manual Git URL flow stays as the fallback for GitLab, Bitbucket, Gitea and self-hosted Git servers.
+
+**Competitor research (2026):**
+- **Coolify**: a "GitHub App" source that gives access to one repository, selected repositories or all repositories of an account or organization, with automatic deployments and pull-request events through one integration. It is created through GitHub's app **manifest flow** (permissions, webhook, credentials and callback are filled in automatically), with a manual path only for GitHub Enterprise or custom permissions; on a self-hosted instance the App can be made available system-wide to every team. Deploy keys remain available as the alternative. ([Coolify: Set up a GitHub App](https://coolify.io/docs/applications/sources/github/app), [Coolify: CI/CD with Git providers](https://coolify.io/docs/applications/ci-cd))
+- **Dokploy**: supports GitHub, GitLab, Bitbucket and Gitea as providers (its exact GitHub setup should be re-checked in its own docs before implementation). ([comparison](https://use-apify.com/blog/coolify-vs-dokploy-2026))
+- **GitHub's own guidance**: GitHub Apps are generally preferred over OAuth apps. Installation tokens carry only the permissions the app declared and only the repositories the installer selected, they expire after a short time (currently 1 hour) while OAuth tokens stay valid until revoked, and an App keeps working if the person who installed it leaves the organization. ([GitHub Apps vs OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/differences-between-github-apps-and-oauth-apps))
+- **Traditional panels (cPanel, Plesk, HestiaCP)**: Git support is "clone a URL (with a deploy key)", the same model Vexlyx has today; none of them offers a GitHub account connection or repository picker.
+- **Takeaway**: the self-hosted PaaS tools that users compare Vexlyx with already offer "connect GitHub, pick a repo". A GitHub App with a manifest-based setup is the established, least-privilege way to do it. Vexlyx can differ by keeping the manual flow fully working beside it, and by storing no long-lived GitHub token anywhere.
+
+**Implementation:**
+1. **GitHub App per install, created from a manifest.** An ADMIN opens Settings → GitHub and clicks "Create GitHub App". The API serves the manifest (name `Vexlyx (<panel domain>)`, homepage, OAuth callback and webhook URLs built from `API_BASE_URL`, never from request headers) and GitHub redirects back with a code that the API exchanges for the App's id, slug, private key, client secret and webhook secret. A "Use an existing GitHub App" manual form is the fallback for custom setups.
+2. **Minimal permissions**: Repository contents (read), Metadata (read); optionally Commit statuses or Deployments (write) as a later step for reporting deploy results on commits. Subscribed events: `push`, `installation`, `installation_repositories`.
+3. **Data model** (one Prisma migration): `GitHubApp` singleton (`appId`, `slug`, `clientId`, and `privateKey`, `clientSecret`, `webhookSecret` encrypted with the existing AES-256-GCM helper in `utils/encryption.ts`); `GitHubInstallation` (`installationId`, account identity, repository selection, owner and lifecycle state); and on `Project` the optional GitHub installation, repository identity, connection state and disconnect reason. A project with these set is connected through GitHub; without them it behaves exactly as today.
+4. **Linking an installation**: a user clicks "Connect GitHub", is sent to the App's installation page with a random, single-use `state` (stored in Redis, bound to their session, short TTL) and returns to the OAuth callback. The API proves the installation belongs to that user by checking it against `GET /user/installations` with the temporary user-to-server token, because the `installation_id` in the redirect can be forged. Users only ever see and use installations they linked themselves.
+5. **Tokens**: the API signs a short-lived RS256 JWT with the App's private key using Node's built-in `crypto` (no new dependency), exchanges it for an installation token (about one hour), and caches it only in process memory until shortly before expiry. No GitHub token is stored in Redis, the database or on disk.
+6. **Cloning without leaking the token**: the token is passed to `system/python/git_manager.py` on stdin like the rest of its payload and used for the clone and pull through a one-shot credential header or `GIT_ASKPASS`, so the remote URL stored in `.git/config` stays token-free. Builds (F1.4) and redeploys call the same path to fetch a fresh token each time.
+7. **Webhooks**: one App-level endpoint `POST /api/webhooks/github-app` verifies `x-hub-signature-256` with the App's webhook secret using the existing timing-safe verifier, de-duplicates on `x-github-delivery`, then looks up projects by numeric installation and repository IDs and queues matching-branch deployments. The per-project webhook route from F2.7 stays for manual projects. `installation` and `installation_repositories` events keep access and suspension state in sync; an uninstall disconnects affected projects without stopping their running containers.
+8. **Repository picker API**: `GET /api/github/installations`, paginated/searchable `GET /api/github/installations/:id/repositories`, and `GET .../repositories/:repoId/branches`; `POST /api/projects/:id/git/connect-github` revalidates access, records the repository and runs the first clone. All routes are scoped to the caller's own installations.
+9. **UI**: a Settings → GitHub card (admin: create/replace the App and see its status; every user: connect, list and disconnect their installations); an "Import from GitHub" tab in the project creation flow with a searchable repository list and a branch select; in `GitSettings.tsx` a connected project shows `owner/repo`, the branch and "Connected via GitHub", hides the SSH key and webhook sections, and offers "Switch to manual URL". Empty and error states explain what to do when the install has no public HTTPS panel URL (GitHub cannot reach `localhost`), with a pointer to a tunnel for local development.
+10. **Audit log** (F5.18) entries for creating or replacing the App, linking or unlinking an installation, and connecting a project to a repository. Secrets and tokens are never part of audit metadata or logs.
+11. **Out of scope for the first version**: GitLab, Bitbucket and Gitea account connections (the provider interface should be shaped so they can follow), pull-request preview deployments, GitHub Enterprise Server base-URL support beyond the manual App form, writing commit statuses or deployments back to GitHub, and bulk-creating a project per repository. Track as follow-ups.
+
+**Risks to handle in the implementation:**
+- Stolen or forged `installation_id` in the setup redirect: verify ownership as described in step 4; reject and audit mismatches.
+- App private key and webhook secret are high-value: encrypt at rest, never return them from any API response, and keep them out of logs and error messages.
+- Webhook replay or forgery: signature check on the raw body, delivery-id de-duplication, and the existing branch filter.
+- A user must not deploy a repository they cannot access: repository selection is always resolved through the user's own installation, and the repository id is re-checked at clone time.
+- GitHub API rate limits and large accounts: paginate, search server-side, and cache repository lists for a short time.
+- Operators without a public HTTPS URL cannot receive webhooks: detect this up front and say so instead of failing silently.
+
+**Acceptance Criteria:**
+- [x] An admin can create the GitHub App for the install from Settings with one click (manifest flow), or enter an existing App's credentials; its private key, client secret and webhook secret are stored encrypted and never returned by the API
+- [x] A user can connect their own GitHub account or organization to the panel and disconnect it again; other users cannot see or use that installation
+- [x] Creating or editing a project offers a searchable list of the repositories the installation can access, with a branch selector, and connecting performs the first clone with no SSH key or URL typing
+- [x] Private repositories work without a per-repository deploy key
+- [x] Cloning, pulling and building use short-lived installation tokens fetched on demand; no GitHub token is persisted in the database or on disk, and the stored remote URL contains no credentials
+- [x] Pushing to the connected branch triggers a deployment through the App webhook with no manual webhook setup; pushes to other branches are ignored, and a repeated delivery id is processed once
+- [x] Webhook requests with a missing or invalid signature are rejected with 401
+- [x] Uninstalling the App, removing a repository from it, or suspending it disconnects the affected projects cleanly without stopping their running containers, and the dashboard says why
+- [x] Projects connected the manual way (Git URL, SSH key, per-project webhook) keep working unchanged
+- [x] Forged or mismatched installation ids in the setup redirect are rejected
+- [x] Linking, unlinking, App creation and repository connection are written to the audit log
+- [x] Unauthenticated calls return 401 and calls for another user's installation or repository return 403/404
+
+**Test Plan:**
+1. As admin, click "Create GitHub App" on a server with a public HTTPS panel URL → GitHub shows the pre-filled manifest, and after confirming, Settings shows the App as connected
+2. As a user, connect a GitHub account → the account appears; as a second user, it does not
+3. Create a project via "Import from GitHub", choose a private repository and a branch → it clones and builds with no deploy key
+4. Push a commit to that branch → a deployment starts within seconds; push to another branch → no deployment
+5. Replay the same webhook delivery → processed once; send it with a wrong signature → 401
+6. Inspect the cloned project's `.git/config` and the database → no token anywhere
+7. Remove the repository from the installation on GitHub → the project shows "disconnected", its container keeps running, and switching to the manual URL flow works
+8. Tamper with `installation_id` in the setup redirect → linking is rejected
+9. Run the same flow on a server without a public HTTPS URL → the card explains why GitHub cannot be connected instead of failing
+10. Existing manual-flow project → still deploys on its own webhook exactly as before
+
+**Developer Docs:**
+- **Location:** `docs/dev/github-integration.md`
+- **Contents:** App creation and permissions, the linking and verification flow, token lifecycle, webhook handling, how repository selection is authorized, how to add another Git provider, how to test locally with a tunnel
+
+**Files to Create:**
+- `apps/api/src/modules/github/{client,routes,service,schema,tokens}.ts`
+- `apps/api/src/modules/webhooks/github-app.ts` (App webhook handler reusing `WebhookService`)
+- `packages/shared/src/schemas/github.ts`
+- `apps/api/prisma/migrations/<timestamp>_add_github_integration/migration.sql`
+- `apps/dashboard/src/components/settings/GitHubCard.tsx`, `src/components/projects/GitHubRepoPicker.tsx`, `src/hooks/useGitHub.ts`
+- `apps/api/src/modules/github/tokens.test.ts`
+- `tests/test_github_app_git_credentials.py`
+- `docs/dev/github-integration.md`
+
+---
+
 ## Phase 6: Ecosystem & Launch
 
 ### F6.1 — Complete Documentation
-**Status:** 🔴 NOT STARTED
+**Status:** 🟢 COMPLETED
 
 **Description:**
 VitePress documentation site covering installation, development, and API reference.
 
 **Acceptance Criteria:**
-- [ ] Installation guide (bare metal, Docker)
-- [ ] Developer guide (local setup, contributing)
-- [ ] API reference (auto-generated from OpenAPI)
-- [ ] Feature documentation (all 48 features)
-- [ ] Troubleshooting guide
-- [ ] Changelog
-- [ ] Hosted at `docs.vexlyx.com` I know that the car is a bit of an oddity, but I want to be honest. I don't know what the car is. I mean, I The first one is the one that was used in And then, the next I I I I I Took the picture and put it on the table, and then he was like, well, I I I I I I Hello?
-Haan ji. the second day was about, you know, we got to go back together, and you know that you can come back together and reunite.
+- [x] Installation guide (bare metal, Docker)
+- [x] Developer guide (local setup, contributing)
+- [x] API reference (auto-generated from OpenAPI)
+- [x] Feature documentation for every released feature
+- [x] Troubleshooting guide
+- [x] Changelog
+- [x] Hosted at `docs.vexlyx.atlantiqs.org`
 
 **Test Plan:**
 1. New developer reads guide → sets up local env successfully
@@ -2365,19 +2510,19 @@ Haan ji. the second day was about, you know, we got to go back together, and you
 ---
 
 ### F6.2 — CI/CD Pipeline
-**Status:** 🔴 NOT STARTED
+**Status:** 🟢 COMPLETED
 
 **Description:**
 GitHub Actions for testing, building, and releasing Vexlyx.
 
 **Acceptance Criteria:**
-- [ ] Lint check on PR
-- [ ] Type check on PR
-- [ ] Unit tests on PR
-- [ ] Build check on PR
-- [ ] Auto-release on tag push
-- [ ] Docker image build and push
-- [ ] Changelog generation
+- [x] Lint check on PR
+- [x] Type check on PR
+- [x] Unit tests on PR
+- [x] Build check on PR
+- [x] Auto-release on tag push
+- [x] Docker image build and push
+- [x] Changelog generation
 
 **Test Plan:**
 1. Open PR → all checks pass

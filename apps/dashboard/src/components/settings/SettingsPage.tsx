@@ -31,6 +31,9 @@ import { ApiRequestError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { formatTime } from "@/lib/datetime";
 import { useRefreshAnimation, refreshIconClassName } from "@/hooks/useRefreshAnimation";
+import { TwoFactorCard } from "./TwoFactorCard";
+import { SystemEmailCard } from "./SystemEmailCard";
+import { GitHubCard } from "./GitHubCard";
 import type { DnsRecordVerification } from "@vexlyx/shared";
 
 // IANA timezone identifiers, sourced from the runtime's own tz database
@@ -230,6 +233,11 @@ export function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* Two-Factor Authentication (F5.17) */}
+      <TwoFactorCard />
+
+      <GitHubCard />
+
       {/* Server Timezone (F5.13) — governs the backup cron's wall-clock time
           and (where adopted) how timestamps are displayed across the dashboard. */}
       <Card>
@@ -276,6 +284,9 @@ export function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* System transactional email status (F5.23), ADMIN only */}
+      {isAdmin && <SystemEmailCard />}
 
       {/* DNS Records & Public IP reference (F5.9), ADMIN only */}
       {isAdmin && (

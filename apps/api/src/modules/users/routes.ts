@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { UserService, UserError } from "./service.js";
+import { AuthError } from "../auth/service.js";
 import { AuditLogService } from "../audit-log/service.js";
+import { TwoFactorService } from "../auth/two-factor-service.js";
 import {
   CreateSubAccountSchema,
   UpdateUserRoleSchema,
@@ -15,6 +17,11 @@ function handleUserError(err: unknown, reply: FastifyReply): void {
     return;
   }
   throw err;
+}
+
+async function twoFactorAdminReset(app: FastifyInstance, actorId: string, targetId: string) {
+  const svc = new TwoFactorService(app.prisma, app.redis, new AuditLogService(app.prisma, app.log));
+  await svc.adminReset(actorId, targetId);
 }
 
 export async function userRoutes(app: FastifyInstance) {
@@ -60,6 +67,21 @@ export async function userRoutes(app: FastifyInstance) {
       const body = UpdateUserRoleSchema.parse(request.body);
       return await service.updateRole({ id: request.userId!, role: request.userRole! }, id, body);
     } catch (err) {
+      handleUserError(err, reply);
+    }
+  });
+
+  // POST /api/users/:id/2fa/reset — ADMIN only (F5.17)
+  app.post("/:id/2fa/reset", { preHandler: [app.requireRole("ADMIN")] }, async (request, reply) => {
+    try {
+      const { id } = UserIdParamSchema.parse(request.params);
+      await twoFactorAdminReset(app, request.userId!, id);
+      return { message: "Two-factor authentication reset" };
+    } catch (err) {
+      if (err instanceof AuthError) {
+        reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
+        return;
+      }
       handleUserError(err, reply);
     }
   });

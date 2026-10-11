@@ -1,0 +1,70 @@
+diff --git a/.superpowers/sdd/2026-09-25-2fa/task-1-report.md b/.superpowers/sdd/2026-09-25-2fa/task-1-report.md
+index 525a929..99d66f0 100644
+--- a/.superpowers/sdd/2026-09-25-2fa/task-1-report.md
++++ b/.superpowers/sdd/2026-09-25-2fa/task-1-report.md
+@@ -41,10 +41,39 @@ pnpm --filter @vexlyx/api add -D @types/qrcode
+ 
+ ## Concerns
+ 
+ 1. `pnpm --filter @vexlyx/api typecheck` does NOT pass repo-wide on this
+    checkout (pre-existing `@vexlyx/shared` resolution failure + stale Prisma
+    client). Task 5+ workers should run `pnpm install` / build shared first,
+    or scope verification to `env.ts`.
+ 2. `otplib@12` + `qrcode` + `@types/qrcode` are NOT installed (per ruling).
+    Task 4 (TwoFactorService) cannot typecheck/test until the user runs the
+    two install commands above.
++
++## Fix round 1/5 (2026-09-25) — reviewer findings addressed
++
++- Renamed HEAD commit to `feat(2fa): add REQUIRE_ADMIN_2FA flag`
++  (drops misleading "and totp deps" — no deps were added; user installs manually).
++- Added missing blank line in `apps/api/.env.example` before the
++  `# Require TOTP` comment (now matches surrounding comment-block style).
++
++### Finding 1 evidence — typecheck failure is pre-existing, unrelated
++
++- Full output captured to `.superpowers/sdd/2026-09-25-2fa/task-1-typecheck.log`
++  (`pnpm --filter @vexlyx/api typecheck`, exit 1, 139 `error TS` lines).
++- Zero of the 139 errors reference `src/config/env.ts`
++  (`Select-String "config/env"` on the log returns 0 matches).
++- Breakdown: 63x `TS2307 Cannot find module '@vexlyx/shared'`
++  (workspace package unbuilt), 62x `TS7006 implicit any` across untouched
++  modules (aliases, backups, dashboard, quota, …), 10x `TS2305/TS2694`
++  stale-Prisma-client errors (audit-log, databases, domains), ~4 other.
++- Excerpt (head of log):
++  `src/index.ts(5,42): error TS2307: Cannot find module '@vexlyx/shared' …`
++  `src/modules/audit-log/service.ts(53,52): error TS2694: Namespace '….Prisma' has no exported member 'InputJsonValue'.`
++- Pre-existing proof without a second full run: `git diff HEAD~1 --name-only`
++  shows this change touches ONLY `apps/api/src/config/env.ts`,
++  `apps/api/.env.example` (+ this report) — every one of the 139 error
++  lines is in a file this commit never touched, so the failure exists
++  independently of this change.
++- Scoped check on the touched file: `eslint src/config/env.ts` exits 0
++  (clean, no warnings/errors). Re-ran typecheck capture after the blank-line
++  fix — same 139 pre-existing errors, still zero in `env.ts`.
+diff --git a/apps/api/.env.example b/apps/api/.env.example
+index bc58270..55efa33 100644
+--- a/apps/api/.env.example
++++ b/apps/api/.env.example
+@@ -16,20 +16,21 @@ DATABASE_URL=postgresql://vexlyx:vexlyx_dev@localhost:5432/vexlyx_dev
+ REDIS_URL=redis://localhost:6379
+ 
+ # Auth & Encryption (F1.7)
+ SESSION_SECRET=change-me-to-a-random-32-char-string-in-production
+ # Optional dedicated 32+ char key for encrypting environment variables at rest (AES-256-GCM).
+ # If unset, derived from SESSION_SECRET.
+ ENCRYPTION_KEY=change-me-to-a-random-32-char-string-in-production
+ # Off by default (F5.8) — panel is closed, admins/resellers add users from
+ # /users. Set to true only if you want the public /register form enabled.
+ ALLOW_REGISTRATION=false
++
+ # Require TOTP 2FA for ADMIN role at login (F5.17). "false" = optional for everyone.
+ REQUIRE_ADMIN_2FA=false
+ 
+ # Session cookie Domain attribute (F5.1). Required when the dashboard and
+ # API are served from different subdomains (e.g. production: dashboard on
+ # panel.example.com, API on api.panel.example.com) — set to the shared
+ # parent domain (e.g. panel.example.com) so both subdomains can read the
+ # session cookie. Leave unset for local dev.
+ # COOKIE_DOMAIN=panel.example.com
+ 

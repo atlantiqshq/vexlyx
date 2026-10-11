@@ -5,6 +5,7 @@ import { SslService } from "./ssl-service.js";
 import { AuditLogService } from "../audit-log/service.js";
 import {
   CreateDomainSchema,
+  UpdateDomainSchema,
   DomainListQuerySchema,
   DomainIdParamSchema,
   DomainRecordParamSchema,
@@ -42,6 +43,16 @@ export async function domainRoutes(app: FastifyInstance) {
   const service = new DomainService(app.prisma, auditLog);
   const dnsService = new DnsService(app.prisma);
   const sslService = new SslService(app.prisma);
+
+  app.patch("/:id", { preHandler: [app.requireAuth] }, async (request, reply) => {
+    try {
+      const { id } = DomainIdParamSchema.parse(request.params);
+      const input = UpdateDomainSchema.parse(request.body);
+      return await service.update(request.userId!, id, input);
+    } catch (err) {
+      handleDomainError(err, reply);
+    }
+  });
 
   const requireManagedDns = async (
     request: FastifyRequest,

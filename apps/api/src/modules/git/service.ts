@@ -7,6 +7,9 @@ import type { PrismaClient } from "@prisma/client";
 import type { GitMetadata } from "@vexlyx/shared";
 import { env } from "../../config/env.js";
 import type { ConnectRepoInput } from "./schema.js";
+import type { ConnectGitHubRepositoryInput } from "@vexlyx/shared";
+import type { GitHubService } from "../github/service.js";
+import type { AuditLogService } from "../audit-log/service.js";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -149,7 +152,11 @@ export function runGitManager(payload: GitManagerPayload): Promise<GitManagerRes
 // ---------------------------------------------------------------------------
 
 export class GitService {
-  constructor(private prisma: PrismaClient) {}
+  constructor(
+    private prisma: PrismaClient,
+    private github?: GitHubService,
+    private auditLog?: AuditLogService,
+  ) {}
 
   async getMetadata(userId: string, projectId: string): Promise<GitMetadata> {
     const project = await this.findOwnedProject(userId, projectId);
@@ -163,6 +170,11 @@ export class GitService {
         : null,
       webhookSecret: project.webhookSecret,
       isPrivate: project.sshPublicKey !== null,
+      githubInstallationId: project.githubInstallationId,
+      githubRepoId: project.githubRepoId?.toString() ?? null,
+      githubRepoFullName: project.githubRepoFullName,
+      githubConnectionStatus: project.githubConnectionStatus,
+      githubDisconnectReason: project.githubDisconnectReason,
     };
   }
 
@@ -194,6 +206,11 @@ export class GitService {
         gitUrl: data.gitUrl,
         branch: data.branch,
         webhookSecret,
+        githubInstallationId: null,
+        githubRepoId: null,
+        githubRepoFullName: null,
+        githubConnectionStatus: null,
+        githubDisconnectReason: null,
       },
       select: {
         gitUrl: true,
@@ -210,7 +227,81 @@ export class GitService {
       webhookUrl: `${env.API_BASE_URL}/api/webhooks/github?projectId=${projectId}`,
       webhookSecret: updated.webhookSecret,
       isPrivate: updated.sshPublicKey !== null,
+      githubInstallationId: null,
+      githubRepoId: null,
+      githubRepoFullName: null,
+      githubConnectionStatus: null,
+      githubDisconnectReason: null,
     };
+  }
+
+  async connectGitHubRepository(
+    userId: string,
+    projectId: string,
+    data: ConnectGitHubRepositoryInput,
+  ): Promise<GitMetadata> {
+    if (!this.github) throw new GitError("GitHub integration is unavailable", "GITHUB_UNAVAILABLE", 500);
+    await this.findOwnedProject(userId, projectId);
+    const installation = await this.github.getOwnedInstallationRecord(userId, data.installationId);
+    const repository = await this.github.findRepository(installation.installationId, data.repositoryId);
+    if (repository.archived) throw new GitError("Archived repositories cannot be connected", "GITHUB_REPOSITORY_ARCHIVED", 422);
+    const branches = await this.github.listBranches(userId, data.installationId, data.repositoryId);
+    if (!branches.some((branch) => branch.name === data.branch)) {
+      throw new GitError("The selected branch does not exist", "GITHUB_BRANCH_NOT_FOUND", 404);
+    }
+    const token = await this.github.getInstallationToken(installation.installationId);
+    await runGitManager({
+      command: "clone",
+      projectId,
+      gitUrl: repository.clone_url,
+      branch: data.branch,
+      projectsDir: resolve(env.PROJECTS_DIR),
+      accessToken: token,
+    });
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        gitUrl: repository.clone_url,
+        branch: data.branch,
+        webhookSecret: null,
+        sshPublicKey: null,
+        sshPrivateKeyPath: null,
+        githubInstallationId: installation.id,
+        githubRepoId: BigInt(repository.id),
+        githubRepoFullName: repository.full_name,
+        githubConnectionStatus: "CONNECTED",
+        githubDisconnectReason: null,
+      },
+    });
+    await this.auditLog?.log(userId, "github.project_connected", { type: "Project", id: projectId }, {
+      after: {
+        installationId: installation.installationId.toString(),
+        repository: repository.full_name,
+        branch: data.branch,
+      },
+    });
+    return this.getMetadata(userId, projectId);
+  }
+
+  async disconnectGitHubRepository(userId: string, projectId: string): Promise<GitMetadata> {
+    const project = await this.findOwnedProject(userId, projectId);
+    if (!project.githubInstallationId) return this.getMetadata(userId, projectId);
+    await this.prisma.project.update({
+      where: { id: projectId },
+      data: {
+        gitUrl: null,
+        githubInstallationId: null,
+        githubRepoId: null,
+        githubRepoFullName: null,
+        githubConnectionStatus: null,
+        githubDisconnectReason: null,
+        webhookSecret: null,
+      },
+    });
+    await this.auditLog?.log(userId, "github.project_disconnected", { type: "Project", id: projectId }, {
+      before: { repository: project.githubRepoFullName },
+    });
+    return this.getMetadata(userId, projectId);
   }
 
   async rotateWebhookSecret(
@@ -278,6 +369,11 @@ export class GitService {
         webhookSecret: true,
         sshPublicKey: true,
         sshPrivateKeyPath: true,
+        githubInstallationId: true,
+        githubRepoId: true,
+        githubRepoFullName: true,
+        githubConnectionStatus: true,
+        githubDisconnectReason: true,
         deletedAt: true,
       },
     });

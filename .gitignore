@@ -80,3 +80,13 @@ docker-compose.prod.env
 # DKIM private keys are generated at runtime for each mail domain. Never commit them.
 # (This does not affect the test keys that are already tracked.)
 docker/postfix/opendkim/keys/*/
+
+# Docs site (docs/): reference + project pages are generated from docs/dev,
+# CONTRIBUTING.md and SECURITY.md by docs/scripts/sync-docs.mjs
+docs/reference/*
+!docs/reference/index.md
+docs/project/*
+!docs/project/index.md
+docs/.vitepress/cache/
+docs/.vitepress/.temp/
+docs/.vitepress/dist/

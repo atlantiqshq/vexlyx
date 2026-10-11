@@ -1,0 +1,105 @@
+import { describe, it, expect, vi, afterEach } from "vitest";
+import Fastify from "fastify";
+import type { PrismaClient } from "@prisma/client";
+
+process.env.DATABASE_URL ??=
+  "postgresql://user:pass@localhost:5432/vexlyx_test";
+process.env.SESSION_SECRET ??=
+  "test-session-secret-at-least-32-characters-long";
+const { domainRoutes } = await import("./routes.js");
+const { DomainService, DomainError } = await import("./service.js");
+
+afterEach(() => vi.restoreAllMocks());
+
+async function appFixture() {
+  const app = Fastify();
+  app.decorate("prisma", {} as PrismaClient);
+  app.decorate("requireAuth", async (request, reply) => {
+    if (request.headers.authorization !== "test-session") {
+      return reply
+        .status(401)
+        .send({ error: "Unauthorized", code: "UNAUTHORIZED", details: {} });
+    }
+    request.userId = "u1";
+  });
+  await app.register(domainRoutes, { prefix: "/api/domains" });
+  return app;
+}
+
+describe("PATCH /api/domains/:id", () => {
+  it("requires authentication", async () => {
+    const update = vi.spyOn(DomainService.prototype, "update");
+    const app = await appFixture();
+    try {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/domains/d1",
+        payload: { projectId: "p1" },
+      });
+      expect(response.statusCode).toBe(401);
+      expect(update).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("validates the payload before updating", async () => {
+    const update = vi.spyOn(DomainService.prototype, "update");
+    const app = await appFixture();
+    try {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/domains/d1",
+        headers: { authorization: "test-session" },
+        payload: {},
+      });
+      expect(response.statusCode).toBe(400);
+      expect(update).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("updates using the authenticated user", async () => {
+    const update = vi
+      .spyOn(DomainService.prototype, "update")
+      .mockResolvedValue({ id: "d1", projectId: null } as never);
+    const app = await appFixture();
+    try {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/domains/d1",
+        headers: { authorization: "test-session" },
+        payload: { projectId: null },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ id: "d1", projectId: null });
+      expect(update).toHaveBeenCalledWith("u1", "d1", { projectId: null });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("returns the domain error without exposing other users' domains", async () => {
+    vi.spyOn(DomainService.prototype, "update").mockRejectedValue(
+      new DomainError("Domain not found", "DOMAIN_NOT_FOUND", 404),
+    );
+    const app = await appFixture();
+    try {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/domains/d1",
+        headers: { authorization: "test-session" },
+        payload: { projectId: "p1" },
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toEqual({
+        error: "Domain not found",
+        code: "DOMAIN_NOT_FOUND",
+        details: {},
+      });
+    } finally {
+      await app.close();
+    }
+  });
+});

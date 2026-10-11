@@ -75,35 +75,76 @@ For every provisioned database, Vexlyx generates two types of connection URIs:
    - PostgreSQL: `postgresql://u_app_1234:password@localhost:5432/app_production`
    - MySQL: `mysql://u_app_1234:password@localhost:3306/app_production`
 
-3. **Adminer Web GUI**:
-   - Pre-filled deep link: `http://localhost:8088/?pgsql=vexlyx-postgres&username=u_app_1234&db=app_production`
+3. **Adminer Web GUI** — see [Adminer access](#adminer-access) below. The API only returns an `adminerUrl` for a database when Adminer is available, so the dashboard never shows a broken link.
 
 ---
+
+## Adminer access
+
+The databases list response includes `adminer: { enabled, url?, disabledReason? }`, computed from one source of truth (`env.ADMINER_URL`). The dashboard's page-level **Open Adminer** button and every per-database link use it; when `enabled` is false the page shows an **Adminer unavailable** button (the reason is its tooltip) and the per-database links are hidden.
+
+### Development
+
+`ADMINER_URL` defaults to `http://localhost:8088` (the `adminer` service in `docker-compose.yml`), so links work out of the box.
+
+### Production
+
+Adminer is **off by default**. An unset `ADMINER_URL` means no link is ever generated, which is why a fresh install shows *Adminer unavailable*. Production values are validated at API startup: `ADMINER_URL` must be HTTPS and must not point at localhost, otherwise the API refuses to start. An empty value is treated as unset.
+
+To enable it on a server:
+
+```bash
+cd /opt/vexlyx
+sudo bash system/scripts/enable-adminer.sh
+```
+
+The script:
+
+1. generates a basic-auth password (user `admin`, override with `ADMINER_USER`) and prints it **once**;
+2. writes `ADMINER_BASIC_AUTH` (an apr1 htpasswd entry, single-quoted so Compose does not interpolate its `$`) and `ADMINER_URL=https://adminer.<VEXLYX_DOMAIN>` to `/etc/vexlyx/vexlyx.env`;
+3. starts the `adminer` service (`--profile adminer`) and recreates the API so it picks up `ADMINER_URL`.
+
+Adminer is routed only through Traefik at `adminer.<VEXLYX_DOMAIN>` with a Let's Encrypt certificate and the basic-auth middleware; it has **no published host port**. Users then sign in to Adminer a second time with the database credentials shown in the panel. DNS: `adminer.<VEXLYX_DOMAIN>` must resolve to the server (a wildcard `*.<VEXLYX_DOMAIN>` record covers it).
+
+To turn it off: `sudo bash system/scripts/enable-adminer.sh --disable`. Re-running without `--disable` rotates the basic-auth password.
+
+> Never publish Adminer without access control — it gives direct access to every database. If you add your own routing, keep it behind HTTPS and authentication/IP restrictions.
+
+### Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| Panel shows **Adminer unavailable** | `ADMINER_URL` is unset (the production default). Run `enable-adminer.sh`. |
+| API crash-loops after setting `ADMINER_URL` | The value is HTTP or localhost; production requires a public HTTPS URL. |
+| `adminer.<domain>` returns 401 | Expected without the basic-auth login; use the password printed by the script. |
+| `adminer.<domain>` returns 404 / certificate error | DNS does not point at the server yet, or the Adminer container is not running (`docker compose ... --profile adminer ps`). |
 
 ## Environment Variable Auto-Injection
 
 When a database is linked to a project with `autoInjectEnv = true`, the following variables are automatically encrypted and inserted into the project's environment variables:
 
-| Variable | Description | Example |
-|----------|-------------|---------|
+| Variable       | Description             | Example                                             |
+| -------------- | ----------------------- | --------------------------------------------------- |
 | `DATABASE_URL` | Internal connection URI | `postgresql://u_app:pw@vexlyx-postgres:5432/app_db` |
-| `DB_TYPE` | Database engine type | `POSTGRESQL` or `MYSQL` |
-| `DB_HOST` | Internal Docker host | `vexlyx-postgres` or `vexlyx-mysql` |
-| `DB_PORT` | Port number | `5432` or `3306` |
-| `DB_NAME` | Database name | `app_db` |
-| `DB_USER` | Scoped username | `u_app_9a2f` |
-| `DB_PASSWORD` | Plaintext password | `••••••••••••••••••••••••` |
+| `DB_TYPE`      | Database engine type    | `POSTGRESQL` or `MYSQL`                             |
+| `DB_HOST`      | Internal Docker host    | `vexlyx-postgres` or `vexlyx-mysql`                 |
+| `DB_PORT`      | Port number             | `5432` or `3306`                                    |
+| `DB_NAME`      | Database name           | `app_db`                                            |
+| `DB_USER`      | Scoped username         | `u_app_9a2f`                                        |
+| `DB_PASSWORD`  | Plaintext password      | `••••••••••••••••••••••••`                          |
 
 ---
 
 ## API Endpoints
 
 ### 1. List Databases
+
 ```http
 GET /api/databases?projectId=cm123&type=POSTGRESQL&search=app&page=1&limit=20
 ```
 
 ### 2. Provision Database
+
 ```http
 POST /api/databases
 Content-Type: application/json
@@ -117,16 +158,19 @@ Content-Type: application/json
 ```
 
 ### 3. Get Database & Credentials
+
 ```http
 GET /api/databases/:id
 ```
 
 ### 4. Test Connectivity
+
 ```http
 POST /api/databases/:id/test
 ```
 
 ### 5. Drop Database & User
+
 ```http
 DELETE /api/databases/:id
 ```
@@ -142,6 +186,7 @@ python tests/test_database_provisioning.py
 ```
 
 Expected output:
+
 ```
 =================================================================
 Running Vexlyx Database Provisioning Test Suite (F2.6)

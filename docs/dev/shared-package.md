@@ -1,11 +1,5 @@
 # Shared Package (`@vexlyx/shared`)
 
-> **Feature:** F0.7  
-> **Status:** 🟢 Completed  
-> **Package:** `packages/shared`
-
----
-
 ## What This Does
 
 `@vexlyx/shared` is the single source of truth for Zod validation schemas and TypeScript types used by **both** `apps/api` (Fastify) and `apps/dashboard` (Next.js). It eliminates type drift — if the API changes a schema, the frontend immediately gets a TypeScript error if it sends the wrong shape.
@@ -17,10 +11,14 @@
 ```
 packages/shared/
 ├── src/
-│   ├── schemas/
-│   │   └── auth.ts         # RegisterSchema, LoginSchema (+ inferred types)
+│   ├── schemas/             # One file per feature area:
+│   │   alias.ts       audit-log.ts   auth.ts        backups.ts     cleanup.ts
+│   │   dashboard.ts   databases.ts   dns.ts         dnsOnboarding.ts  dockerfile.ts
+│   │   domains.ts     env.ts         files.ts       firewall.ts    mail.ts
+│   │   mailbox.ts     monitoring.ts  projects.ts    serviceStatus.ts  ssl.ts
+│   │   systemSettings.ts  users.ts   vacation.ts    webhooks.ts
 │   ├── types/
-│   │   └── index.ts        # User, Role, ApiError types
+│   │   └── index.ts        # Project/Domain/Mailbox/... types shared across schemas
 │   └── index.ts            # Package boundary — re-exports everything
 ├── dist/                   # Compiled output (consumed by apps via node_modules)
 ├── package.json
@@ -60,7 +58,7 @@ This means `routes.ts` and `service.ts` continue importing from `"./schema.js"` 
 
 ## File Reference
 
-### `src/schemas/auth.ts`
+### `src/schemas/auth.ts` (the original example — still the same pattern every later file follows)
 
 | Export | Type | Description |
 |--------|------|-------------|
@@ -69,12 +67,14 @@ This means `routes.ts` and `service.ts` continue importing from `"./schema.js"` 
 | `LoginSchema` | `ZodObject` | Validates login form: email, password |
 | `LoginInput` | `type` | Inferred from `LoginSchema` |
 
-### `src/types/index.ts`
+### `src/types/index.ts` (selected exports — see the file itself for the full current list)
 
 | Export | Type | Description |
 |--------|------|-------------|
 | `User` | `type` | Public user object returned by the API (no password field) |
-| `Role` | `type` | `"ADMIN" \| "USER"` |
+| `Role` | `type` | `"ADMIN" \| "USER" \| "RESELLER"` (added in [Roles & permissions](roles-permissions.md)) |
+| `Permission` | `type` | `"canManageDns" \| "canManageFirewall" \| "canManageBackups" \| "canCreateSubAccounts"` (see [Fine-grained permissions](fine-grained-permissions.md)) |
+| `Project`, `Domain`, `Mailbox`, ... | `type` | One type per Prisma model surfaced to the frontend, alongside their matching enums (`ProjectType`, `ProjectStatus`, ...) |
 | `ApiError` | `type` | Standard error response shape `{ error, code, details }` |
 
 ---
@@ -147,5 +147,5 @@ When building a new feature (e.g., F1.1 — Projects):
 |----------|-----------|
 | Single `src/index.ts` entry point (re-exports) | This is the *package boundary*, not an internal barrel. The CLAUDE.md anti-pattern rule applies to in-app barrels, not package entry points. |
 | `zod` declared as `peerDependency` + `devDependency` | Prevents relying on pnpm hoisting. Peer dep signals that consumers must have zod installed (they do — both apps have it). |
-| Auth module `schema.ts` stays as thin re-export | `routes.ts` and `service.ts` import from `"./schema.js"` — keeping this indirection means zero changes to those files and a clean migration path. |
-| Only auth schemas for now | Phase 1+ schemas (projects, domains, etc.) will be added as those features are built, keeping the shared package lean and the source of truth accurate. |
+| Auth module `schema.ts` stays as thin re-export | `routes.ts` and `service.ts` import from `"./schema.js"` — keeping this indirection means zero changes to those files and a clean migration path. Every later feature module followed the same thin re-export pattern for its own `schema.ts`. |
+| One schema file per feature area, added as each feature is built | Keeps the shared package's file layout self-documenting — `src/schemas/` doubles as a map of every feature that has a client/server-shared contract. |

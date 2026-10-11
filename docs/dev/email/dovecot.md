@@ -12,6 +12,13 @@
 
 Dovecot IMAP Server provides incoming mail access (IMAP) for every mailbox managed in Vexlyx, serving the same Maildir storage that Postfix (F4.1) delivers into.
 
+Production IMAP/IMAPS uses the same publicly trusted certificate as Postfix.
+The production Compose overlay mounts `docker/mail-data/certs` read-only at
+`/etc/dovecot/certs`; the installer synchronizes that pair from Traefik's ACME
+store and keeps it current with the `vexlyx-mail-tls.timer` systemd timer.
+Container-generated self-signed certificates are retained only for local
+development.
+
 Vexlyx decouples IMAP access into:
 1. **A single flat passwd-file acting as both passdb and userdb** (`/etc/dovecot/users`), synchronized from the `Mailbox` table by `dovecot_manager.py` — no live database connection from Dovecot itself, matching Postfix's own decoupled virtual-domain sync philosophy from F4.1.
 2. **ARGON2ID password verification**, consistent with CLAUDE.md's Argon2id-everywhere rule. Mailbox passwords are stored pre-hashed (PHC format) and simply get an `{ARGON2ID}` scheme prefix when written to the passwd-file.

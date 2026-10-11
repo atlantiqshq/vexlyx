@@ -18,12 +18,6 @@ services:
       resources:
         limits:
           memory: "{{memory_limit}}"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:{{container_port}}/health || wget -qO- http://localhost:{{container_port}}/ || curl -fs http://localhost:{{container_port}}/ || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.{{service_name}}.rule=Host(`{{hostname}}`)"

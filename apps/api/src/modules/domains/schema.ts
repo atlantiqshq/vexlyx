@@ -1,13 +1,14 @@
 import { z } from "zod";
 import {
   CreateDomainSchema,
+  UpdateDomainSchema,
   DomainListQuerySchema,
   HostnameSchema,
   DomainStatusSchema,
   SetDnsModeSchema,
 } from "@vexlyx/shared";
 
-export { CreateDomainSchema, DomainListQuerySchema, HostnameSchema, DomainStatusSchema, SetDnsModeSchema };
+export { CreateDomainSchema, UpdateDomainSchema, DomainListQuerySchema, HostnameSchema, DomainStatusSchema, SetDnsModeSchema };
 
 export const DomainIdParamSchema = z.object({
   id: z.string().min(1, "Domain ID is required"),

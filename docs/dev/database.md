@@ -2,7 +2,7 @@
 
 ## What This Does
 
-Vexlyx uses **Prisma ORM** with **PostgreSQL 16** for all database operations. The schema defines 8 core models (User, Project, Deployment, EnvVar, Domain, DnsRecord, Database, Mailbox) and 7 enums covering every entity in the hosting control panel. PostgreSQL runs locally via Docker Compose.
+Vexlyx uses **Prisma ORM** with **PostgreSQL 16** for all database operations. The schema has grown from its original 8 models/7 enums (see the table below for the current count — this doc is kept in sync as the schema grows, unlike some of its Foundation siblings) to cover every entity in the hosting control panel: users and roles, projects and deployments, domains/DNS/SSL, mail, backups, firewall rules, and the audit log. PostgreSQL runs locally via Docker Compose.
 
 ## Architecture
 
@@ -20,30 +20,40 @@ Vexlyx uses **Prisma ORM** with **PostgreSQL 16** for all database operations. T
 
 ## Schema Overview
 
+24 models, 18 enums as of this writing (`apps/api/prisma/schema.prisma` is always the exact source
+of truth — grep it for `^model ` / `^enum ` for the current count).
+
 ### Models
 
-| Model | Table | Purpose |
-|-------|-------|---------|
-| `User` | `users` | Panel users with role-based access |
-| `Project` | `projects` | Hosted applications/websites |
-| `Deployment` | `deployments` | Build + deploy lifecycle tracking |
-| `EnvVar` | `env_vars` | Encrypted environment variables |
-| `Domain` | `domains` | Custom domains with SSL status |
-| `DnsRecord` | `dns_records` | DNS zone records (A, CNAME, MX, etc.) |
-| `Database` | `databases` | User-provisioned MySQL/PostgreSQL instances |
-| `Mailbox` | `mailboxes` | Email accounts per domain |
+| Area | Models | Purpose |
+|---|---|---|
+| Users & access | `User`, `Session` | Panel accounts (ADMIN/RESELLER/USER, quotas, permissions — see [Roles & permissions](roles-permissions.md)); server-side session rows |
+| Projects & deploys | `Project`, `Deployment`, `EnvVar` | Hosted apps, one row per build/deploy attempt, encrypted env vars |
+| Domains, DNS & SSL | `Domain`, `DnsRecord`, `Certificate` | Custom domains (connect or hosted DNS mode — see [Domains](domains.md)), zone records, TLS certificates |
+| Databases & files | `Database`, `SftpUser` | User-provisioned MySQL/PostgreSQL instances, SFTP accounts |
+| Mail | `Mailbox`, `VirtualAlias`, `DkimKey`, `VacationResponder` | Mailboxes, forwarding/catch-all aliases, DKIM keys, auto-responders — see [Email](/guide/email) |
+| Operations | `MetricSnapshot`, `BackupSnapshot`, `BackupSettings`, `CleanupSettings`, `CleanupRun`, `FirewallRule`, `FirewallSettings`, `SystemSettings` | Resource-usage history, backup runs/schedule, disk cleanup runs/schedule, firewall rules/policy, misc panel settings |
+| Audit | `AuditLog` | Who changed what — see [Audit log](audit-log.md) |
 
 ### Enums
 
+The original 7 are unchanged; notable additions since:
+
 | Enum | Values |
 |------|--------|
-| `Role` | ADMIN, USER |
+| `Role` | ADMIN, USER, **RESELLER** (added in [Roles & permissions](roles-permissions.md)) |
+| `Permission` | canManageDns, canManageFirewall, canManageBackups, canCreateSubAccounts (see [Fine-grained permissions](fine-grained-permissions.md)) |
 | `ProjectType` | NODEJS, NEXTJS, PYTHON, REACT, STATIC, PHP, WORDPRESS, DOCKER |
 | `ProjectStatus` | CREATING, ACTIVE, STOPPED, ERROR, DELETED |
 | `DeploymentStatus` | QUEUED, BUILDING, DEPLOYING, RUNNING, FAILED, CANCELLED |
 | `DomainStatus` | PENDING, ACTIVE, ERROR |
+| `DnsMode` | CONNECTED, MANAGED (see [DNS management](dns-management.md)) |
 | `DatabaseType` | POSTGRESQL, MYSQL |
 | `MailboxStatus` | ACTIVE, SUSPENDED, DELETED |
+| `CertType` / `CertStatus` | LETS_ENCRYPT/CUSTOM/SELF_SIGNED — PENDING/ACTIVE/EXPIRING_SOON/EXPIRED/ERROR |
+| `BackupStatus` / `BackupTrigger` | see [Backup system](backup-system.md) |
+| `CleanupStatus` / `CleanupTrigger` | see [Docker cleanup](docker-cleanup.md) |
+| `FirewallProtocol` / `FirewallAction` / `FirewallPolicy` | see [Firewall](firewall.md) |
 
 ### Key Relations
 
@@ -140,4 +150,4 @@ Always use the service layer for complex queries — routes should only call ser
 | Cascade deletes | Simplifies cleanup — deleting a User removes all their Projects, Domains, etc. |
 | Per-user unique project names | Users can have projects with the same name as other users |
 | Separate Deployment model | Tracks every deploy attempt, not just current state |
-| EnvVar encryption placeholder | Values stored as strings now; AES-256-GCM encryption added in F1.7 |
+| `EnvVar.value` is AES-256-GCM ciphertext | Encrypted at rest since [F1.7](environment-variables.md); the database never holds a plaintext secret |

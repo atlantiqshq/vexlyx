@@ -29,6 +29,8 @@ COPY --from=pruner /app/tsconfig.json ./tsconfig.json
 # Baked in at build time — Next.js inlines NEXT_PUBLIC_* vars into the client bundle.
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ARG NEXT_PUBLIC_MAIL_HOSTNAME
+ENV NEXT_PUBLIC_MAIL_HOSTNAME=${NEXT_PUBLIC_MAIL_HOSTNAME}
 RUN pnpm exec turbo run build --filter=@vexlyx/dashboard
 
 # ---------------------------------------------------------------------------

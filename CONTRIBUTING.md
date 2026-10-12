@@ -7,9 +7,12 @@ Thanks for considering a contribution. Vexlyx is MIT-licensed and open to pull r
 ```bash
 git clone https://github.com/atlantiqshq/vexlyx.git
 cd vexlyx
-pnpm install
+corepack enable
+pnpm bootstrap   # env files, Docker services, database, seed data
 pnpm dev
 ```
+
+`pnpm bootstrap` is safe to re-run; see the README for what it does and its flags.
 
 Requires Node.js 22+ (pnpm 11 relies on the `node:sqlite` built-in, added in Node 22) and Docker
 & Docker Compose for the local infrastructure (Postgres, MySQL, Redis, Traefik, CoreDNS, Postfix,

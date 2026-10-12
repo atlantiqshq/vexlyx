@@ -14,6 +14,7 @@ import {
   Eye,
   EyeOff,
   ShieldCheck,
+  Github,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +26,8 @@ import { cn } from "@/lib/utils";
 import { useGitSettings } from "@/hooks/useGitSettings";
 import { useRefreshAnimation, refreshIconClassName } from "@/hooks/useRefreshAnimation";
 import { ConnectRepoSchema } from "@vexlyx/shared";
+import { Badge } from "@/components/ui/badge";
+import { GitHubRepoPicker, type GitHubRepoSelection } from "./GitHubRepoPicker";
 
 // ---------------------------------------------------------------------------
 // Small copy-to-clipboard button
@@ -109,7 +112,7 @@ export function GitSettings({
   initialBranch = "main",
   onProjectUpdate,
 }: GitSettingsProps) {
-  const { state, fetchMetadata, connectRepo, generateSshKey, rotateWebhookSecret } =
+  const { state, fetchMetadata, connectRepo, connectGitHub, disconnectGitHub, generateSshKey, rotateWebhookSecret } =
     useGitSettings(projectId);
 
   const [form, setForm] = useState<FormState>({
@@ -121,6 +124,7 @@ export function GitSettings({
   const [isGeneratingKey, setIsGeneratingKey] = useState(false);
   const [isRotatingSecret, setIsRotatingSecret] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
+  const [githubSelection, setGitHubSelection] = useState<GitHubRepoSelection | null>(null);
   const { isRefreshing, refresh } = useRefreshAnimation();
 
   const handleRefresh = () =>
@@ -194,10 +198,40 @@ export function GitSettings({
 
   const metadata = state.data;
 
+  const handleGitHubConnect = async () => {
+    if (!githubSelection) return;
+    setIsConnecting(true);
+    try {
+      await connectGitHub({
+        installationId: githubSelection.installationId,
+        repositoryId: githubSelection.repositoryId,
+        branch: githubSelection.branch,
+      });
+      toast.success("GitHub repository connected");
+      onProjectUpdate?.();
+    } catch {
+      toast.error("Failed to connect GitHub repository");
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
+      {metadata?.githubInstallationId ? (
+        <Card className="border border-border">
+          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Github className="h-4 w-4" />{metadata.githubRepoFullName}</CardTitle><CardDescription>Connected through your GitHub App installation.</CardDescription></CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-2"><Badge variant={metadata.githubConnectionStatus === "CONNECTED" ? "default" : "secondary"}>{metadata.githubConnectionStatus?.toLowerCase()}</Badge><Badge variant="outline">{metadata.branch}</Badge><Button type="button" size="sm" variant="outline" onClick={() => void disconnectGitHub()}>Switch to manual URL</Button>{metadata.githubDisconnectReason && <p className="w-full text-sm text-destructive">{metadata.githubDisconnectReason}</p>}</CardContent>
+        </Card>
+      ) : (
+        <Card className="border border-border">
+          <CardHeader><CardTitle className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground"><Github className="h-3.5 w-3.5" />Import from GitHub</CardTitle><CardDescription className="text-xs">Select an authorized repository without configuring a deploy key or webhook.</CardDescription></CardHeader>
+          <CardContent className="space-y-4"><GitHubRepoPicker value={githubSelection} onChange={setGitHubSelection} disabled={isConnecting} /><Button size="sm" type="button" disabled={!githubSelection || isConnecting} onClick={() => void handleGitHubConnect()}>{isConnecting && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}Connect GitHub Repository</Button></CardContent>
+        </Card>
+      )}
+
       {/* ── Section A: Repository connection ── */}
-      <Card className="border border-border">
+      {!metadata?.githubInstallationId && <Card className="border border-border">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -288,10 +322,10 @@ export function GitSettings({
             </Button>
           </form>
         </CardContent>
-      </Card>
+      </Card>}
 
       {/* ── Section B: SSH Deploy Key ── */}
-      <Card className="border border-border">
+      {!metadata?.githubInstallationId && <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             <KeyRound className="h-3.5 w-3.5" />
@@ -338,7 +372,7 @@ export function GitSettings({
             </div>
           )}
         </CardContent>
-      </Card>
+      </Card>}
 
       {/* ── Section C: Webhook Auto-Deploy (only once repo is connected) ── */}
       {metadata?.webhookUrl && (

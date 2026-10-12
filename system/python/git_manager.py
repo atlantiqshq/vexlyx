@@ -56,19 +56,24 @@ def cmd_clone(payload: dict) -> None:
       branch           — branch to clone (default: main)
       projectsDir      — base directory for all project workspaces
       sshPrivateKeyPath — optional; if set, clone uses SSH with this key
+      accessToken       — optional short-lived HTTPS credential
     """
     project_id = require_field(payload, "projectId")
     git_url = require_field(payload, "gitUrl")
     branch = payload.get("branch", "main")
     projects_dir = require_field(payload, "projectsDir")
     ssh_key_path = payload.get("sshPrivateKeyPath")
+    access_token = payload.get("accessToken")
 
     dest = Path(projects_dir) / project_id
-    env = _build_env(ssh_key_path)
+    env = _build_env(ssh_key_path, access_token)
 
     # If the workspace already exists and has a valid .git repo, try fetch + checkout
     if (dest / ".git").exists():
         try:
+            # The URL never contains credentials; setting it before fetch also makes
+            # switching a project between repositories deterministic.
+            _run(["git", "-C", str(dest), "remote", "set-url", "origin", git_url], env=env)
             _run(["git", "-C", str(dest), "fetch", "--all"], env=env)
             _run(["git", "-C", str(dest), "checkout", branch], env=env)
             _run(["git", "-C", str(dest), "pull", "origin", branch], env=env)
@@ -148,7 +153,7 @@ def cmd_generate_ssh_key(payload: dict) -> None:
 # Internal utilities
 # ---------------------------------------------------------------------------
 
-def _build_env(ssh_key_path: str | None) -> dict:
+def _build_env(ssh_key_path: str | None, access_token: str | None = None) -> dict:
     """Build the subprocess environment, injecting GIT_SSH_COMMAND when needed."""
     env = os.environ.copy()
     if ssh_key_path:
@@ -161,6 +166,12 @@ def _build_env(ssh_key_path: str | None) -> dict:
             "-o StrictHostKeyChecking=accept-new "
             "-o BatchMode=yes"
         )
+    if access_token:
+        import base64
+        credential = base64.b64encode(f"x-access-token:{access_token}".encode()).decode()
+        env["GIT_CONFIG_COUNT"] = "1"
+        env["GIT_CONFIG_KEY_0"] = "http.https://github.com/.extraheader"
+        env["GIT_CONFIG_VALUE_0"] = f"Authorization: Basic {credential}"
     return env
 
 

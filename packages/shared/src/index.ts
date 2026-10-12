@@ -476,6 +476,32 @@ export type {
 } from "./schemas/audit-log.js";
 
 export {
+  GitHubAccountTypeSchema,
+  GitHubRepositorySelectionSchema,
+  GitHubConnectionStatusSchema,
+  GitHubAppStatusSchema,
+  ConfigureGitHubAppSchema,
+  GitHubInstallationSchema,
+  GitHubSelectableRepositorySchema,
+  GitHubRepositoryListQuerySchema,
+  GitHubRepositoryListSchema,
+  GitHubBranchSchema,
+  ConnectGitHubRepositorySchema,
+  GitHubCallbackQuerySchema,
+} from "./schemas/github.js";
+export type {
+  GitHubAppStatus,
+  ConfigureGitHubAppInput,
+  GitHubInstallation,
+  GitHubRepository,
+  GitHubRepositoryListQuery,
+  GitHubRepositoryList,
+  GitHubBranch,
+  ConnectGitHubRepositoryInput,
+  GitHubCallbackQuery,
+} from "./schemas/github.js";
+
+export {
   SystemEmailTestSchema,
   SYSTEM_EMAIL_EVENTS,
 } from "./schemas/systemEmail.js";

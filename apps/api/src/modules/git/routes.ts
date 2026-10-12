@@ -1,12 +1,19 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { GitService, GitError } from "./service.js";
 import { ConnectRepoSchema } from "./schema.js";
+import { ConnectGitHubRepositorySchema } from "@vexlyx/shared";
+import { GitHubError, GitHubService } from "../github/service.js";
+import { AuditLogService } from "../audit-log/service.js";
 
 // ---------------------------------------------------------------------------
 // Shared error handler — mirrors the pattern in projects/routes.ts
 // ---------------------------------------------------------------------------
 
 function handleGitError(err: unknown, reply: FastifyReply): void {
+  if (err instanceof GitHubError) {
+    reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
+    return;
+  }
   if (err instanceof GitError) {
     reply.status(err.statusCode).send({
       error: err.message,
@@ -24,7 +31,9 @@ function handleGitError(err: unknown, reply: FastifyReply): void {
 // ---------------------------------------------------------------------------
 
 export async function gitRoutes(app: FastifyInstance) {
-  const service = new GitService(app.prisma);
+  const auditLog = new AuditLogService(app.prisma, app.log);
+  const github = new GitHubService(app.prisma, app.redis, auditLog);
+  const service = new GitService(app.prisma, github, auditLog);
 
   // -------------------------------------------------------------------------
   // GET /api/projects/:id/git
@@ -57,6 +66,36 @@ export async function gitRoutes(app: FastifyInstance) {
         const data = ConnectRepoSchema.parse(request.body);
         const metadata = await service.connectRepo(request.userId!, id, data);
         return metadata;
+      } catch (err) {
+        handleGitError(err, reply);
+      }
+    },
+  );
+
+  app.post(
+    "/:id/git/connect-github",
+    { preHandler: [app.requireAuth] },
+    async (request, reply) => {
+      try {
+        const { id } = request.params as { id: string };
+        return await service.connectGitHubRepository(
+          request.userId!,
+          id,
+          ConnectGitHubRepositorySchema.parse(request.body),
+        );
+      } catch (err) {
+        handleGitError(err, reply);
+      }
+    },
+  );
+
+  app.post(
+    "/:id/git/disconnect-github",
+    { preHandler: [app.requireAuth] },
+    async (request, reply) => {
+      try {
+        const { id } = request.params as { id: string };
+        return await service.disconnectGitHubRepository(request.userId!, id);
       } catch (err) {
         handleGitError(err, reply);
       }

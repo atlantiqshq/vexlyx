@@ -22,8 +22,14 @@ from your code. For the very first project, see [Getting started](/guide/getting
 
 ### Connect a repository
 
-In the project's **Git** settings, enter the repository URL (GitHub, GitLab, or Bitbucket) and
-branch.
+For GitHub, an administrator first creates the panel's GitHub App under **Settings → GitHub**.
+Each user can then connect a personal account or organization and choose which repositories the
+App may access. When creating or editing a project, select **Import from GitHub**, choose the
+repository and branch, and Vexlyx configures private access and push-to-deploy automatically.
+
+The manual Git flow remains available for GitLab, Bitbucket, Gitea, self-hosted servers, and
+GitHub repositories that should not use the App. In the project's **Git** settings, enter the
+repository URL and branch.
 
 - **Public repos** — paste the HTTPS URL and connect directly.
 - **Private repos** — click **Generate SSH Key** first. Vexlyx generates an Ed25519 key pair for
@@ -33,12 +39,14 @@ branch.
 
 ### Auto-deploy on push
 
-Once a repo is connected, the project's Git settings show a **webhook URL** and a **secret**.
-Add them as a webhook in your repository (GitHub: Settings → Webhooks → Add webhook — payload URL
-and secret from the dashboard, content type `application/json`, event: just the `push` event).
-From then on, every push to the connected branch triggers a build and redeploy automatically;
-pushes to other branches are acknowledged and ignored. The secret can be rotated from the same
-Git settings panel at any time, which immediately invalidates the old one.
+GitHub App projects receive push events automatically through the panel-wide App webhook; there
+is no per-project webhook to configure. Manual GitHub projects continue to show a **webhook URL**
+and **secret** in Git settings. Add those under GitHub → Settings → Webhooks with content type
+`application/json` and the `push` event selected.
+
+Every push to the configured branch triggers a build and redeploy. Pushes to other branches are
+acknowledged and ignored. See the [GitHub integration reference](/reference/github-integration)
+for installation lifecycle, security, and troubleshooting details.
 
 ### Environment variables
 

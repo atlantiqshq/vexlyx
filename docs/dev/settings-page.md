@@ -12,6 +12,7 @@
 - **Change Password card:** self-service form (current password + new password + confirm). On success, the current session stays logged in; the old password simply stops verifying everywhere else, since login re-checks the hash on every attempt rather than caching anything.
 - **DNS Records & Public IP card:** ADMIN-only (both client-side — the section isn't rendered for other roles — and server-side, since `GET /api/system/dns-info` itself is ADMIN-gated). Shows the server's public IP and every DNS record from F5.9, each with a copy-to-clipboard button, plus a manual refresh (`RefreshCw`, 600ms spin, per CLAUDE.md's refresh-button convention).
 - **Setup instructions + live verification (UX follow-up, same pass):** a short blurb tells the admin what to actually do with the records ("add each as an A record at your registrar/DNS provider"), and a **Verify DNS** button triggers a real cross-resolver DNS lookup (`POST /api/system/dns-info/verify`) so they can confirm propagation from inside the panel instead of shelling out to `dig`. Each record gets a Live / Not pointed here yet / Not found badge.
+- **GitHub card (F5.29):** administrators create or replace the panel-wide GitHub App; every authenticated user can link and disconnect their own account or organization installations. App credentials are never rendered. See [GitHub Integration](github-integration.md).
 
 ---
 

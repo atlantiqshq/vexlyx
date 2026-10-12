@@ -9,6 +9,10 @@
   },
   "packageManager": "pnpm@11.24.0",
   "scripts": {
+    "bootstrap": "node scripts/dev-setup.mjs",
+    "infra:up": "docker compose up -d --wait postgres redis traefik",
+    "infra:down": "docker compose down",
+    "db:studio": "pnpm --filter @vexlyx/api db:studio",
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",

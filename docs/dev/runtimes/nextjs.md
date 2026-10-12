@@ -116,7 +116,7 @@ services:
         limits:
           memory: "{{memory_limit}}"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:{{container_port}}/ || wget -qO- http://localhost:{{container_port}}/api/health || exit 1"]
+      test: ["CMD", "node", "-e", "const socket=require('net').connect({{container_port}},'127.0.0.1',()=>{socket.end();process.exit(0)});socket.on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -127,6 +127,11 @@ services:
       - "traefik.http.routers.{{service_name}}.entrypoints=web"
       - "traefik.http.services.{{service_name}}.loadbalancer.server.port={{container_port}}"
 ```
+
+The probe uses Node's built-in TCP client, which is guaranteed to exist in a
+Next.js runtime image. It does not require optional utilities such as `wget` or
+`curl`; missing those utilities would otherwise mark a working container as
+unhealthy and cause Traefik to remove its route.
 
 ---
 

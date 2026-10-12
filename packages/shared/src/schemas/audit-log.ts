@@ -37,6 +37,13 @@ export const AUDIT_ACTIONS = [
   "scheduled_task.updated",
   "scheduled_task.deleted",
   "scheduled_task.run_now",
+  "github.app_created",
+  "github.app_replaced",
+  "github.installation_linked",
+  "github.installation_unlinked",
+  "github.installation_link_rejected",
+  "github.project_connected",
+  "github.project_disconnected",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

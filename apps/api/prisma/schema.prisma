@@ -52,6 +52,13 @@ enum ProjectStatus {
   DELETED
 }
 
+enum GitHubConnectionStatus {
+  CONNECTED
+  DISCONNECTED
+  SUSPENDED
+  REPOSITORY_REMOVED
+}
+
 /// Status of a single deployment attempt.
 enum DeploymentStatus {
   QUEUED
@@ -216,6 +223,7 @@ model User {
   dkimKeys            DkimKey[]
   sftpUser            SftpUser?
   scheduledTasks      ScheduledTask[]
+  githubInstallations GitHubInstallation[]
   reseller            User?                @relation("ResellerAccounts", fields: [resellerId], references: [id], onDelete: SetNull)
   subAccounts         User[]               @relation("ResellerAccounts")
 
@@ -304,6 +312,11 @@ model Project {
   /// Absolute path to the Ed25519 private key on the host filesystem.
   /// Used by git_manager.py at clone/pull time via GIT_SSH_COMMAND.
   sshPrivateKeyPath String?       @map("ssh_private_key_path")
+  githubInstallationId String?    @map("github_installation_id")
+  githubRepoId         BigInt?    @map("github_repo_id")
+  githubRepoFullName   String?    @map("github_repo_full_name")
+  githubConnectionStatus GitHubConnectionStatus? @map("github_connection_status")
+  githubDisconnectReason String?  @map("github_disconnect_reason")
   userId            String        @map("user_id")
   /// Docker container ID of the currently running container (short or full hash).
   containerId       String?       @map("container_id")
@@ -319,16 +332,55 @@ model Project {
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
 
-  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  deployments    Deployment[]
-  envVars        EnvVar[]
-  domains        Domain[]
-  databases      Database[]
-  scheduledTasks ScheduledTask[]
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deployments        Deployment[]
+  envVars            EnvVar[]
+  domains            Domain[]
+  databases          Database[]
+  scheduledTasks     ScheduledTask[]
+  githubInstallation GitHubInstallation? @relation(fields: [githubInstallationId], references: [id], onDelete: SetNull)
 
   @@unique([userId, name])
   @@index([userId])
+  @@index([githubInstallationId])
+  @@index([githubRepoId])
   @@map("projects")
+}
+
+model GitHubApp {
+  id                     String   @id @default("singleton")
+  appId                  BigInt   @unique @map("app_id")
+  slug                   String
+  clientId               String   @map("client_id")
+  encryptedClientSecret  String   @map("encrypted_client_secret")
+  encryptedPrivateKey    String   @map("encrypted_private_key")
+  encryptedWebhookSecret String   @map("encrypted_webhook_secret")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  @@map("github_apps")
+}
+
+model GitHubInstallation {
+  id                  String   @id @default(cuid())
+  installationId      BigInt   @unique @map("installation_id")
+  accountId           BigInt   @map("account_id")
+  accountLogin        String   @map("account_login")
+  accountType         String   @map("account_type")
+  repositorySelection String   @map("repository_selection")
+  status              GitHubConnectionStatus @default(CONNECTED)
+  suspendedAt         DateTime? @map("suspended_at")
+  disconnectedAt      DateTime? @map("disconnected_at")
+  userId              String   @map("user_id")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projects Project[]
+
+  @@index([userId])
+  @@index([accountId])
+  @@map("github_installations")
 }
 
 /// A single deployment attempt for a project (build + deploy lifecycle).

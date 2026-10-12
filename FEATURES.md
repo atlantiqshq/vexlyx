@@ -31,10 +31,10 @@ This document is the **single source of truth** for all Vexlyx features.
 | Phase 2: Multi-Runtime Support | 🟢 COMPLETED | 100% (8/8) |
 | Phase 3: Domain & DNS | 🟡 IN PROGRESS | 80% (4/5) |
 | Phase 4: Email Server | 🟡 IN PROGRESS | 88% (7/8) |
-| Phase 5: System & Administration | 🟡 IN PROGRESS | 48% (10/21) |
+| Phase 5: System & Administration | 🟡 IN PROGRESS | 45% (10/22) |
 | Phase 6: Ecosystem & Launch | 🟡 IN PROGRESS | 33% (1/3) |
 
-**Overall Completion:** 73% (44/60 features)
+**Overall Completion:** 72% (44/61 features)
 
 ---
 
@@ -2406,23 +2406,98 @@ Users cannot schedule recurring work for their projects. A Laravel app needs `ph
 
 ---
 
+### F5.29 — GitHub Integration (Connect Your GitHub Account, Pick a Repo, Auto-Deploy)
+**Status:** 🟢 COMPLETED
+
+**Description:**
+Connecting a repository today is manual and per project (F1.3, F2.7): the user pastes a Git URL, copies a generated SSH deploy key into the repository's settings on GitHub, then copies the webhook URL and secret into GitHub as well, and repeats all of it for every project. There is no way to sign in to GitHub from Vexlyx, so users cannot browse their repositories, private repositories need a deploy key each, and a mistyped URL is only discovered when the clone fails. This feature adds a first-class GitHub connection: the operator creates a GitHub App for the install once (one click), each user installs it on their GitHub account or organization, and from then on projects are created by **picking a repository and branch from a list**. Cloning uses short-lived tokens, and push-to-deploy webhooks are delivered by the App with nothing to copy by hand. The existing manual Git URL flow stays as the fallback for GitLab, Bitbucket, Gitea and self-hosted Git servers.
+
+**Competitor research (2026):**
+- **Coolify**: a "GitHub App" source that gives access to one repository, selected repositories or all repositories of an account or organization, with automatic deployments and pull-request events through one integration. It is created through GitHub's app **manifest flow** (permissions, webhook, credentials and callback are filled in automatically), with a manual path only for GitHub Enterprise or custom permissions; on a self-hosted instance the App can be made available system-wide to every team. Deploy keys remain available as the alternative. ([Coolify: Set up a GitHub App](https://coolify.io/docs/applications/sources/github/app), [Coolify: CI/CD with Git providers](https://coolify.io/docs/applications/ci-cd))
+- **Dokploy**: supports GitHub, GitLab, Bitbucket and Gitea as providers (its exact GitHub setup should be re-checked in its own docs before implementation). ([comparison](https://use-apify.com/blog/coolify-vs-dokploy-2026))
+- **GitHub's own guidance**: GitHub Apps are generally preferred over OAuth apps. Installation tokens carry only the permissions the app declared and only the repositories the installer selected, they expire after a short time (currently 1 hour) while OAuth tokens stay valid until revoked, and an App keeps working if the person who installed it leaves the organization. ([GitHub Apps vs OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/differences-between-github-apps-and-oauth-apps))
+- **Traditional panels (cPanel, Plesk, HestiaCP)**: Git support is "clone a URL (with a deploy key)", the same model Vexlyx has today; none of them offers a GitHub account connection or repository picker.
+- **Takeaway**: the self-hosted PaaS tools that users compare Vexlyx with already offer "connect GitHub, pick a repo". A GitHub App with a manifest-based setup is the established, least-privilege way to do it. Vexlyx can differ by keeping the manual flow fully working beside it, and by storing no long-lived GitHub token anywhere.
+
+**Implementation:**
+1. **GitHub App per install, created from a manifest.** An ADMIN opens Settings → GitHub and clicks "Create GitHub App". The API serves the manifest (name `Vexlyx (<panel domain>)`, homepage, OAuth callback and webhook URLs built from `API_BASE_URL`, never from request headers) and GitHub redirects back with a code that the API exchanges for the App's id, slug, private key, client secret and webhook secret. A "Use an existing GitHub App" manual form is the fallback for custom setups.
+2. **Minimal permissions**: Repository contents (read), Metadata (read); optionally Commit statuses or Deployments (write) as a later step for reporting deploy results on commits. Subscribed events: `push`, `installation`, `installation_repositories`.
+3. **Data model** (one Prisma migration): `GitHubApp` singleton (`appId`, `slug`, `clientId`, and `privateKey`, `clientSecret`, `webhookSecret` encrypted with the existing AES-256-GCM helper in `utils/encryption.ts`); `GitHubInstallation` (`installationId`, account identity, repository selection, owner and lifecycle state); and on `Project` the optional GitHub installation, repository identity, connection state and disconnect reason. A project with these set is connected through GitHub; without them it behaves exactly as today.
+4. **Linking an installation**: a user clicks "Connect GitHub", is sent to the App's installation page with a random, single-use `state` (stored in Redis, bound to their session, short TTL) and returns to the OAuth callback. The API proves the installation belongs to that user by checking it against `GET /user/installations` with the temporary user-to-server token, because the `installation_id` in the redirect can be forged. Users only ever see and use installations they linked themselves.
+5. **Tokens**: the API signs a short-lived RS256 JWT with the App's private key using Node's built-in `crypto` (no new dependency), exchanges it for an installation token (about one hour), and caches it only in process memory until shortly before expiry. No GitHub token is stored in Redis, the database or on disk.
+6. **Cloning without leaking the token**: the token is passed to `system/python/git_manager.py` on stdin like the rest of its payload and used for the clone and pull through a one-shot credential header or `GIT_ASKPASS`, so the remote URL stored in `.git/config` stays token-free. Builds (F1.4) and redeploys call the same path to fetch a fresh token each time.
+7. **Webhooks**: one App-level endpoint `POST /api/webhooks/github-app` verifies `x-hub-signature-256` with the App's webhook secret using the existing timing-safe verifier, de-duplicates on `x-github-delivery`, then looks up projects by numeric installation and repository IDs and queues matching-branch deployments. The per-project webhook route from F2.7 stays for manual projects. `installation` and `installation_repositories` events keep access and suspension state in sync; an uninstall disconnects affected projects without stopping their running containers.
+8. **Repository picker API**: `GET /api/github/installations`, paginated/searchable `GET /api/github/installations/:id/repositories`, and `GET .../repositories/:repoId/branches`; `POST /api/projects/:id/git/connect-github` revalidates access, records the repository and runs the first clone. All routes are scoped to the caller's own installations.
+9. **UI**: a Settings → GitHub card (admin: create/replace the App and see its status; every user: connect, list and disconnect their installations); an "Import from GitHub" tab in the project creation flow with a searchable repository list and a branch select; in `GitSettings.tsx` a connected project shows `owner/repo`, the branch and "Connected via GitHub", hides the SSH key and webhook sections, and offers "Switch to manual URL". Empty and error states explain what to do when the install has no public HTTPS panel URL (GitHub cannot reach `localhost`), with a pointer to a tunnel for local development.
+10. **Audit log** (F5.18) entries for creating or replacing the App, linking or unlinking an installation, and connecting a project to a repository. Secrets and tokens are never part of audit metadata or logs.
+11. **Out of scope for the first version**: GitLab, Bitbucket and Gitea account connections (the provider interface should be shaped so they can follow), pull-request preview deployments, GitHub Enterprise Server base-URL support beyond the manual App form, writing commit statuses or deployments back to GitHub, and bulk-creating a project per repository. Track as follow-ups.
+
+**Risks to handle in the implementation:**
+- Stolen or forged `installation_id` in the setup redirect: verify ownership as described in step 4; reject and audit mismatches.
+- App private key and webhook secret are high-value: encrypt at rest, never return them from any API response, and keep them out of logs and error messages.
+- Webhook replay or forgery: signature check on the raw body, delivery-id de-duplication, and the existing branch filter.
+- A user must not deploy a repository they cannot access: repository selection is always resolved through the user's own installation, and the repository id is re-checked at clone time.
+- GitHub API rate limits and large accounts: paginate, search server-side, and cache repository lists for a short time.
+- Operators without a public HTTPS URL cannot receive webhooks: detect this up front and say so instead of failing silently.
+
+**Acceptance Criteria:**
+- [x] An admin can create the GitHub App for the install from Settings with one click (manifest flow), or enter an existing App's credentials; its private key, client secret and webhook secret are stored encrypted and never returned by the API
+- [x] A user can connect their own GitHub account or organization to the panel and disconnect it again; other users cannot see or use that installation
+- [x] Creating or editing a project offers a searchable list of the repositories the installation can access, with a branch selector, and connecting performs the first clone with no SSH key or URL typing
+- [x] Private repositories work without a per-repository deploy key
+- [x] Cloning, pulling and building use short-lived installation tokens fetched on demand; no GitHub token is persisted in the database or on disk, and the stored remote URL contains no credentials
+- [x] Pushing to the connected branch triggers a deployment through the App webhook with no manual webhook setup; pushes to other branches are ignored, and a repeated delivery id is processed once
+- [x] Webhook requests with a missing or invalid signature are rejected with 401
+- [x] Uninstalling the App, removing a repository from it, or suspending it disconnects the affected projects cleanly without stopping their running containers, and the dashboard says why
+- [x] Projects connected the manual way (Git URL, SSH key, per-project webhook) keep working unchanged
+- [x] Forged or mismatched installation ids in the setup redirect are rejected
+- [x] Linking, unlinking, App creation and repository connection are written to the audit log
+- [x] Unauthenticated calls return 401 and calls for another user's installation or repository return 403/404
+
+**Test Plan:**
+1. As admin, click "Create GitHub App" on a server with a public HTTPS panel URL → GitHub shows the pre-filled manifest, and after confirming, Settings shows the App as connected
+2. As a user, connect a GitHub account → the account appears; as a second user, it does not
+3. Create a project via "Import from GitHub", choose a private repository and a branch → it clones and builds with no deploy key
+4. Push a commit to that branch → a deployment starts within seconds; push to another branch → no deployment
+5. Replay the same webhook delivery → processed once; send it with a wrong signature → 401
+6. Inspect the cloned project's `.git/config` and the database → no token anywhere
+7. Remove the repository from the installation on GitHub → the project shows "disconnected", its container keeps running, and switching to the manual URL flow works
+8. Tamper with `installation_id` in the setup redirect → linking is rejected
+9. Run the same flow on a server without a public HTTPS URL → the card explains why GitHub cannot be connected instead of failing
+10. Existing manual-flow project → still deploys on its own webhook exactly as before
+
+**Developer Docs:**
+- **Location:** `docs/dev/github-integration.md`
+- **Contents:** App creation and permissions, the linking and verification flow, token lifecycle, webhook handling, how repository selection is authorized, how to add another Git provider, how to test locally with a tunnel
+
+**Files to Create:**
+- `apps/api/src/modules/github/{client,routes,service,schema,tokens}.ts`
+- `apps/api/src/modules/webhooks/github-app.ts` (App webhook handler reusing `WebhookService`)
+- `packages/shared/src/schemas/github.ts`
+- `apps/api/prisma/migrations/<timestamp>_add_github_integration/migration.sql`
+- `apps/dashboard/src/components/settings/GitHubCard.tsx`, `src/components/projects/GitHubRepoPicker.tsx`, `src/hooks/useGitHub.ts`
+- `apps/api/src/modules/github/tokens.test.ts`
+- `tests/test_github_app_git_credentials.py`
+- `docs/dev/github-integration.md`
+
+---
+
 ## Phase 6: Ecosystem & Launch
 
 ### F6.1 — Complete Documentation
-**Status:** 🔴 NOT STARTED
+**Status:** 🟢 COMPLETED
 
 **Description:**
 VitePress documentation site covering installation, development, and API reference.
 
 **Acceptance Criteria:**
-- [ ] Installation guide (bare metal, Docker)
-- [ ] Developer guide (local setup, contributing)
-- [ ] API reference (auto-generated from OpenAPI)
-- [ ] Feature documentation (all 48 features)
-- [ ] Troubleshooting guide
-- [ ] Changelog
-- [ ] Hosted at `docs.vexlyx.com` I know that the car is a bit of an oddity, but I want to be honest. I don't know what the car is. I mean, I The first one is the one that was used in And then, the next I I I I I Took the picture and put it on the table, and then he was like, well, I I I I I I Hello?
-Haan ji. the second day was about, you know, we got to go back together, and you know that you can come back together and reunite.
+- [x] Installation guide (bare metal, Docker)
+- [x] Developer guide (local setup, contributing)
+- [x] API reference (auto-generated from OpenAPI)
+- [x] Feature documentation for every released feature
+- [x] Troubleshooting guide
+- [x] Changelog
+- [x] Hosted at `docs.vexlyx.atlantiqs.org`
 
 **Test Plan:**
 1. New developer reads guide → sets up local env successfully

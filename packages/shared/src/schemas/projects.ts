@@ -122,6 +122,11 @@ export interface GitMetadata {
   webhookUrl: string | null;
   webhookSecret: string | null;
   isPrivate: boolean;
+  githubInstallationId: string | null;
+  githubRepoId: string | null;
+  githubRepoFullName: string | null;
+  githubConnectionStatus: "CONNECTED" | "DISCONNECTED" | "SUSPENDED" | "REPOSITORY_REMOVED" | null;
+  githubDisconnectReason: string | null;
 }
 
 // ---------------------------------------------------------------------------

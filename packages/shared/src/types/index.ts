@@ -115,6 +115,11 @@ export type Deployment = {
   commitHash: string | null;
   commitMsg: string | null;
   buildLogs: string | null;
+  failure?: {
+    code: string;
+    message: string;
+    details: { file?: string; remediation?: string };
+  } | null;
   duration: number | null;
   projectId: string;
   createdAt: Date | string;

@@ -28,6 +28,10 @@ import sys
 import tarfile
 import zipfile
 from pathlib import Path
+from node_preflight import (
+    NodePreflightError, inspect_node_project, resolve_package_manager,
+    validate_node_plan, validate_script_commands,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -57,9 +61,9 @@ def log_line(message: str) -> None:
     print(json.dumps({"log": message}), flush=True)
 
 
-def fail(message: str, code: str = "BUILD_ERROR") -> None:
+def fail(message: str, code: str = "BUILD_ERROR", details: dict | None = None) -> None:
     """Write a JSON error to stdout and exit 1."""
-    print(json.dumps({"error": message, "code": code}), flush=True)
+    print(json.dumps({"error": message, "code": code, "details": details or {}}), flush=True)
     sys.exit(1)
 
 
@@ -93,6 +97,8 @@ def get_nixpacks_binary() -> str:
         install_cmd = "PowerShell: irm https://nixpacks.com/install.ps1 | iex"
     else:
         install_cmd = "curl -sSL https://nixpacks.com/install.sh | sh"
+
+    fail(f"Nixpacks CLI not found. Install it with: {install_cmd}", "NIXPACKS_NOT_FOUND")
 
 def get_docker_binary() -> str:
     """Find docker binary in PATH or common install directories."""
@@ -325,13 +331,7 @@ def detect_vite_project(project_dir: Path, plan: dict) -> tuple[str, str | None,
 
     if has_vite_config or has_vite_dep:
         # Resolve package manager for build command
-        pkg_mgr = "npm"
-        if (project_dir / "pnpm-lock.yaml").is_file():
-            pkg_mgr = "pnpm"
-        elif (project_dir / "yarn.lock").is_file():
-            pkg_mgr = "yarn"
-        elif (project_dir / "bun.lockb").is_file() or (project_dir / "bun.lock").is_file():
-            pkg_mgr = "bun"
+        pkg_mgr = resolve_package_manager(project_dir)
 
         default_build = "yarn build" if pkg_mgr == "yarn" else f"{pkg_mgr} run build"
 
@@ -740,13 +740,7 @@ def detect_framework_and_commands(project_dir: Path, plan: dict) -> tuple[str, s
     and normalized project type based on file heuristics and Nixpacks plan.
     """
     # Detect package manager for Node/JS projects
-    pkg_mgr = "npm"
-    if (project_dir / "pnpm-lock.yaml").is_file():
-        pkg_mgr = "pnpm"
-    elif (project_dir / "yarn.lock").is_file():
-        pkg_mgr = "yarn"
-    elif (project_dir / "bun.lockb").is_file() or (project_dir / "bun.lock").is_file():
-        pkg_mgr = "bun"
+    pkg_mgr = "npm" if find_dockerfile(project_dir) else resolve_package_manager(project_dir)
 
     default_build = "yarn build" if pkg_mgr == "yarn" else f"{pkg_mgr} run build"
     default_start = "yarn start" if pkg_mgr == "yarn" else f"{pkg_mgr} run start"
@@ -908,7 +902,7 @@ def detect_framework_and_commands(project_dir: Path, plan: dict) -> tuple[str, s
     return (str(framework), build_cmd, start_cmd, detected_type)
 
 
-def cmd_plan(payload: dict) -> None:
+def make_build_plan(payload: dict) -> dict:
     """
     Detect the framework and proposed build command for a project directory.
 
@@ -921,7 +915,6 @@ def cmd_plan(payload: dict) -> None:
     """
     project_dir = require_field(payload, "projectDir")
     env_vars = payload.get("envVars")
-    nixpacks_bin = get_nixpacks_binary()
     project_path = Path(project_dir)
 
     if not project_path.is_dir():
@@ -934,7 +927,7 @@ def cmd_plan(payload: dict) -> None:
     dockerfile_p = find_dockerfile(project_path)
     if dockerfile_p:
         df_info = parse_dockerfile_info(dockerfile_p)
-        respond({
+        return {
             "framework": "dockerfile",
             "buildCmd": None,
             "startCmd": None,
@@ -945,9 +938,11 @@ def cmd_plan(payload: dict) -> None:
             "baseImage": df_info.get("baseImage"),
             "entrypoint": df_info.get("entrypoint"),
             "cmd": df_info.get("cmd"),
-        })
-        return
+        }
 
+    node_project = inspect_node_project(project_path)
+    validate_script_commands(node_project, payload.get("buildCmd"), payload.get("startCmd"))
+    nixpacks_bin = get_nixpacks_binary()
     cmd = [nixpacks_bin, "plan", project_dir, "--format", "json"]
 
     # Detect python version and propagate to nixpacks plan
@@ -989,6 +984,12 @@ def cmd_plan(payload: dict) -> None:
                 plan = json.loads(raw_output)
             except json.JSONDecodeError:
                 plan = {}
+    if node_project:
+        if result.returncode != 0:
+            fail("Nixpacks could not generate a Node build plan: " + (result.stderr or result.stdout or "").strip(), "NIXPACKS_PLAN_FAILED")
+        phases = plan.get("phases") if isinstance(plan, dict) else None
+        if not isinstance(phases, dict) or not phases or any(not isinstance(phase, dict) for phase in phases.values()):
+            fail("Nixpacks did not return a usable Node build plan.", "NIXPACKS_PLAN_FAILED")
 
     framework, build_cmd, start_cmd, detected_type = detect_framework_and_commands(
         project_path, plan
@@ -998,12 +999,20 @@ def cmd_plan(payload: dict) -> None:
         error_output = (result.stderr or result.stdout or "").strip()
         fail(f"nixpacks plan failed:\n{error_output}", "NIXPACKS_PLAN_FAILED")
 
-    respond({
+    validate_node_plan(node_project, plan, payload.get("installCmd"))
+    validate_script_commands(node_project, payload.get("buildCmd") or build_cmd,
+                             payload.get("startCmd") or start_cmd)
+    return {
         "framework": framework,
         "buildCmd": build_cmd,
         "startCmd": start_cmd,
         "detectedType": detected_type,
-    })
+        "warnings": node_project.warnings if node_project else [],
+    }
+
+
+def cmd_plan(payload: dict) -> None:
+    respond(make_build_plan(payload))
 
 
 def cmd_build(payload: dict) -> None:
@@ -1028,7 +1037,6 @@ def cmd_build(payload: dict) -> None:
     start_cmd = payload.get("startCmd")
     cache_key = payload.get("cacheKey")
     env_vars = payload.get("envVars")
-    nixpacks_bin = get_nixpacks_binary()
 
     project_path = Path(project_dir)
     if not project_path.is_dir():
@@ -1092,6 +1100,17 @@ def cmd_build(payload: dict) -> None:
         print(json.dumps({"done": True, "imageName": image_name}), flush=True)
         return
 
+    node_project = inspect_node_project(project_path)
+    if node_project:
+        plan_payload = {**payload, "command": "plan"}
+        # Revalidate direct builds and source changes between detection and image creation.
+        plan_result = make_build_plan(plan_payload)
+        build_cmd = build_cmd or plan_result.get("buildCmd")
+        start_cmd = start_cmd or plan_result.get("startCmd")
+        for warning in plan_result.get("warnings", []):
+            log_line(f"[vexlyx:warn] {warning}")
+        log_line("[vexlyx] Node build preflight passed")
+
     nixpacks_bin = get_nixpacks_binary()
 
     # Auto-resolve start_cmd, build_cmd, and install_cmd if not provided
@@ -1122,13 +1141,6 @@ def cmd_build(payload: dict) -> None:
             install_cmd = "python -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install 'setuptools<70' && pip install -r requirements.txt"
         elif (project_path / "pyproject.toml").is_file():
             install_cmd = "python -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install 'setuptools<70' && pip install ."
-    elif not install_cmd:
-        if (project_path / "bun.lockb").is_file() or (project_path / "bun.lock").is_file():
-            install_cmd = "bun install"
-        elif (project_path / "pnpm-lock.yaml").is_file():
-            install_cmd = "pnpm install"
-        elif (project_path / "yarn.lock").is_file():
-            install_cmd = "yarn install"
 
     cmd = [nixpacks_bin, "build", project_dir, "--name", image_name]
 
@@ -1643,7 +1655,10 @@ def main() -> None:
         )
         return
 
-    COMMANDS[command](payload)
+    try:
+        COMMANDS[command](payload)
+    except NodePreflightError as exc:
+        fail(str(exc), exc.code, exc.details)
 
 
 if __name__ == "__main__":

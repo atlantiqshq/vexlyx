@@ -436,6 +436,9 @@ Integrate Nixpacks for zero-configuration builds. Auto-detect framework from sou
 - [x] Build logs stored and polled progressively by frontend (Socket.io streaming in F1.6)
 - [x] Build queue managed via BullMQ and Redis
 - [x] Support for custom build commands override
+- [x] Node build preflight validates manifests, workspace configuration, and the effective package-manager toolchain before image setup (#35)
+- [x] Preserve Nixpacks Node install defaults and retain explicit per-deployment install overrides
+- [x] Show structured build failures and repository remediation beside deployment history
 
 **Test Plan:**
 1. Node.js project → Nixpacks detects, builds successfully
@@ -446,6 +449,7 @@ Integrate Nixpacks for zero-configuration builds. Auto-detect framework from sou
 
 **Developer Docs:**
 - **Location:** `docs/dev/build-system.md`
+- **Node preflight:** `docs/dev/build-preflight.md`
 
 **Files Created:**
 - `apps/api/src/modules/build/schema.ts`

@@ -57,6 +57,26 @@ jobs:
       - run: pnpm --filter @vexlyx/api db:generate
       - run: pnpm test
 
+  build-preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: system/python/requirements-build.txt
+      - run: python -m pip install -r system/python/requirements-build.txt
+      - name: Install pinned Nixpacks integration-test engine
+        run: |
+          curl -fsSL https://github.com/railwayapp/nixpacks/releases/download/v1.41.0/nixpacks-v1.41.0-x86_64-unknown-linux-musl.tar.gz -o "$RUNNER_TEMP/nixpacks.tar.gz"
+          echo "0f55de7874507b9cf7502113120bd96f2ab6979f78d10eaf2eb2ade9207b3af6  $RUNNER_TEMP/nixpacks.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/nixpacks.tar.gz" -C "$RUNNER_TEMP" nixpacks
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: python -m unittest discover -s system/python -p 'test_build_preflight.py' -v
+        env:
+          NIXPACKS_INTEGRATION: '1'
+
   build:
     runs-on: ubuntu-latest
     steps:

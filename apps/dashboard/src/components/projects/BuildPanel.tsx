@@ -186,6 +186,19 @@ function DeploymentRow({ projectId, deployment, isActive }: DeploymentRowProps) 
         </div>
       </div>
 
+      {displayDeployment.status === "FAILED" && displayDeployment.failure && (
+        <div role="alert" className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+          <p className="font-medium text-destructive">{displayDeployment.failure.message}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {displayDeployment.failure.code}
+            {displayDeployment.failure.details.file && ` · ${displayDeployment.failure.details.file}`}
+          </p>
+          {displayDeployment.failure.details.remediation && (
+            <p className="mt-2 text-foreground">{displayDeployment.failure.details.remediation}</p>
+          )}
+        </div>
+      )}
+
       {expanded && (
         <LogViewer
           lines={lines}

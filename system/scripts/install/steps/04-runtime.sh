@@ -34,7 +34,7 @@ apt-get install -y --no-install-recommends python3 python3-pip python3-venv
 if ! has_cmd python; then
   ln -sf "$(command -v python3)" /usr/local/bin/python
 fi
-pip3 install --break-system-packages --no-cache-dir cryptography psutil
+pip3 install --break-system-packages --no-cache-dir cryptography psutil -r system/python/requirements-build.txt
 log_ok "Python ready ($(python --version))."
 
 if ! has_cmd nixpacks; then

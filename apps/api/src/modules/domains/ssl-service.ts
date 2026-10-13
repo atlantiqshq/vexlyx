@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
   CertificateResponse,
   CertStatus,
@@ -732,16 +732,37 @@ export class SslService {
   }
 
   /**
-   * Batch audits all certificates for upcoming expiration (<= 7 days alert threshold).
+   * Audits certificates visible to the requester (<= 7 days alert threshold).
+   * The dashboard can narrow this further to the requester's own domains.
    */
-  public async checkExpiryAlerts(): Promise<{
+  public async checkExpiryAlerts(userId: string, options: { ownOnly?: boolean } = {}): Promise<{
     totalChecked: number;
     expiringSoon: number;
     expired: number;
     alerts: Array<{ domainId: string; hostname: string; daysRemaining: number | null; status: CertStatus }>;
   }> {
+    if (!userId) {
+      throw new DomainError("Authentication required", "UNAUTHORIZED", 401);
+    }
+
+    // Read the current role rather than trusting session or client-supplied data.
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+    if (!user || !["USER", "RESELLER", "ADMIN"].includes(user.role)) {
+      throw new DomainError("Access denied", "FORBIDDEN", 403);
+    }
+
+    const where: Prisma.CertificateWhereInput = options.ownOnly || user.role === "USER"
+      ? { domain: { userId } }
+      : user.role === "RESELLER"
+        ? { domain: { OR: [{ userId }, { user: { resellerId: userId } }] } }
+        : {};
+
     const certificates = await this.prisma.certificate.findMany({
-      include: { domain: true },
+      where,
+      include: { domain: { select: { hostname: true } } },
     });
 
     let expiringSoonCount = 0;
@@ -764,7 +785,8 @@ export class SslService {
 
       if (newStatus !== cert.status) {
         await this.prisma.certificate.update({
-          where: { id: cert.id },
+          // Recheck ownership if a domain moved after the read.
+          where: { id: cert.id, AND: where },
           data: { status: newStatus, lastCheckedAt: new Date() },
         });
       }

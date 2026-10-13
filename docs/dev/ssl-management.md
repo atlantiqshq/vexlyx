@@ -12,6 +12,12 @@
 
 SSL Certificate Management provides automated and custom TLS certificate provisioning, validation, encryption, renewal, and expiry monitoring across all domains managed in Vexlyx.
 
+Expiry alerts and counts are scoped to the authenticated caller: USER sees their
+own domains, RESELLER sees their own and their subaccounts' domains, and ADMIN
+sees all domains. Certificate status updates use the same scope. The dashboard
+keeps its own-domain feed for every role. See [SSL expiry alert authorization](ssl-alert-isolation.md)
+for the access rules and regression checks.
+
 Drawing from best practices in modern cloud control panels (Coolify, CloudPanel, CapRover) and solving the common "silent renewal failure" problem, Vexlyx provides:
 1. **Automated Let's Encrypt Provisioning**: Traefik v3 automatically fulfills ACME HTTP-01 challenges on port 80/443 with persistent certificate storage in `docker/traefik/acme.json`.
 2. **Wildcard & Custom Certificate Support**: Users can upload manual custom certificates (PEM certificate chain and private key) with client- and server-side pairing validation and AES-256-GCM encrypted private key storage at rest.

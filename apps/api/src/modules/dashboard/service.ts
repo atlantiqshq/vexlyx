@@ -114,19 +114,11 @@ export class DashboardService {
   }
 
   private async recentSslAlerts(userId: string): Promise<ActivityItem[]> {
-    const userDomains = await this.prisma.domain.findMany({
-      where: { userId },
-      select: { id: true },
-    });
-    const userDomainIds = new Set(userDomains.map((d) => d.id));
-    if (userDomainIds.size === 0) return [];
-
-    // Reuses SslService's existing expiry-audit logic (it also refreshes
-    // cert status as a side effect) rather than reimplementing days-remaining math.
-    const { alerts } = await this.sslService.checkExpiryAlerts();
+    // Keep the dashboard's own-domain feed, including status refreshes,
+    // scoped in the database even for administrators and resellers.
+    const { alerts } = await this.sslService.checkExpiryAlerts(userId, { ownOnly: true });
 
     return alerts
-      .filter((a) => userDomainIds.has(a.domainId))
       .map((a) => ({
         id: `ssl-${a.domainId}`,
         type: "ssl_alert" as const,

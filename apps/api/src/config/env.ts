@@ -41,6 +41,8 @@ const envSchema = z
     // Build integration (F1.4)
     NIXPACKS_IMAGE_PREFIX: z.string().min(1).default("vexlyx"),
     BUILD_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(5),
+    // How many scheduled-task commands (F5.28) may run at the same time across all projects.
+    SCHEDULED_TASK_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(4),
     // Deploy integration (F1.5)
     // Base domain used to generate per-project Traefik hostnames: {name}.{BASE_DOMAIN}
     BASE_DOMAIN: z.string().min(1).default("vexlyx.localhost"),

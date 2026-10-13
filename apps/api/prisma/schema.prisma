@@ -210,6 +210,8 @@ model User {
   maxDatabases   Int?     @map("max_databases")
   maxMailboxes   Int?     @map("max_mailboxes")
   maxSubAccounts Int?     @map("max_sub_accounts")
+  /// Cap on scheduled tasks across all of the user's projects (F5.28).
+  maxScheduledTasks Int?  @map("max_scheduled_tasks")
   /// Named capabilities granted on top of the role (F5.19). Additive only —
   /// never removes what the role itself already grants.
   permissions Permission[] @default([])
@@ -230,6 +232,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   issuedResetTokens   PasswordResetToken[] @relation("PasswordResetIssuer")
   quotaNotices QuotaNotice[]
+  scheduledTasks ScheduledTask[]
   projects       Project[]
   domains        Domain[]
   databases      Database[]
@@ -309,6 +312,64 @@ model QuotaNotice {
   @@map("quota_notices")
 }
 
+enum ScheduledTaskTrigger {
+  SCHEDULED
+  MANUAL
+}
+
+enum ScheduledTaskStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  TIMEOUT
+  SKIPPED
+}
+
+/// A command a user runs on a cron schedule inside one of their project's containers (F5.28).
+model ScheduledTask {
+  id                  String   @id @default(cuid())
+  projectId           String   @map("project_id")
+  userId              String   @map("user_id")
+  name                String
+  command             String
+  /// Five-field cron expression, evaluated in the server timezone (F5.13).
+  schedule            String
+  timeoutSeconds      Int      @default(300) @map("timeout_seconds")
+  enabled             Boolean  @default(true)
+  notifyOnFailure     Boolean  @default(true) @map("notify_on_failure")
+  /// Runs in a row that ended FAILED or TIMEOUT; reset by a SUCCESS. Skipped runs leave it alone.
+  consecutiveFailures Int      @default(0) @map("consecutive_failures")
+  lastRunAt           DateTime? @map("last_run_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  project Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  runs    ScheduledTaskRun[]
+
+  @@index([projectId])
+  @@index([userId])
+  @@map("scheduled_tasks")
+}
+
+/// One execution (or skipped attempt) of a scheduled task. Only the latest 50 per task are kept (F5.28).
+model ScheduledTaskRun {
+  id         String               @id @default(cuid())
+  taskId     String               @map("task_id")
+  trigger    ScheduledTaskTrigger
+  status     ScheduledTaskStatus
+  exitCode   Int?                 @map("exit_code")
+  /// Combined stdout/stderr, capped. May contain secrets the command printed, so it is only ever shown to the owner.
+  output     String               @default("")
+  startedAt  DateTime             @default(now()) @map("started_at")
+  finishedAt DateTime?            @map("finished_at")
+
+  task ScheduledTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, startedAt])
+  @@map("scheduled_task_runs")
+}
+
 /// A hosted application or website managed by the panel.
 /// Project names are unique per user.
 model Project {
@@ -355,6 +416,7 @@ model Project {
   envVars     EnvVar[]
   domains     Domain[]
   databases   Database[]
+  scheduledTasks ScheduledTask[]
   githubInstallation GitHubInstallation? @relation(fields: [githubInstallationId], references: [id], onDelete: SetNull)
 
   @@unique([userId, name])

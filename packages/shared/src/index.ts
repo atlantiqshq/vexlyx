@@ -555,3 +555,38 @@ export type {
   SystemEmailStatusResponse,
   SystemEmailDnsRecord,
 } from "./schemas/systemEmail.js";
+
+export {
+  CreateScheduledTaskSchema,
+  CronExpressionSchema,
+  SCHEDULE_PRESETS,
+  SCHEDULED_TASK_COMMAND_MAX,
+  SCHEDULED_TASK_FAILURE_EMAIL_AFTER,
+  SCHEDULED_TASK_NAME_MAX,
+  SCHEDULED_TASK_OUTPUT_MAX_BYTES,
+  SCHEDULED_TASK_RUNS_KEPT,
+  SCHEDULED_TASK_TIMEOUT_DEFAULT,
+  SCHEDULED_TASK_TIMEOUT_MAX,
+  SCHEDULED_TASK_TIMEOUT_MIN,
+  SCHEDULED_TASK_UNSUPPORTED_PROJECT_TYPES,
+  SchedulePreviewSchema,
+  ScheduledTaskRunsQuerySchema,
+  ScheduledTaskStatusSchema,
+  ScheduledTaskTriggerSchema,
+  TASK_PRESETS,
+  UpdateScheduledTaskSchema,
+} from "./schemas/scheduledTasks.js";
+export type {
+  CreateScheduledTaskInput,
+  SchedulePreset,
+  SchedulePreviewInput,
+  SchedulePreviewResponse,
+  ScheduledTaskListResponse,
+  ScheduledTaskResponse,
+  ScheduledTaskRunResponse,
+  ScheduledTaskRunsQuery,
+  ScheduledTaskStatus,
+  ScheduledTaskTrigger,
+  TaskPreset,
+  UpdateScheduledTaskInput,
+} from "./schemas/scheduledTasks.js";

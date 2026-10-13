@@ -10,6 +10,7 @@ export type EmailParams = {
   two_factor_reset: { name: string };
   quota_warning: { name: string; resource: string; used: number; limit: number; level: 80 | 100 };
   backup_failed: { error: string; snapshotId: string };
+  scheduled_task_failed: { name: string; taskName: string; projectName: string; projectId: string; status: "FAILED" | "TIMEOUT"; failures: number };
   /** signatureHtml is HTML produced by the signature renderer, which escapes everything it is given. */
   signature_test: { name: string; address: string; signatureHtml: string; signatureText: string };
   test: Record<string, never>;
@@ -92,6 +93,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   database: "databases",
   mailbox: "mailboxes",
   subAccount: "sub-accounts",
+  scheduledTask: "scheduled tasks",
 };
 
 const TEMPLATES: { [E in SystemEmailEvent]: (params: EmailParams[E]) => RenderedEmail } = {
@@ -178,6 +180,16 @@ const TEMPLATES: { [E in SystemEmailEvent]: (params: EmailParams[E]) => Rendered
       heading: "A backup failed",
       paragraphs: [`Backup ${snapshotId} did not complete.`, `Error: ${error}`],
       action: { label: "View backups", url: panelUrl("/settings") },
+    }),
+  scheduled_task_failed: ({ name, taskName, projectName, projectId, status, failures }) =>
+    render({
+      subject: `Scheduled task "${taskName}" keeps failing`,
+      heading: "A scheduled task keeps failing",
+      paragraphs: [
+        `Hi ${name}, the task "${taskName}" in project "${projectName}" has now ${status === "TIMEOUT" ? "timed out or failed" : "failed"} ${failures} times in a row.`,
+        "You won't get another email about it until it succeeds once. Open the run history to see what it printed.",
+      ],
+      action: { label: "Open the project", url: panelUrl(`/projects/${projectId}`) },
     }),
   test: () =>
     render({

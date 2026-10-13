@@ -17,6 +17,7 @@ const SAMPLES: { [E in keyof EmailParams]: EmailParams[E] } = {
   quota_warning: { name: "Ada", resource: "project", used: 8, limit: 10, level: 80 },
   backup_failed: { error: "disk full", snapshotId: "snap-1" },
   signature_test: { name: "Ada", address: "ada@example.com", signatureHtml: "<div>Ada Lovelace</div>", signatureText: "Ada Lovelace" },
+  scheduled_task_failed: { name: "Ada", taskName: "Nightly report", projectName: "Shop", projectId: "p1", status: "FAILED", failures: 3 },
   test: {},
 };
 
@@ -46,6 +47,19 @@ describe("renderEmail", () => {
     expect(mail.text).toContain("Ada Lovelace");
     expect(mail.html).not.toContain("<b>Ada</b>");
     expect(mail.subject).toBe("Signature preview for ada@example.com");
+  });
+
+  it("names the failing task and links to its project, escaping user-chosen names", () => {
+    const mail = renderEmail("scheduled_task_failed", { ...SAMPLES.scheduled_task_failed, taskName: "<img src=x>", status: "TIMEOUT" });
+    expect(mail.html).not.toContain("<img src=x>");
+    expect(mail.html).toContain("&lt;img src=x&gt;");
+    expect(mail.text).toContain("3 times in a row");
+    expect(mail.text).toContain("/projects/p1");
+  });
+
+  it("labels the scheduled task quota in plain words", () => {
+    const mail = renderEmail("quota_warning", { name: "Ada", resource: "scheduledTask", used: 4, limit: 5, level: 80 });
+    expect(mail.text).toContain("4 of 5 scheduled tasks");
   });
 
   it("uses the stronger wording when the limit is fully reached", () => {

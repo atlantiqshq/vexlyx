@@ -44,6 +44,10 @@ export const AUDIT_ACTIONS = [
   "github.installation_link_rejected",
   "github.project_connected",
   "github.project_disconnected",
+  "scheduled_task.created",
+  "scheduled_task.updated",
+  "scheduled_task.deleted",
+  "scheduled_task.run_manual",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

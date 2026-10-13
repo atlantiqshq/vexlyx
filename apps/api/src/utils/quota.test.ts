@@ -19,6 +19,7 @@ interface PrismaMock {
   domain: { count: ReturnType<typeof vi.fn> };
   database: { count: ReturnType<typeof vi.fn> };
   mailbox: { count: ReturnType<typeof vi.fn> };
+  scheduledTask: { count: ReturnType<typeof vi.fn> };
 }
 
 function createPrismaMock(): PrismaMock {
@@ -28,6 +29,7 @@ function createPrismaMock(): PrismaMock {
     domain: { count: vi.fn() },
     database: { count: vi.fn() },
     mailbox: { count: vi.fn() },
+    scheduledTask: { count: vi.fn().mockResolvedValue(0) },
   };
 }
 
@@ -225,5 +227,61 @@ describe("getUsageSummary — F5.20 oversold reporting", () => {
     expect(summary.project.oversold).toBeUndefined();
     expect(summary.project.nominalSum).toBeUndefined();
     expect(prisma.user.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("scheduled task quota (F5.28)", () => {
+  it("blocks creation at the limit, naming the resource in plain words", async () => {
+    const prisma = createPrismaMock();
+    prisma.user.findUnique.mockResolvedValueOnce({ role: "USER", resellerId: null, maxScheduledTasks: 3 });
+    prisma.scheduledTask.count.mockResolvedValueOnce(3);
+
+    await expect(
+      assertUnderQuota(prisma as unknown as PrismaClient, "user-1", "scheduledTask", makeError),
+    ).rejects.toMatchObject({ code: "QUOTA_EXCEEDED", statusCode: 403, message: expect.stringContaining("scheduled task limit (3)") });
+    expect(prisma.scheduledTask.count).toHaveBeenCalledWith({ where: { userId: "user-1" } });
+  });
+
+  it("allows creation under the limit and when the limit is unlimited", async () => {
+    const prisma = createPrismaMock();
+    prisma.user.findUnique.mockResolvedValueOnce({ role: "USER", resellerId: null, maxScheduledTasks: 3 });
+    prisma.scheduledTask.count.mockResolvedValueOnce(2);
+    await expect(assertUnderQuota(prisma as unknown as PrismaClient, "user-1", "scheduledTask", makeError)).resolves.toBeUndefined();
+
+    prisma.user.findUnique.mockResolvedValueOnce({ role: "USER", resellerId: null, maxScheduledTasks: null });
+    await expect(assertUnderQuota(prisma as unknown as PrismaClient, "user-1", "scheduledTask", makeError)).resolves.toBeUndefined();
+  });
+
+  it("is a per-user limit only: a reseller's overselling pool is never consulted", async () => {
+    const prisma = createPrismaMock();
+    prisma.user.findUnique.mockResolvedValueOnce({ role: "USER", resellerId: "reseller-1", maxScheduledTasks: 5 });
+    prisma.scheduledTask.count.mockResolvedValueOnce(1);
+
+    await expect(assertUnderQuota(prisma as unknown as PrismaClient, "sub-1", "scheduledTask", makeError)).resolves.toBeUndefined();
+    expect(prisma.user.findUnique).toHaveBeenCalledTimes(1);
+    expect(prisma.user.findMany).not.toHaveBeenCalled();
+  });
+
+  it("appears in the usage summary without reseller oversold fields", async () => {
+    const prisma = createPrismaMock();
+    prisma.user.findUnique.mockResolvedValue({
+      role: "RESELLER",
+      maxProjects: 10,
+      maxDomains: null,
+      maxDatabases: null,
+      maxMailboxes: null,
+      maxSubAccounts: null,
+      maxScheduledTasks: 4,
+    });
+    prisma.user.findMany.mockResolvedValue([]);
+    prisma.project.count.mockResolvedValue(0);
+    prisma.domain.count.mockResolvedValue(0);
+    prisma.database.count.mockResolvedValue(0);
+    prisma.mailbox.count.mockResolvedValue(0);
+    prisma.scheduledTask.count.mockResolvedValue(2);
+
+    const summary = await getUsageSummary(prisma as unknown as PrismaClient, "reseller-1");
+
+    expect(summary.scheduledTask).toEqual({ used: 2, limit: 4 });
   });
 });

@@ -7,6 +7,7 @@ import type { CreateProjectInput, UpdateProjectInput, ProjectListQuery } from ".
 import { assertUnderQuota, notifyQuotaThreshold } from "../../utils/quota.js";
 import { env } from "../../config/env.js";
 import { runDockerAction } from "../deploy/service.js";
+import { removeTasksForProject } from "../scheduled-tasks/scheduler.js";
 import type { AuditLogService } from "../audit-log/service.js";
 
 // ---------------------------------------------------------------------------
@@ -70,6 +71,8 @@ export class ProjectService {
   // logged but don't block the delete -- a project stuck on a broken
   // container shouldn't become permanently undeletable.
   private async teardownWorkspace(projectId: string): Promise<void> {
+    await removeTasksForProject(this.prisma, projectId, this.logger);
+
     const projectDir = resolve(env.PROJECTS_DIR, projectId);
     if (!existsSync(projectDir)) return;
 

@@ -18,6 +18,7 @@ Commands:
   cleanup   -- `docker container prune` + `docker image prune -a` (F5.15).
   image_id  -- Resolve the current image ID for a tag, or null (F5.15).
   remove_image -- `docker image rm <id>`, no-ops if the image is in use (F5.15).
+  exec      -- Run a shell command inside the project's `app` container, with a timeout (F5.28).
 
 Port allocation strategy:
   Each project gets a unique host port derived from a configurable range (default 8100-8999).
@@ -35,6 +36,8 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 
@@ -799,10 +802,157 @@ def cmd_logs_follow(payload: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Scheduled tasks (F5.28)
+# ---------------------------------------------------------------------------
+
+EXEC_SERVICE = "app"
+RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,64}")
+EXEC_TIMEOUT_MIN = 1
+EXEC_TIMEOUT_MAX = 3600
+EXEC_OUTPUT_DEFAULT_MAX = 64 * 1024
+
+# Killing the `docker exec` client does not stop the command inside the container, and the
+# `timeout` binary only signals its direct child, so after a timeout every process that carries
+# this run's marker variable is killed instead. Descendants inherit the environment, which is
+# what makes the whole tree findable. Runs inside the container as `sh -c <script> vx-kill <runId>`.
+EXEC_KILL_SCRIPT = (
+    'for p in /proc/[0-9]*; do '
+    'if tr "\\0" "\\n" < "$p/environ" 2>/dev/null | grep -qx "VX_TASK_RUN=$1"; then '
+    'kill -KILL "${p#/proc/}" 2>/dev/null; fi; done'
+)
+
+
+def get_service_container(compose_dir: str, docker_bin: str, service: str) -> str | None:
+    """Return the container ID of one specific compose service, or None."""
+    result = subprocess.run(
+        [docker_bin, "compose", "ps", "-q", service],
+        cwd=compose_dir,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    ids = result.stdout.strip().splitlines()
+    return ids[0].strip() if ids and ids[0].strip() else None
+
+
+def kill_run_in_container(docker_bin: str, container_id: str, run_id: str) -> None:
+    """Best effort: two passes, so a process started while the first one ran is caught too."""
+    for _ in range(2):
+        try:
+            subprocess.run(
+                [docker_bin, "exec", container_id, "sh", "-c", EXEC_KILL_SCRIPT, "vx-kill", run_id],
+                capture_output=True,
+                timeout=20,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return
+
+
+def cmd_exec(payload: dict) -> None:
+    """
+    Run one shell command inside the project's `app` container (F5.28).
+
+    The command is passed to `docker exec` as a single argument of `sh -c`, never interpolated
+    into a host shell. Output (stdout and stderr together) is capped; the run is killed, together
+    with everything it started, when it exceeds the timeout.
+    Returns: { status: success|failed|timeout|skipped, exitCode, output, truncated, durationMs, reason }
+    """
+    project_dir = require_field(payload, "projectDir")
+    command = require_field(payload, "shellCommand")
+    run_id = require_field(payload, "runId")
+    if not RUN_ID_PATTERN.fullmatch(run_id):
+        fail("runId may only contain letters, digits, '-' and '_'", "INVALID_PAYLOAD")
+        return
+    if "\x00" in command:
+        fail("shellCommand contains a NUL character", "INVALID_PAYLOAD")
+        return
+
+    timeout = payload.get("timeoutSeconds")
+    if not isinstance(timeout, int) or isinstance(timeout, bool) or not EXEC_TIMEOUT_MIN <= timeout <= EXEC_TIMEOUT_MAX:
+        fail(f"timeoutSeconds must be a whole number from {EXEC_TIMEOUT_MIN} to {EXEC_TIMEOUT_MAX}", "INVALID_PAYLOAD")
+        return
+    max_output = payload.get("maxOutputBytes", EXEC_OUTPUT_DEFAULT_MAX)
+    if not isinstance(max_output, int) or isinstance(max_output, bool) or max_output < 1:
+        fail("maxOutputBytes must be a positive whole number", "INVALID_PAYLOAD")
+        return
+
+    docker_bin = get_docker_binary()
+    compose_dir = str(Path(project_dir) / "deploy")
+    if not (Path(compose_dir) / "docker-compose.yml").is_file():
+        respond({"status": "skipped", "reason": "NOT_DEPLOYED", "exitCode": None, "output": "", "truncated": False, "durationMs": 0})
+        return
+
+    container_id = get_service_container(compose_dir, docker_bin, EXEC_SERVICE)
+    state = ""
+    if container_id:
+        inspected = subprocess.run(
+            [docker_bin, "inspect", "--format", "{{.State.Status}}", container_id],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        state = inspected.stdout.strip() if inspected.returncode == 0 else ""
+    if not container_id or state != "running":
+        respond({"status": "skipped", "reason": "NOT_RUNNING", "exitCode": None, "output": "", "truncated": False, "durationMs": 0})
+        return
+
+    started = time.monotonic()
+    proc = subprocess.Popen(
+        [docker_bin, "exec", "-e", f"VX_TASK_RUN={run_id}", container_id, "sh", "-c", command],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+    chunks: list[bytes] = []
+    kept = 0
+    truncated = False
+
+    def drain() -> None:
+        nonlocal kept, truncated
+        assert proc.stdout is not None
+        # Keep reading after the cap so a chatty command never blocks on a full pipe.
+        for chunk in iter(lambda: proc.stdout.read(8192), b""):  # type: ignore[union-attr]
+            room = max_output - kept
+            if room > 0:
+                chunks.append(chunk[:room])
+                kept += min(len(chunk), room)
+            if len(chunk) > room:
+                truncated = True
+
+    reader = threading.Thread(target=drain, daemon=True)
+    reader.start()
+
+    timed_out = False
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        proc.kill()
+        proc.wait()
+        kill_run_in_container(docker_bin, container_id, run_id)
+    reader.join(timeout=10)
+
+    output = b"".join(chunks).decode("utf-8", errors="replace")
+    duration_ms = int((time.monotonic() - started) * 1000)
+    if timed_out:
+        status, exit_code = "timeout", None
+    else:
+        exit_code = proc.returncode
+        status = "success" if exit_code == 0 else "failed"
+        if "executable file not found" in output and exit_code != 0:
+            output += "\nThis container has no `sh`, so commands can't run in it."
+    respond({"status": status, "exitCode": exit_code, "output": output, "truncated": truncated, "durationMs": duration_ms, "reason": None})
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 COMMANDS = {
+    "exec": cmd_exec,
     "deploy": cmd_deploy,
     "start": cmd_start,
     "stop": cmd_stop,

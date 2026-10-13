@@ -24,6 +24,7 @@ export type User = {
   maxDatabases: number | null;
   maxMailboxes: number | null;
   maxSubAccounts: number | null;
+  maxScheduledTasks: number | null;
   permissions: Permission[];
   totpEnabled: boolean;
   createdAt: Date | string;

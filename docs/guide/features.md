@@ -13,6 +13,7 @@ Use this page to find the right user guide or technical reference. Availability 
 | Build and runtime logs | [Watching logs](/guide/deploying#watching-logs) | [Real-time logs](/reference/realtime-logs) |
 | Next.js, Python, React, PHP, WordPress, and Docker | [Runtime requirements](/guide/deploying#per-type-notes) | [Runtime reference](/reference/runtimes/nextjs) |
 | File manager and SFTP | [File manager reference](/reference/file-manager-sftp) | [File manager and SFTP](/reference/file-manager-sftp) |
+| Scheduled tasks (cron jobs) | [Scheduled tasks](/guide/deploying#scheduled-tasks) | [Scheduled tasks](/reference/scheduled-tasks) |
 
 ## Domains, data, and communication
 
@@ -86,7 +87,9 @@ This matrix maps every completed roadmap feature to its primary maintained docum
 | F5.24 File permissions and archives | [File permissions and archives](/reference/file-manager-permissions-archives) |
 | F5.26 Mail authentication for connected domains | [Email authentication](/reference/email/authentication) |
 | F5.29 GitHub integration | [GitHub integration](/reference/github-integration) |
+| F5.28 Scheduled tasks | [Scheduled tasks](/guide/deploying#scheduled-tasks) |
 | F5.30 Password recovery | [Password recovery](/reference/password-recovery) |
+| F5.31 Email signatures | [Email signatures](/guide/email#email-signatures) |
 | F6.2 CI/CD | [CI/CD](/reference/ci-cd) |
 
 F5.28 scheduled tasks and F6.3 community infrastructure are excluded because the roadmap marks them as not started.

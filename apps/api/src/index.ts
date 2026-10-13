@@ -30,6 +30,7 @@ import { mailboxRoutes } from "./modules/mailboxes/routes.js";
 import { aliasRoutes } from "./modules/aliases/routes.js";
 import { vacationRoutes } from "./modules/vacation/routes.js";
 import { mailSignatureRoutes } from "./modules/mail-signatures/routes.js";
+import { scheduledTaskRoutes } from "./modules/scheduled-tasks/routes.js";
 import { SignatureSync } from "./modules/mail-signatures/sync.js";
 import { fileRoutes } from "./modules/files/routes.js";
 import { sftpRoutes } from "./modules/sftp/routes.js";
@@ -97,6 +98,7 @@ async function buildApp() {
   await app.register(deployRoutes, { prefix: "/api/projects" });
   await app.register(logRoutes, { prefix: "/api/projects" });
   await app.register(envRoutes, { prefix: "/api/projects" });
+  await app.register(scheduledTaskRoutes, { prefix: "/api/projects" });
   await app.register(wordpressRoutes, { prefix: "/api/projects" });
   await app.register(dockerfileRoutes, { prefix: "/api/projects" });
   await app.register(databaseRoutes, { prefix: "/api/databases" });

@@ -1,12 +1,12 @@
 import type { PrismaClient } from "@prisma/client";
 import { notifyUser } from "../modules/system-email/notifier.js";
 
-export type QuotaResource = "project" | "domain" | "database" | "mailbox" | "subAccount";
+export type QuotaResource = "project" | "domain" | "database" | "mailbox" | "subAccount" | "scheduledTask";
 
 /** Resources that participate in reseller pooling/overselling (F5.20). `subAccount` is excluded — there's no reseller-of-reseller nesting, so sub-account counts don't aggregate the same way. */
-type PoolResource = Exclude<QuotaResource, "subAccount">;
+type PoolResource = Exclude<QuotaResource, "subAccount" | "scheduledTask">;
 
-const QUOTA_RESOURCES: QuotaResource[] = ["project", "domain", "database", "mailbox", "subAccount"];
+const QUOTA_RESOURCES: QuotaResource[] = ["project", "domain", "database", "mailbox", "subAccount", "scheduledTask"];
 const POOL_RESOURCES: PoolResource[] = ["project", "domain", "database", "mailbox"];
 
 const QUOTA_FIELD: Record<QuotaResource, string> = {
@@ -15,6 +15,7 @@ const QUOTA_FIELD: Record<QuotaResource, string> = {
   database: "maxDatabases",
   mailbox: "maxMailboxes",
   subAccount: "maxSubAccounts",
+  scheduledTask: "maxScheduledTasks",
 };
 
 export interface QuotaUsage {
@@ -38,6 +39,8 @@ async function countExisting(prisma: PrismaClient, userId: string, resource: Quo
       return prisma.mailbox.count({ where: { userId, status: { not: "DELETED" } } });
     case "subAccount":
       return prisma.user.count({ where: { resellerId: userId } });
+    case "scheduledTask":
+      return prisma.scheduledTask.count({ where: { userId } });
   }
 }
 
@@ -79,14 +82,15 @@ export async function assertUnderQuota(
     const current = await countExisting(prisma, userId, resource);
     if (current >= limit) {
       throw makeError(
-        `You have reached your ${resource} limit (${limit}). Contact your administrator to increase it.`,
+        `You have reached your ${resource === "scheduledTask" ? "scheduled task" : resource} limit (${limit}). Contact your administrator to increase it.`,
         "QUOTA_EXCEEDED",
         403,
       );
     }
   }
 
-  if (resource === "subAccount") return;
+  // Sub-accounts and scheduled tasks are per-user limits only: they are not pooled across a reseller.
+  if (resource === "subAccount" || resource === "scheduledTask") return;
 
   const resellerId = record?.resellerId as string | null | undefined;
   const role = record?.role as string | undefined;
@@ -194,6 +198,7 @@ export async function getUsageSummary(
       maxDatabases: true,
       maxMailboxes: true,
       maxSubAccounts: true,
+      maxScheduledTasks: true,
     },
   });
 
@@ -213,7 +218,7 @@ export async function getUsageSummary(
       const limit = (limits?.[QUOTA_FIELD[resource]] as number | null | undefined) ?? null;
       const usage: QuotaUsage = { used, limit };
 
-      if (isReseller && resource !== "subAccount") {
+      if (isReseller && resource !== "subAccount" && resource !== "scheduledTask") {
         const field = QUOTA_FIELD[resource] as keyof (typeof subAccountQuotas)[number];
         const values = subAccountQuotas.map((s) => s[field]);
         const nominalSum = values.some((v) => v === null) ? null : (values as number[]).reduce((sum, v) => sum + v, 0);

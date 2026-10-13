@@ -64,6 +64,7 @@ const groups: Group[] = [
       "reference/github-webhooks",
       "reference/build-system",
       "reference/deployment-engine",
+      "reference/scheduled-tasks",
       "reference/realtime-logs",
       "reference/environment-variables",
     ],

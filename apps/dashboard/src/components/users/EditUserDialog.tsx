@@ -48,7 +48,7 @@ interface EditUserDialogProps {
   onResetPassword: (id: string) => Promise<AdminPasswordResetResult>;
 }
 
-type QuotaField = "maxProjects" | "maxDomains" | "maxDatabases" | "maxMailboxes" | "maxSubAccounts";
+type QuotaField = "maxProjects" | "maxDomains" | "maxDatabases" | "maxMailboxes" | "maxSubAccounts" | "maxScheduledTasks";
 
 const QUOTA_FIELDS: { key: QuotaField; label: string }[] = [
   { key: "maxProjects", label: "Max projects" },
@@ -56,6 +56,7 @@ const QUOTA_FIELDS: { key: QuotaField; label: string }[] = [
   { key: "maxDatabases", label: "Max databases" },
   { key: "maxMailboxes", label: "Max mailboxes" },
   { key: "maxSubAccounts", label: "Max sub-accounts" },
+  { key: "maxScheduledTasks", label: "Max scheduled tasks" },
 ];
 
 const PERMISSION_FIELDS: { key: Permission; label: string; description: string }[] = [
@@ -81,6 +82,7 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, canReset2F
     maxDatabases: "",
     maxMailboxes: "",
     maxSubAccounts: "",
+    maxScheduledTasks: "",
   });
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [oversellingEnabled, setOversellingEnabled] = useState(false);
@@ -98,6 +100,7 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, canReset2F
       maxDatabases: toFormValue(user.maxDatabases),
       maxMailboxes: toFormValue(user.maxMailboxes),
       maxSubAccounts: toFormValue(user.maxSubAccounts),
+      maxScheduledTasks: toFormValue(user.maxScheduledTasks),
     });
     setPermissions(user.permissions);
     setOversellingEnabled(user.oversellingEnabled);
@@ -121,6 +124,7 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, canReset2F
         maxDatabases: fromFormValue(quotas.maxDatabases),
         maxMailboxes: fromFormValue(quotas.maxMailboxes),
         maxSubAccounts: fromFormValue(quotas.maxSubAccounts),
+        maxScheduledTasks: fromFormValue(quotas.maxScheduledTasks),
         oversellingEnabled: canEditOverselling ? oversellingEnabled : undefined,
       },
       permissions: canEditRole ? permissions : undefined,

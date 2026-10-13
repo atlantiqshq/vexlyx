@@ -20,6 +20,14 @@ export default defineConfig({
     ["meta", { name: "theme-color", content: "#4f46e5" }],
     ["meta", { property: "og:site_name", content: "Vexlyx Docs" }],
     ["meta", { property: "og:type", content: "website" }],
+    // Google Search Console, URL-prefix property for docs.vexlyx.atlantiqs.org.
+    [
+      "meta",
+      {
+        name: "google-site-verification",
+        content: "US6r9MOMwCukIFCnjBAXAgK5aAF67qNf0nC7bOuKYhA",
+      },
+    ],
   ],
   markdown: {
     // The reference pages are plain documentation, not Vue. Render raw HTML as text and stop Vue

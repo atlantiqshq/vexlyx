@@ -1138,6 +1138,7 @@ Automatic SSL certificate provisioning via Let's Encrypt through Traefik.
 - [x] Auto SSL for all domains via Traefik certresolver
 - [x] Wildcard SSL support
 - [x] Certificate expiry monitoring
+- [x] Tenant-scoped SSL expiry alerts, counts, and status refreshes (issue #43; USER own domains, RESELLER own/subaccounts, ADMIN all)
 - [x] Auto-renewal before expiry
 - [x] Manual certificate upload (for custom certs)
 - [x] SSL status shown per domain

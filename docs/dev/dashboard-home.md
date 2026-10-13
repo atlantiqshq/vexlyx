@@ -28,7 +28,7 @@ apps/api/src/modules/dashboard/{routes,service}.ts
   │  getUsageSummary()        — apps/api/src/utils/quota.ts (user-scoped resource counts)
   │  MonitoringService.getServerMetrics()  — apps/api/src/modules/monitoring/service.ts
   │  Deployment / BackupSnapshot           — Prisma (project-scoped / global+ADMIN-only)
-  │  SslService.checkExpiryAlerts()        — apps/api/src/modules/domains/ssl-service.ts
+  │  SslService.checkExpiryAlerts(userId, { ownOnly: true }) — apps/api/src/modules/domains/ssl-service.ts
   ▼
 Prisma / system_monitor.py
 ```
@@ -41,7 +41,7 @@ Prisma / system_monitor.py
    - Recent deployments, via `prisma.deployment.findMany({ where: { project: { userId } } })` (deployments have no `userId` of their own).
    - Recent backups, only when the caller's role is `ADMIN` (looked up separately, since `BackupSnapshot` has no `userId` at all and is fully global — this mirrors the existing `requireRole("ADMIN")` boundary on `GET /api/backups`).
 4. **`sslExpiringCount`** — counted from the *full* (unfiltered-by-cap) SSL alert list returned alongside the activity sources, so it stays accurate even if SSL alerts get pushed out of the merged feed's top 15 by other activity. Drives the amber banner on the frontend independently of the activity feed.
-   - SSL expiry alerts, via `SslService.checkExpiryAlerts()` (which also refreshes certificate status as a side effect), filtered down to the caller's own domain IDs.
+   - SSL expiry alerts, via `SslService.checkExpiryAlerts(userId, { ownOnly: true })`. Both the query and certificate status refreshes are restricted to the caller's own domains in the database, including for ADMIN and RESELLER callers.
 
 The route (`GET /api/dashboard/summary`) requires only `app.requireAuth` — the backup-visibility check happens inside the service, not as a route-level role gate, since everything except backups should still be visible to non-admins.
 

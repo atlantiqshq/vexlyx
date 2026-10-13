@@ -47,7 +47,7 @@ const SAMPLE_SERVER_METRICS: ServerMetrics = {
 };
 
 interface PrismaMock {
-  user: { findUnique: ReturnType<typeof vi.fn>; count: ReturnType<typeof vi.fn> };
+  user: { findUnique: ReturnType<typeof vi.fn>; count: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
   project: { count: ReturnType<typeof vi.fn> };
   domain: { count: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
   database: { count: ReturnType<typeof vi.fn> };
@@ -68,6 +68,7 @@ function createPrismaMock(overrides: { role?: "ADMIN" | "USER" | "RESELLER" } = 
         maxSubAccounts: null,
       }),
       count: vi.fn().mockResolvedValue(0),
+      findMany: vi.fn().mockResolvedValue([]),
     },
     project: { count: vi.fn().mockResolvedValue(3) },
     domain: { count: vi.fn().mockResolvedValue(2), findMany: vi.fn().mockResolvedValue([{ id: "domain-1" }]) },
@@ -142,22 +143,22 @@ describe("DashboardService.getSummary", () => {
     });
   });
 
-  it("scopes SSL alerts to the caller's own domains only", async () => {
-    const prisma = createPrismaMock();
-    prisma.domain.findMany.mockResolvedValue([{ id: "domain-1" }]);
+  it.each(["USER", "RESELLER", "ADMIN"] as const)("requests database-scoped own-domain SSL alerts for %s", async (role) => {
+    const prisma = createPrismaMock({ role });
     mockCheckExpiryAlerts.mockResolvedValue({
-      totalChecked: 2,
+      totalChecked: 1,
       expiringSoon: 1,
-      expired: 1,
+      expired: 0,
       alerts: [
         { domainId: "domain-1", hostname: "mine.example.com", daysRemaining: 3, status: "EXPIRING_SOON" },
-        { domainId: "someone-elses-domain", hostname: "other.example.com", daysRemaining: 1, status: "EXPIRED" },
       ],
     });
     const service = new DashboardService(prisma as unknown as PrismaClient, noopLogger);
 
     const summary = await service.getSummary(USER_ID);
 
+    expect(mockCheckExpiryAlerts).toHaveBeenCalledWith(USER_ID, { ownOnly: true });
+    expect(prisma.domain.findMany).not.toHaveBeenCalled();
     const sslAlerts = summary.activity.filter((item) => item.type === "ssl_alert");
     expect(sslAlerts).toHaveLength(1);
     expect(sslAlerts[0]?.title).toContain("mine.example.com");

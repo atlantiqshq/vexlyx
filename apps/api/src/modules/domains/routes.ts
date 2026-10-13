@@ -357,14 +357,14 @@ export async function domainRoutes(app: FastifyInstance) {
   // ===========================================================================
 
   // ---------------------------------------------------------------------------
-  // GET /api/domains/ssl/alerts — audit all certificates for upcoming expiry (<= 7 days)
+  // GET /api/domains/ssl/alerts — audit accessible certificates for upcoming expiry (<= 7 days)
   // ---------------------------------------------------------------------------
   app.get(
     "/ssl/alerts",
     { preHandler: [app.requireAuth] },
-    async (_request, reply) => {
+    async (request, reply) => {
       try {
-        return await sslService.checkExpiryAlerts();
+        return await sslService.checkExpiryAlerts(request.userId!);
       } catch (err) {
         handleDomainError(err, reply);
       }

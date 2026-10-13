@@ -10,6 +10,7 @@
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:login-browser": "node test/login-timing.browser.mjs",
     "clean": "rimraf dist .turbo tsconfig.tsbuildinfo",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

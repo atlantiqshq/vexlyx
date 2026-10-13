@@ -3,6 +3,10 @@ import * as argon2 from "argon2";
 import { notifyUser } from "../system-email/notifier.js";
 import type { RegisterInput, LoginInput, ChangePasswordInput } from "./schema.js";
 
+// Match the current Argon2id password cost for unknown accounts. The random
+// input was discarded; this hash is never stored as an account credential.
+const DUMMY_PASSWORD_HASH = "$argon2id$v=19$m=65536,p=4,t=3$6QGcGwYqzSMCjFLaJB2jnQ$PhxLJA2eI2rRXQulCY06OlBIbGcxSKyGiCd75qS0u7Q";
+
 const PUBLIC_USER_SELECT = {
   id: true,
   email: true,
@@ -57,13 +61,9 @@ export class AuthService {
       where: { email: data.email },
     });
 
-    if (!user) {
-      throw new AuthError("Invalid email or password", "INVALID_CREDENTIALS", 401);
-    }
+    const validPassword = await argon2.verify(user?.password ?? DUMMY_PASSWORD_HASH, data.password);
 
-    const validPassword = await argon2.verify(user.password, data.password);
-
-    if (!validPassword) {
+    if (!user || !validPassword) {
       throw new AuthError("Invalid email or password", "INVALID_CREDENTIALS", 401);
     }
 

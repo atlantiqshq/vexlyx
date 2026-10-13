@@ -232,6 +232,7 @@ Implement complete authentication with custom session-based auth (Lucia Auth was
 - [x] Session stored in Redis with TTL
 - [x] CSRF protection via SameSite=Lax cookies
 - [x] Rate limiting: 5 login attempts per 15 minutes per IP
+- [x] Unknown-account login performs dummy Argon2id verification with the current password cost (issue #44)
 - [x] Frontend login/register forms with validation
 - [x] Protected routes redirect to login
 - [x] Auth hook (`useAuth`) in React

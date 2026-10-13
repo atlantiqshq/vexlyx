@@ -8,6 +8,36 @@
 
 Complete session-based authentication for Vexlyx. Users can register (email/password), log in, log out, and access protected panel pages. Passwords are hashed with Argon2id. Sessions are stored in Redis for fast lookup and PostgreSQL for audit/admin invalidation. HTTP-only cookies prevent XSS. Rate limiting protects against brute-force attacks.
 
+### Login timing and account enumeration
+
+Login always awaits one Argon2 verification: the stored password hash for an
+existing account, or a precomputed dummy Argon2id hash for a missing account.
+Both credential failures return the same 401 response (`INVALID_CREDENTIALS`),
+and missing accounts remain rejected even if dummy verification reports a match.
+The dummy hash was generated from random input that was discarded; it is never
+an account credential.
+
+The dummy matches current password creation defaults: Argon2id v19, 64 MiB
+memory, 3 iterations, parallelism 4, a 16-byte salt and a 32-byte digest. A
+regression test compares it with a password produced by `AuthService.register`.
+When password parameters change, regenerate the dummy with the new settings.
+This removes the missing-account verification shortcut; database/network jitter
+and legacy hashes with different costs can still affect observed response times.
+
+`pnpm --filter @vexlyx/api test` covers awaited verification, both credential
+failures, successful login, 2FA, rate limiting and parameter drift. After building
+the API and shared package, `pnpm --filter @vexlyx/api test:login-browser` runs
+Chrome/Chromium checks against disposable PostgreSQL and Redis containers. Set
+`VEXLYX_PLAYWRIGHT_MODULE` to a Playwright module path if needed and
+`VEXLYX_BROWSER_EXECUTABLE` to an installed browser executable. It checks browser
+HTTP responses and session cookies, without changing the dashboard UI. Timing
+samples are diagnostic, not pass/fail thresholds.
+
+The runner binds random service ports to loopback, overrides database/Redis
+settings, avoids `.env`, and removes its containers and volumes on completion.
+Deploy by rebuilding and restarting the API; no migration or configuration
+change is required.
+
 ## Architecture
 
 ### Auth Flow

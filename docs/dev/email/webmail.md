@@ -58,7 +58,7 @@ The user's browser talks directly to Roundcube (via Traefik at `webmail.vexlyx.l
 - `docker-compose.yml` — `roundcube` service: official image, no custom Dockerfile (unlike Postfix/Dovecot, which need custom config). Joins `default` (to reach `dovecot`/`postfix`, and to be reachable, by container name) and `traefik-net`. Also carries `traefik.enable=true` Docker labels for `webmail.vexlyx.localhost`, kept for portability to environments where Traefik's Docker provider works — see the routing note below.
 - `docker/traefik/dynamic/webmail.yml` — the route that actually works in this dev environment: a Traefik **file-provider** static router for `webmail.vexlyx.localhost` → `http://vexlyx-roundcube:80`, the same mechanism `DomainService.syncTraefikRouter()` (F3.3/F3.4) uses for per-domain routing. See §5.
 - `vexlyx_roundcube_data` named volume → `/var/roundcube/db` (SQLite file).
-- `docker/roundcube/config/local.inc.php`, bind-mounted read-only to `/var/roundcube/config/` (the official image auto-includes any `*.php` dropped there) — sets `imap_conn_options`/`smtp_conn_options` to accept Dovecot/Postfix's self-signed certificate in local development during the mandatory STARTTLS handshake. Production mail services use the trusted certificate synchronized from Traefik. See §5.
+- `docker/roundcube/config/local.inc.php`, bind-mounted read-only to `/var/roundcube/config/` (the official image auto-includes any `*.php` dropped there) — verifies mail server certificates and hostnames by default. The development Compose file explicitly enables its self-signed exception; production enforces verification. See [production TLS and upgrades](roundcube-tls.md).
 
 **System layer**
 - `system/python/webmail_manager.py` — `status` command: TCP-probes the mapped host port and runs `docker inspect vexlyx-roundcube`, mirroring `dovecot_manager.py::get_dovecot_status()`.
@@ -100,7 +100,7 @@ The user's browser talks directly to Roundcube (via Traefik at `webmail.vexlyx.l
 ROUNDCUBEMAIL_DEFAULT_HOST: tls://dovecot   # was: dovecot
 ROUNDCUBEMAIL_SMTP_SERVER: tls://postfix    # was: postfix
 ```
-Forcing STARTTLS then hit a second, expected development problem: Dovecot/Postfix's local self-signed cert isn't trusted by PHP's default TLS verification, so the handshake failed again. `docker/roundcube/config/local.inc.php` (auto-included by the official image from `/var/roundcube/config/*.php`) sets `imap_conn_options`/`smtp_conn_options` → `ssl.verify_peer = false` for the internal container connection. External production clients do not need this exception because Postfix and Dovecot present the trusted certificate synchronized from Traefik.
+Forcing STARTTLS then hit a second, expected development problem: Dovecot/Postfix's local self-signed cert isn't trusted by PHP's default TLS verification. Development now explicitly sets both `VEXLYX_ROUNDCUBE_ENV=development` and `VEXLYX_ROUNDCUBE_ALLOW_INSECURE_TLS=true` to permit that exception. Production sets the environment to `production`, disables the exception, verifies `${VEXLYX_MAIL_HOSTNAME}`, and uses implicit TLS (IMAPS 993 and internal SMTP 465) so capability stripping cannot bypass the TLS handshake. See [production TLS and upgrades](roundcube-tls.md).
 
 **Verified independently of Roundcube's UI**, from inside the `vexlyx_default` network:
 ```

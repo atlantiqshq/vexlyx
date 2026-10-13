@@ -25,34 +25,35 @@ chown -R 5000:5000 /var/mail/vhosts 2>/dev/null || true
 mkdir -p /var/indexes
 chown -R 5000:5000 /var/indexes 2>/dev/null || true
 
-# 3. Virtual users database (passdb + userdb), synced from Postgres by
-# dovecot_manager.py sync_mailboxes. The unprivileged "dovecot" auth worker
-# process needs read access, so it's group-owned by "dovecot" (not root) and
-# not group/other writable.
-mkdir -p /etc/dovecot
-touch /etc/dovecot/users
-chown root:dovecot /etc/dovecot/users
-chmod 640 /etc/dovecot/users
-
-# Seed dev test mailboxes so IMAPS login can be exercised before F4.3 ships
-# real mailbox creation. Password: "vexlyx-dev".
-# Checked by address (not file emptiness) so a real dovecot_manager.py
-# sync_mailboxes run — which rewrites entries for DB-known domains — never
-# permanently wipes these two dev fixtures on a later container restart.
-# Disabled in production (F5.1 sets VEXLYX_SEED_DEV_FIXTURES=false) so a
-# fresh install never ships a mailbox with a known, hardcoded password.
-if [ "${VEXLYX_SEED_DEV_FIXTURES:-true}" = "true" ] && ! grep -q "^test@vexlyx.local:" /etc/dovecot/users 2>/dev/null; then
-    echo "[Vexlyx] Seeding dev test mailboxes (test@vexlyx.local / admin@vexlyx.local)..."
-    HASH=$(doveadm pw -s ARGON2ID -p "vexlyx-dev")
-    mkdir -p /var/mail/vhosts/vexlyx.local/test/Maildir/cur /var/mail/vhosts/vexlyx.local/test/Maildir/new /var/mail/vhosts/vexlyx.local/test/Maildir/tmp
-    mkdir -p /var/mail/vhosts/vexlyx.local/admin/Maildir/cur /var/mail/vhosts/vexlyx.local/admin/Maildir/new /var/mail/vhosts/vexlyx.local/admin/Maildir/tmp
-    chown -R 5000:5000 /var/mail/vhosts
-    {
-      echo "test@vexlyx.local:${HASH}:5000:5000::::userdb_quota_rule=*:storage=1024M"
-      echo "admin@vexlyx.local:${HASH}:5000:5000::::userdb_quota_rule=*:storage=1024M"
-    } >> /etc/dovecot/users
-    chmod 640 /etc/dovecot/users
+state=/var/lib/vexlyx-mail/dovecot
+mkdir -p "$state/generations"
+if [ ! -f "$state/active.conf" ]; then
+    generation=$(openssl rand -hex 16)
+    directory="$state/generations/$generation"
+    mkdir -p "$directory"
+    touch "$directory/users"
+    if [ "${VEXLYX_SEED_DEV_FIXTURES:-true}" = true ]; then
+        HASH=$(doveadm -c /dev/null pw -s ARGON2ID -p "vexlyx-dev")
+        for name in test admin; do
+            mkdir -p "/var/mail/vhosts/vexlyx.local/$name/Maildir/cur" "/var/mail/vhosts/vexlyx.local/$name/Maildir/new" "/var/mail/vhosts/vexlyx.local/$name/Maildir/tmp"
+            echo "$name@vexlyx.local:$HASH:5000:5000::::userdb_quota_rule=*:storage=1024M" >> "$directory/users"
+        done
+        chown -R 5000:5000 /var/mail/vhosts/vexlyx.local
+    fi
+    cat > "$state/active.conf" <<EOF
+# generation:$generation
+passdb {
+  driver = passwd-file
+  args = scheme=ARGON2ID username_format=%u $directory/users
+}
+userdb {
+  driver = passwd-file
+  args = username_format=%u $directory/users
+}
+EOF
 fi
+generation=$(sed -n '1s/^# generation://p' "$state/active.conf")
+/usr/local/bin/mail-state.sh prepare "$generation"
 
 echo "[Vexlyx] Starting Dovecot IMAP on ports 143 and 993 (SASL auth on 12345)..."
 exec dovecot -F -c /etc/dovecot/dovecot.conf

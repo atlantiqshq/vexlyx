@@ -119,6 +119,10 @@ export class MailboxService {
     });
     void notifyQuotaThreshold(this.prisma, userId, "mailbox");
 
+    await this.auditLog.log(userId, "mailbox.created", { type: "Mailbox", id: mailbox.id }, {
+      after: { address: mailbox.address },
+    });
+
     await this.mailService.syncVirtualDomains(userId);
 
     if (isFirstMailbox) {
@@ -131,10 +135,6 @@ export class MailboxService {
         // The user can still trigger it manually via "Regenerate All".
       }
     }
-
-    await this.auditLog.log(userId, "mailbox.created", { type: "Mailbox", id: mailbox.id }, {
-      after: { address: mailbox.address },
-    });
 
     return {
       mailbox: {
@@ -212,10 +212,10 @@ export class MailboxService {
 
     await this.prisma.mailbox.delete({ where: { id: mailbox.id } });
 
-    await this.mailService.syncVirtualDomains(userId);
-
     await this.auditLog.log(userId, "mailbox.deleted", { type: "Mailbox", id: mailboxId }, {
       before: { address: mailbox.address },
     });
+
+    await this.mailService.syncVirtualDomains(userId);
   }
 }

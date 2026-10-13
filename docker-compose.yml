@@ -184,10 +184,13 @@ services:
     environment:
       ROUNDCUBEMAIL_DB_TYPE: sqlite
       ROUNDCUBEMAIL_SKIN: elastic
+      # Both settings are required to opt in to self-signed development mail.
+      VEXLYX_ROUNDCUBE_ENV: development
+      VEXLYX_ROUNDCUBE_ALLOW_INSECURE_TLS: "true"
       # tls:// forces STARTTLS — Dovecot's `ssl = required` (docker/dovecot/dovecot.conf)
       # rejects auth on a plaintext connection, so a bare "dovecot"/"postfix"
       # host (no scheme) silently fails every login. See docker/roundcube/config/local.inc.php
-      # for the matching self-signed-cert trust override this requires.
+      # for the explicitly gated development certificate exception.
       ROUNDCUBEMAIL_DEFAULT_HOST: tls://dovecot
       ROUNDCUBEMAIL_DEFAULT_PORT: 143
       ROUNDCUBEMAIL_SMTP_SERVER: tls://postfix

@@ -14,6 +14,7 @@ F5.3 adds a `/backups` page to the Vexlyx dashboard that:
 - **Retains a rotation** — keeps the most recent N daily snapshots plus M older ones spaced ~7 days apart, deleting the rest (both the DB row and the archive file).
 - **Restores per item** — pick a single project, database, mail domain, or DNS zone out of any completed snapshot and restore just that target in place, behind a destructive-confirmation dialog. There is no all-or-nothing full-server restore.
 - **Shows live progress** — Socket.io pushes backup/restore progress lines and completion status to the page in real time.
+- **Never restores over a running container** — a project restore first stops the project's container. If the stop fails, the restore is aborted **before any file is touched** with `CONTAINER_STOP_FAILED` (the cause is logged and sent to the page as a `FAILED` `restore:completed` event). After a successful restore the container is restarted; if that restart fails the restore still counts as completed (the files are already restored) but a warning is logged and sent as a `restore:progress` line instead of being swallowed (#47). Tests: `apps/api/src/modules/backups/service.test.ts`.
 
 Out of scope for this pass: S3/MinIO remote storage (local disk only, under `BACKUPS_DIR`), and certificates/vacation responders/SFTP accounts/env vars (not included in the manifest).
 

@@ -526,8 +526,24 @@ export class BackupService {
       });
     }
 
+    // Never restore over the files of a container that is still running: that
+    // risks an inconsistent or corrupted application state. If the stop fails
+    // the restore is aborted before anything on disk is touched.
     if (project.containerId) {
-      await this.deployService.containerAction(project.userId, project.id, "stop").catch(() => undefined);
+      try {
+        await this.deployService.containerAction(project.userId, project.id, "stop");
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        this.logger.error(
+          { err, projectId: project.id },
+          "Backup restore aborted: project container could not be stopped",
+        );
+        throw new BackupError(
+          `The project's container could not be stopped before restore, so nothing was changed: ${reason}`,
+          "CONTAINER_STOP_FAILED",
+          500,
+        );
+      }
     }
 
     await runBackupCommand(
@@ -542,8 +558,18 @@ export class BackupService {
       onLog,
     );
 
+    // The files are already restored at this point, so a failed restart does
+    // not fail the restore — but it must not be silent either.
     if (project.containerId) {
-      await this.deployService.containerAction(project.userId, project.id, "start").catch(() => undefined);
+      try {
+        await this.deployService.containerAction(project.userId, project.id, "start");
+      } catch (err) {
+        this.logger.warn(
+          { err, projectId: project.id },
+          "Backup restore succeeded but the project container could not be restarted",
+        );
+        onLog("Warning: files were restored, but the project container could not be restarted. Start it from the project page.");
+      }
     }
   }
 

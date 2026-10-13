@@ -23,55 +23,28 @@ if [ ! -f /etc/postfix/certs/cert.pem ] || [ ! -f /etc/postfix/certs/key.pem ]; 
     chmod 644 /etc/postfix/certs/cert.pem
 fi
 
-# 2. Virtual Maps
-mkdir -p /etc/postfix
-touch /etc/postfix/virtual_domains
-touch /etc/postfix/virtual_mailbox_maps
-touch /etc/postfix/virtual_alias_maps
-# Must not be group/other writable — postfix check rejects 666/664 config files
-chmod 640 /etc/postfix/virtual_domains
-chmod 640 /etc/postfix/virtual_mailbox_maps
-chmod 640 /etc/postfix/virtual_alias_maps
-# 3. Virtual Mailbox Base Directory
-# Required by Postfix virtual delivery agent (virtual_mailbox_base in main.cf).
-# Shared with Dovecot (F4.2) via bind mount — uid:gid 5000:5000 must match
-# virtual_uid_maps/virtual_gid_maps above and Dovecot's mail_uid/mail_gid.
-mkdir -p /var/mail/vhosts/vexlyx.local/test
-chown -R 5000:5000 /var/mail/vhosts 2>/dev/null || true
-
-# Seed a test mailbox so virtual delivery succeeds in dev. Disabled in
-# production (F5.1 sets VEXLYX_SEED_DEV_FIXTURES=false) so a fresh install's
-# mail routing table isn't pre-populated with fake dev addresses.
-if [ "${VEXLYX_SEED_DEV_FIXTURES:-true}" = "true" ] && [ ! -s /etc/postfix/virtual_mailbox_maps ]; then
-    echo "test@vexlyx.local vexlyx.local/test/Maildir/" > /etc/postfix/virtual_mailbox_maps
-    echo "admin@vexlyx.local vexlyx.local/test/Maildir/" >> /etc/postfix/virtual_mailbox_maps
+# Runtime state is a directory mount; only the activation file is replaced.
+state=/var/lib/vexlyx-mail/postfix
+mkdir -p "$state/generations" /var/mail/vhosts
+if [ ! -f "$state/active.conf" ]; then
+    generation=$(openssl rand -hex 16)
+    directory="$state/generations/$generation"
+    mkdir -p "$directory"
+    touch "$directory/virtual_domains" "$directory/virtual_mailbox_maps" "$directory/virtual_alias_maps"
+    if [ "${VEXLYX_SEED_DEV_FIXTURES:-true}" = true ]; then
+        echo vexlyx.local > "$directory/virtual_domains"
+        printf 'test@vexlyx.local vexlyx.local/test/Maildir/\nadmin@vexlyx.local vexlyx.local/admin/Maildir/\n' > "$directory/virtual_mailbox_maps"
+    fi
+    {
+        echo "# generation:$generation"
+        echo "virtual_mailbox_domains = $directory/virtual_domains"
+        echo "virtual_mailbox_maps = lmdb:$directory/virtual_mailbox_maps"
+        echo "virtual_alias_maps = lmdb:$directory/virtual_alias_maps"
+    } > "$state/active.conf"
 fi
-# postmap drops privileges to the OWNER of the source file before writing. On a
-# Linux host the API writes these bind-mounted files as its own non-root uid, so
-# postmap then can't create the .lmdb in root-owned /etc/postfix ("open database
-# ... Permission denied") and every mailbox lookup fails. Compile a root-owned
-# copy and move the result into place instead.
-compile_map() {
-    name="$1"
-    cp "/etc/postfix/$name" "/tmp/$name" &&
-        postmap "lmdb:/tmp/$name" &&
-        mv "/tmp/$name.lmdb" "/etc/postfix/$name.lmdb"
-    rm -f "/tmp/$name"
-}
-compile_map virtual_mailbox_maps || true
-compile_map virtual_alias_maps || true
-# On a Windows Docker Desktop bind mount (gRPC-FUSE/virtiofs), the .lmdb file
-# postmap just wrote is sometimes not yet stat-able by the immediately
-# following chmod, which then fails silently ("|| true" swallows it) and
-# leaves the file root-only. Same class of race postfix_manager.py already
-# works around with a settle delay before its own postmap/chmod calls.
-sleep 0.3
-# postmap (run as root here) writes .lmdb files as root:root mode 640, but
-# actual delivery happens in the unprivileged "virtual" service (mail_owner
-# postfix:postfix), which then can't read them — every delivery fails with
-# "Permission denied" / "mail system configuration error" despite the map
-# itself being correct. Must stay world-readable after every recompile.
-chmod 644 /etc/postfix/virtual_mailbox_maps.lmdb /etc/postfix/virtual_alias_maps.lmdb 2>/dev/null || true
+generation=$(sed -n '1s/^# generation://p' "$state/active.conf")
+/usr/local/bin/mail-state.sh prepare "$generation"
+/usr/local/bin/mail-state.sh configure
 
 # Fix all spool directory ownership (must run as root before postfix starts)
 # Without this, Postfix's cleanup daemon fails with: 451 queue file write error

@@ -8,7 +8,7 @@ log_step "[10/16] Building panel Docker images"
 
 COMPOSE=(docker compose --env-file "${VEXLYX_SECRETS_FILE}" -f docker-compose.yml -f docker-compose.prod.yml)
 
-"${COMPOSE[@]}" build dashboard api
+"${COMPOSE[@]}" build dashboard api postfix dovecot
 
 # vexlyx-ufw-helper (F5.4) -- a throwaway, host-networked image
 # firewall_manager.py launches per-command to reach the HOST's real UFW

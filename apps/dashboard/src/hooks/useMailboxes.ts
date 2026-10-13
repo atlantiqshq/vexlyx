@@ -34,25 +34,31 @@ export function useMailboxes() {
   const createMailbox = async (
     input: CreateMailboxInput,
   ): Promise<{ mailbox: MailboxResponse; password: string }> => {
-    const result = await fetchAPI<{ mailbox: MailboxResponse; password: string }>(
-      "/api/mailboxes",
-      { method: "POST", body: JSON.stringify(input) },
-    );
-    await fetchMailboxes();
-    return result;
+    try {
+      return await fetchAPI<{ mailbox: MailboxResponse; password: string }>(
+        "/api/mailboxes", { method: "POST", body: JSON.stringify(input) },
+      );
+    } finally {
+      await fetchMailboxes();
+    }
   };
 
   const deleteMailbox = async (id: string): Promise<void> => {
-    await fetchAPI(`/api/mailboxes/${id}`, { method: "DELETE" });
-    await fetchMailboxes();
+    try {
+      await fetchAPI(`/api/mailboxes/${id}`, { method: "DELETE" });
+    } finally {
+      await fetchMailboxes();
+    }
   };
 
   const updateQuota = async (id: string, quota: QuotaPreset): Promise<void> => {
-    await fetchAPI(`/api/mailboxes/${id}/quota`, {
-      method: "PATCH",
-      body: JSON.stringify({ quota }),
-    });
-    await fetchMailboxes();
+    try {
+      await fetchAPI(`/api/mailboxes/${id}/quota`, {
+        method: "PATCH", body: JSON.stringify({ quota }),
+      });
+    } finally {
+      await fetchMailboxes();
+    }
   };
 
   const resetPassword = async (id: string): Promise<{ password: string }> => {

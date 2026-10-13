@@ -110,6 +110,7 @@ async function initSocketPlugin(app: FastifyInstance) {
 
     // Store userId on the socket for downstream handlers
     socket.data.userId = userId as string;
+    socket.data.sessionId = sessionId;
     next();
   });
 

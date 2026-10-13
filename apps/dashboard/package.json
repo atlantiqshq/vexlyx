@@ -10,6 +10,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:monitoring-browser": "node test/monitoring-access.browser.mjs",
     "clean": "rimraf .next .turbo node_modules/.cache"
   },
   "dependencies": {

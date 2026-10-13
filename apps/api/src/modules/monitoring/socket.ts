@@ -1,7 +1,11 @@
-import type { Server as SocketIOServer } from "socket.io";
+import type { Server as SocketIOServer, Socket } from "socket.io";
 import type { FastifyBaseLogger } from "fastify";
-import { MonitoringService } from "./service.js";
-import type { ServerMetrics, ThresholdConfig } from "@vexlyx/shared";
+import type { MonitoringService } from "./service.js";
+import type { AlertThreshold, ContainerMetric, ServerMetrics, ThresholdConfig } from "@vexlyx/shared";
+
+type MonitoringAuthorizer = (socket: Socket) => Promise<boolean>;
+const subscriptionVersions = new WeakMap<Socket, number>();
+const activeSubscriptions = new WeakSet<Socket>();
 
 // ---------------------------------------------------------------------------
 // Default alert thresholds (can be made configurable via env later)
@@ -31,12 +35,12 @@ const lastAlertTimes = new Map<string, number>();
 const activeBreaches = new Set<string>();
 
 function checkThresholds(
-  io: SocketIOServer,
   metrics: ServerMetrics,
   thresholds: ThresholdConfig,
-): void {
+): AlertThreshold[] {
   const now = Date.now();
   const timestamp = new Date(now).toISOString();
+  const alerts: AlertThreshold[] = [];
 
   const checks: Array<{
     type: "cpu" | "ram" | "disk";
@@ -59,7 +63,7 @@ function checkThresholds(
         lastAlertTimes.set(type, now);
         activeBreaches.add(type);
 
-        io.to("metrics").emit("alert:threshold", {
+        alerts.push({
           type,
           value,
           threshold,
@@ -72,6 +76,28 @@ function checkThresholds(
       activeBreaches.delete(type);
     }
   }
+  return alerts;
+}
+
+function invalidateSubscription(socket: Socket): number {
+  const version = (subscriptionVersions.get(socket) ?? 0) + 1;
+  subscriptionVersions.set(socket, version);
+  activeSubscriptions.delete(socket);
+  stopMetricsPush(socket.id);
+  return version;
+}
+
+async function ensureAuthorized(socket: Socket, authorize: MonitoringAuthorizer, logger: FastifyBaseLogger): Promise<boolean> {
+  if (!socket.connected) return false;
+  try {
+    if (await authorize(socket)) return true;
+  } catch (err) {
+    logger.error({ socketId: socket.id, err }, "Failed to authorize monitoring subscription");
+  }
+  invalidateSubscription(socket);
+  await socket.leave("metrics");
+  if (socket.connected) socket.emit("metrics:error", { code: "FORBIDDEN_ROLE", message: "Only administrators can view server monitoring" });
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +108,7 @@ async function pushMetrics(
   io: SocketIOServer,
   service: MonitoringService,
   logger: FastifyBaseLogger,
+  authorize: MonitoringAuthorizer,
   checkAlerts = true,
 ): Promise<ServerMetrics | null> {
   try {
@@ -90,11 +117,16 @@ async function pushMetrics(
       service.getContainerMetrics(),
     ]);
 
-    io.to("metrics").emit("metrics:server", server);
-    io.to("metrics").emit("metrics:containers", containers);
-
-    if (checkAlerts) {
-      checkThresholds(io, server, DEFAULT_THRESHOLDS);
+    const alerts = checkAlerts ? checkThresholds(server, DEFAULT_THRESHOLDS) : [];
+    // Never broadcast sensitive data to a room whose membership may be stale.
+    for (const socket of io.sockets.sockets.values()) {
+      if (!activeSubscriptions.has(socket) || !socket.rooms.has("metrics")) continue;
+      const version = subscriptionVersions.get(socket);
+      if (!await ensureAuthorized(socket, authorize, logger)) continue;
+      if (!socket.connected || !activeSubscriptions.has(socket) || !socket.rooms.has("metrics") || version !== subscriptionVersions.get(socket)) continue;
+      socket.emit("metrics:server", server);
+      socket.emit("metrics:containers", containers);
+      for (const alert of alerts) socket.emit("alert:threshold", alert);
     }
 
     return server;
@@ -113,11 +145,12 @@ function startMetricsPush(
   io: SocketIOServer,
   service: MonitoringService,
   logger: FastifyBaseLogger,
+  authorize: MonitoringAuthorizer,
 ): void {
   if (activeIntervals.has(socketId)) return;
 
   const interval = setInterval(() => {
-    void pushMetrics(io, service, logger);
+    void pushMetrics(io, service, logger, authorize);
   }, 5_000);
 
   activeIntervals.set(socketId, interval);
@@ -139,38 +172,55 @@ export function registerMonitoringSocketHandlers(
   io: SocketIOServer,
   service: MonitoringService,
   logger: FastifyBaseLogger,
+  authorize: MonitoringAuthorizer,
 ): void {
   io.on("connection", (socket) => {
     // --- Subscribe to live metrics ---
     socket.on("subscribe:metrics", async () => {
-      await socket.join("metrics");
+      const version = invalidateSubscription(socket);
+      const isCurrent = () => socket.connected && subscriptionVersions.get(socket) === version;
+      if (!await ensureAuthorized(socket, authorize, logger) || !isCurrent()) return;
 
       // Send an immediate snapshot on join so the client doesn't wait 5s
+      let initial: [ServerMetrics, ContainerMetric[]] | null = null;
       try {
-        const [server, containers] = await Promise.all([
+        initial = await Promise.all([
           service.getServerMetrics(),
           service.getContainerMetrics(),
         ]);
-        socket.emit("metrics:server", server);
-        socket.emit("metrics:containers", containers);
       } catch (err) {
         logger.error({ socketId: socket.id, err }, "Initial metrics push failed");
       }
 
-      startMetricsPush(socket.id, io, service, logger);
+      // Collection can take seconds; recheck before joining or sending data.
+      // An authorized subscription still retries after a collector failure.
+      if (!await ensureAuthorized(socket, authorize, logger) || !isCurrent()) return;
+      await socket.join("metrics");
+      if (!isCurrent()) {
+        if (!activeSubscriptions.has(socket)) await socket.leave("metrics");
+        return;
+      }
+      activeSubscriptions.add(socket);
+      if (initial) {
+        socket.emit("metrics:server", initial[0]);
+        socket.emit("metrics:containers", initial[1]);
+      }
+
+      if (!isCurrent()) return;
+      startMetricsPush(socket.id, io, service, logger, authorize);
       logger.debug({ socketId: socket.id }, "Subscribed to metrics");
     });
 
     // --- Unsubscribe from live metrics ---
     socket.on("unsubscribe:metrics", async () => {
-      stopMetricsPush(socket.id);
+      invalidateSubscription(socket);
       await socket.leave("metrics");
       logger.debug({ socketId: socket.id }, "Unsubscribed from metrics");
     });
 
     // --- Cleanup on disconnect ---
     socket.on("disconnect", () => {
-      stopMetricsPush(socket.id);
+      invalidateSubscription(socket);
     });
   });
 }
@@ -184,8 +234,9 @@ export async function runMetricsCollectorJob(
   io: SocketIOServer,
   service: MonitoringService,
   logger: FastifyBaseLogger,
+  authorize: MonitoringAuthorizer,
 ): Promise<void> {
-  const server = await pushMetrics(io, service, logger, true);
+  const server = await pushMetrics(io, service, logger, authorize, true);
 
   if (server) {
     try {

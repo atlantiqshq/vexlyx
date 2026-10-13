@@ -1,6 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/useAuth";
+import { useSocket } from "@/hooks/useSocket";
 import {
   Activity,
   Cpu,
@@ -310,6 +313,34 @@ function ContainersSection() {
  * and threshold alert badges. All real-time data via Socket.io.
  */
 export function MonitoringPage() {
+  const { user, isLoading } = useAuth();
+  const [revoked, setRevoked] = useState(false);
+  if (isLoading) return null;
+  if (user?.role !== "ADMIN" || revoked) {
+    return (
+      <Card>
+        <CardContent className="py-16 text-center">
+          <p className="text-sm font-medium">Access restricted</p>
+          <p className="text-xs text-muted-foreground">Only administrators can view server monitoring.</p>
+        </CardContent>
+      </Card>
+    );
+  }
+  return <MonitoringContent onAccessRevoked={() => setRevoked(true)} />;
+}
+
+function MonitoringContent({ onAccessRevoked }: { onAccessRevoked: () => void }) {
+  const socket = useSocket();
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!socket) return;
+    const revoke = () => {
+      queryClient.removeQueries({ queryKey: ["monitoring"] });
+      onAccessRevoked();
+    };
+    socket.on("metrics:error", revoke);
+    return () => { socket.off("metrics:error", revoke); };
+  }, [socket, queryClient, onAccessRevoked]);
   const { activeAlerts, dismissAlert } = useThresholdAlerts();
 
   return (

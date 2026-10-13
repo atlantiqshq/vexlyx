@@ -9,12 +9,14 @@ import { QuickActions } from "@/components/dashboard/QuickActions";
 import { ResourceUsageWidget } from "@/components/dashboard/ResourceUsageWidget";
 import { RecentActivityFeed } from "@/components/dashboard/RecentActivityFeed";
 import { useDashboardSummary } from "@/hooks/useDashboardSummary";
+import { useAuth } from "@/hooks/useAuth";
 
 /**
  * Dashboard home page content (F5.16) — real stat counts, server health,
  * recent activity, and quick actions, fetched via useDashboardSummary().
  */
 export function DashboardOverview() {
+  const { user } = useAuth();
   const { stats, serverMetrics, activity, sslExpiringCount, isLoading, isError, refetch } =
     useDashboardSummary();
 
@@ -76,11 +78,13 @@ export function DashboardOverview() {
       <QuickActions />
 
       <div className="grid items-start gap-6 lg:grid-cols-2">
-        <ResourceUsageWidget
-          serverMetrics={serverMetrics}
-          isLoading={isLoading}
-          onRefresh={async () => refetch()}
-        />
+        {user?.role === "ADMIN" && (
+          <ResourceUsageWidget
+            serverMetrics={serverMetrics}
+            isLoading={isLoading}
+            onRefresh={async () => refetch()}
+          />
+        )}
         <RecentActivityFeed activity={activity} isLoading={isLoading} />
       </div>
 

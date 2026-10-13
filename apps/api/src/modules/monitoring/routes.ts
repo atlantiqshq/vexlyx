@@ -4,6 +4,8 @@ import { MetricsQuerySchema } from "./schema.js";
 import { registerMonitoringSocketHandlers, runMetricsCollectorJob } from "./socket.js";
 import { getIO } from "../../plugins/socket.js";
 import { createQueue, createWorker } from "../../config/queue.js";
+import { hasMonitoringAccess } from "./access.js";
+import type { Socket } from "socket.io";
 
 // ---------------------------------------------------------------------------
 // Shared error handler
@@ -30,9 +32,12 @@ const METRICS_QUEUE_NAME = "metrics-collector";
 export async function monitoringRoutes(app: FastifyInstance) {
   const service = new MonitoringService(app.prisma, app.log);
   const io = getIO();
+  const canReadMetrics = (socket: Socket) => hasMonitoringAccess(
+    app.prisma, app.redis, socket.data.userId, socket.data.sessionId,
+  );
 
   // Register Socket.io handlers for subscribe/unsubscribe:metrics events
-  registerMonitoringSocketHandlers(io, service, app.log);
+  registerMonitoringSocketHandlers(io, service, app.log, canReadMetrics);
 
   // ---------------------------------------------------------------------------
   // BullMQ repeatable job — collect + persist server metrics every 60 seconds
@@ -43,7 +48,7 @@ export async function monitoringRoutes(app: FastifyInstance) {
   const metricsWorker = createWorker<Record<string, never>>(
     METRICS_QUEUE_NAME,
     async () => {
-      await runMetricsCollectorJob(io, service, app.log);
+      await runMetricsCollectorJob(io, service, app.log, canReadMetrics);
     },
     app,
     { concurrency: 1 },
@@ -66,7 +71,7 @@ export async function monitoringRoutes(app: FastifyInstance) {
 
   app.get(
     "/server",
-    { preHandler: [app.requireAuth] },
+    { preHandler: [app.requireRole("ADMIN")] },
     async (_request, reply) => {
       try {
         const metrics = await service.getServerMetrics();
@@ -83,7 +88,7 @@ export async function monitoringRoutes(app: FastifyInstance) {
 
   app.get(
     "/containers",
-    { preHandler: [app.requireAuth] },
+    { preHandler: [app.requireRole("ADMIN")] },
     async (_request, reply) => {
       try {
         const containers = await service.getContainerMetrics();
@@ -100,7 +105,7 @@ export async function monitoringRoutes(app: FastifyInstance) {
 
   app.get(
     "/history",
-    { preHandler: [app.requireAuth] },
+    { preHandler: [app.requireRole("ADMIN")] },
     async (request, reply) => {
       try {
         const query = MetricsQuerySchema.parse(request.query);

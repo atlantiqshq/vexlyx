@@ -20,7 +20,6 @@ export default defineConfig({
     ["meta", { name: "theme-color", content: "#4f46e5" }],
     ["meta", { property: "og:site_name", content: "Vexlyx Docs" }],
     ["meta", { property: "og:type", content: "website" }],
-    // Google Search Console, URL-prefix property for docs.vexlyx.atlantiqs.org.
     [
       "meta",
       {

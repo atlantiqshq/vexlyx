@@ -47,7 +47,7 @@ const SAMPLE_SERVER_METRICS: ServerMetrics = {
 };
 
 interface PrismaMock {
-  user: { findUnique: ReturnType<typeof vi.fn>; count: ReturnType<typeof vi.fn> };
+  user: { findUnique: ReturnType<typeof vi.fn>; count: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
   project: { count: ReturnType<typeof vi.fn> };
   domain: { count: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
   database: { count: ReturnType<typeof vi.fn> };
@@ -68,6 +68,7 @@ function createPrismaMock(overrides: { role?: "ADMIN" | "USER" | "RESELLER" } = 
         maxSubAccounts: null,
       }),
       count: vi.fn().mockResolvedValue(0),
+      findMany: vi.fn().mockResolvedValue([]),
     },
     project: { count: vi.fn().mockResolvedValue(3) },
     domain: { count: vi.fn().mockResolvedValue(2), findMany: vi.fn().mockResolvedValue([{ id: "domain-1" }]) },
@@ -128,18 +129,35 @@ describe("DashboardService.getSummary", () => {
 
   it("degrades to null serverMetrics when monitoring fails", async () => {
     mockGetServerMetrics.mockReset().mockRejectedValue(new Error("monitor unavailable"));
-    const prisma = createPrismaMock();
+    const prisma = createPrismaMock({ role: "ADMIN" });
     const service = new DashboardService(prisma as unknown as PrismaClient, noopLogger);
 
     const summary = await service.getSummary(USER_ID);
 
     expect(summary.serverMetrics).toBeNull();
+    expect(mockGetServerMetrics).toHaveBeenCalledTimes(1);
     expect(summary.stats).toEqual({
       projects: { used: 3, limit: null },
       domains: { used: 2, limit: null },
       databases: { used: 1, limit: null },
       mailboxes: { used: 4, limit: null },
     });
+  });
+
+  it.each(["USER", "RESELLER"] as const)("returns no host metrics and never collects them for %s", async (role) => {
+    const prisma = createPrismaMock({ role });
+    const service = new DashboardService(prisma as unknown as PrismaClient, noopLogger);
+    expect((await service.getSummary(USER_ID)).serverMetrics).toBeNull();
+    expect(mockGetServerMetrics).not.toHaveBeenCalled();
+  });
+
+  it("allows administrators and rechecks after demotion", async () => {
+    const prisma = createPrismaMock({ role: "ADMIN" });
+    const service = new DashboardService(prisma as unknown as PrismaClient, noopLogger);
+    expect((await service.getSummary(USER_ID)).serverMetrics).toEqual(SAMPLE_SERVER_METRICS);
+    prisma.user.findUnique.mockResolvedValue({ role: "USER" });
+    expect((await service.getSummary(USER_ID)).serverMetrics).toBeNull();
+    expect(mockGetServerMetrics).toHaveBeenCalledTimes(1);
   });
 
   it("scopes SSL alerts to the caller's own domains only", async () => {

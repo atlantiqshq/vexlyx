@@ -10,6 +10,7 @@
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:monitoring-browser": "node test/monitoring-access.browser.mjs",
     "clean": "rimraf dist .turbo tsconfig.tsbuildinfo",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

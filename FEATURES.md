@@ -1615,6 +1615,7 @@ Monitor server and container resource usage (CPU, RAM, Disk, Network) with real-
 
 **Acceptance Criteria:**
 - [x] Server-level metrics (CPU, RAM, Disk, Uptime)
+- [x] ADMIN-only metrics across REST, dashboard and live sockets, with session/role revocation checks (issue #45)
 - [x] Per-container metrics
 - [x] Real-time graphs in dashboard (live gauges via Socket.io + area chart)
 - [x] Historical data (1h, 24h, 7d, 30d) stored as 60-second snapshots

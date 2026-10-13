@@ -7,6 +7,39 @@
 
 ## What It Does
 
+Host-wide monitoring is ADMIN-only. USER and RESELLER accounts receive 403 from
+the monitoring REST endpoints and cannot subscribe to metrics or threshold
+alerts. The dashboard returns `serverMetrics: null` for them without collecting
+host metrics, and hides Server Health and Monitoring navigation. Direct page
+visits show "Access restricted" before mounting monitoring hooks.
+
+Socket subscriptions use the server-resolved user and session IDs. The API
+checks Redis session existence/expiry and the current PostgreSQL role before
+initial delivery and every live/background delivery. It rechecks after slow
+initial collection, invalidates pending subscriptions on unsubscribe/disconnect,
+and removes revoked subscribers from the metrics room and stops their timers.
+Data and threshold alerts are delivered individually to authorized subscribers,
+so stale room membership cannot bypass the check. Authorization-store errors
+fail closed. Other socket features remain available to authenticated tenants.
+
+The collector continues persisting and pruning host snapshots even when there
+are no authorized subscribers. Deploy by rebuilding/restarting the API and
+dashboard; no migration or new environment variable is required.
+
+Regression tests run in the standard API/dashboard suites. After building the
+API and shared package, `pnpm --filter @vexlyx/api test:monitoring-browser` runs
+real browser requests against PostgreSQL, Redis, sessions and Socket.IO. Docker,
+Playwright and Chromium/Chrome are required; set `VEXLYX_PLAYWRIGHT_MODULE` and
+`VEXLYX_BROWSER_EXECUTABLE` if they are not on the default paths. After building
+the dashboard, `pnpm --filter @vexlyx/dashboard test:monitoring-browser` checks
+navigation, Server Health visibility and direct page access in the production
+dashboard with fixture API responses and blocked sockets. It also asserts that
+tenants never mount monitoring hooks. Component tests cover the UI guards too.
+
+The browser fixture uses synthetic native metrics. Authorization, sessions,
+database history and Socket.IO are real. It binds random loopback ports, avoids
+developer `.env` files, and removes its containers and volumes on completion.
+
 F5.2 adds a `/monitoring` page to the Vexlyx dashboard that shows:
 
 - **Live server gauges** — CPU %, RAM %, Disk % updated every 5 seconds via Socket.io
@@ -74,9 +107,9 @@ pip install psutil
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/api/monitoring/server` | ✅ | Live server metrics snapshot |
-| `GET` | `/api/monitoring/containers` | ✅ | Live per-container metrics |
-| `GET` | `/api/monitoring/history?range=24h` | ✅ | Historical snapshots (`1h` / `24h` / `7d` / `30d`) |
+| `GET` | `/api/monitoring/server` | ADMIN | Live server metrics snapshot |
+| `GET` | `/api/monitoring/containers` | ADMIN | Live per-container metrics |
+| `GET` | `/api/monitoring/history?range=24h` | ADMIN | Historical snapshots (`1h` / `24h` / `7d` / `30d`) |
 
 ---
 

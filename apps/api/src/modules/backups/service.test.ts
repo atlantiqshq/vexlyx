@@ -6,7 +6,19 @@ import type { Server } from "socket.io";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuditLogService } from "../audit-log/service.js";
 
-const mocks = vi.hoisted(() => ({ action: vi.fn(), spawn: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  action: vi.fn(),
+  spawn: vi.fn(),
+  workspaceExists: true,
+}));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    existsSync: (path: Parameters<typeof actual.existsSync>[0]) =>
+      String(path).includes("test-projects") ? mocks.workspaceExists : actual.existsSync(path),
+  };
+});
 vi.mock("../../config/env.js", () => ({
   env: { PROJECTS_DIR: "test-projects" },
 }));
@@ -63,6 +75,7 @@ function setup(containerId: string | null = "container-1") {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.workspaceExists = true;
   mocks.action.mockResolvedValue({ containerStatus: "exited" });
   mocks.spawn.mockImplementation(() => {
     const child = Object.assign(new EventEmitter(), {
@@ -134,5 +147,32 @@ describe("project restore safety", () => {
     expect(mocks.action).not.toHaveBeenCalled();
     expect(mocks.spawn).toHaveBeenCalledOnce();
     expect(audit.log).toHaveBeenCalledOnce();
+  });
+
+  it("restores a soft-deleted project whose workspace was already torn down", async () => {
+    mocks.workspaceExists = false;
+    const { restore, audit, emit } = setup("container-1");
+
+    await restore();
+
+    // Nothing is running and there is no compose directory to stop; the old
+    // containerId must not turn this into an unrecoverable RESTORE_STOP_FAILED.
+    expect(mocks.action).not.toHaveBeenCalledWith("owner-1", "project-1", "stop");
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(audit.log).toHaveBeenCalledOnce();
+    expect(emit).toHaveBeenCalledWith(
+      "restore:completed",
+      expect.objectContaining({ status: "COMPLETED" }),
+    );
+  });
+
+  it("still aborts when the workspace exists and stopping fails", async () => {
+    mocks.workspaceExists = true;
+    mocks.action.mockRejectedValue(new Error("docker unavailable"));
+    const { restore, audit } = setup("container-1");
+
+    await expect(restore()).rejects.toMatchObject({ code: "RESTORE_STOP_FAILED" });
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(audit.log).not.toHaveBeenCalled();
   });
 });

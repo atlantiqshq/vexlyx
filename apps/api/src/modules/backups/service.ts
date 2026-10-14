@@ -526,7 +526,13 @@ export class BackupService {
       });
     }
 
-    if (project.containerId) {
+    // A soft-deleted project has already had its containers and workspace torn
+    // down (its containerId is kept), so there is nothing to stop and
+    // containerAction would fail on the missing directory — which must not
+    // make the project unrecoverable.
+    const workspaceExists = existsSync(resolve(env.PROJECTS_DIR, projectId));
+
+    if (project.containerId && workspaceExists) {
       try {
         await this.deployService.containerAction(project.userId, project.id, "stop");
       } catch (err) {

@@ -42,6 +42,22 @@ describe("POST /api/auth/forgot-password", () => {
     expect(res.statusCode).toBe(202);
   }, 30_000);
 
+  it("answers before the lookup finishes, so response time can't reveal whether the email exists", async () => {
+    let finishLookup: () => void = () => undefined;
+    const app = await buildApp(
+      () =>
+        new Promise((resolve) => {
+          finishLookup = () => resolve(null);
+        }),
+    );
+
+    const res = await app.inject({ method: "POST", url: "/api/auth/forgot-password", payload: { email: "ada@example.com" } });
+
+    // The lookup is still pending and the caller already has its answer.
+    expect(res.statusCode).toBe(202);
+    finishLookup();
+  }, 30_000);
+
   it("rejects a malformed email", async () => {
     const app = await buildApp(async () => null);
     const res = await app.inject({ method: "POST", url: "/api/auth/forgot-password", payload: { email: "nope" } });

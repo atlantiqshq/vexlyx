@@ -12,6 +12,10 @@ const BLOCKED_WRITE_PATTERNS = [
 
 const BLOCKED_READ_PATTERNS: RegExp[] = [];
 
+export function isProtectedWriteName(name: string): boolean {
+  return BLOCKED_WRITE_PATTERNS.some((pattern) => pattern.test(name));
+}
+
 // ---------------------------------------------------------------------------
 // Safe path validator
 // Returns the normalized relative path or throws on traversal / blocked names.
@@ -112,7 +116,28 @@ export const MoveBodySchema = z.object({
   to: z.string().min(1),
 });
 
-export type ListQuery = z.infer<typeof ListQuerySchema>;
+export const ChmodBodySchema = z.object({
+  path: z.string().min(1),
+  mode: z.string().regex(/^[0-7]{3}$/, "Mode must be three octal digits, e.g. 644"),
+  recursive: z.boolean().optional().default(false),
+});
+
+export const ExtractBodySchema = z.object({
+  path: z.string().min(1),
+  destination: z.string().optional(),
+  overwrite: z.boolean().optional().default(false),
+});
+
+export const CompressBodySchema = z.object({
+  paths: z.array(z.string().min(1)).min(1).max(500),
+  archivePath: z
+    .string()
+    .min(1)
+    .regex(/\.zip$/i, "Archive name must end in .zip")
+    .optional(),
+});
+
+export type ListQuery =z.infer<typeof ListQuerySchema>;
 export type ReadQuery = z.infer<typeof ReadQuerySchema>;
 export type WriteBody = z.infer<typeof WriteBodySchema>;
 export type DeleteBody = z.infer<typeof DeleteBodySchema>;
@@ -120,3 +145,6 @@ export type RenameBody = z.infer<typeof RenameBodySchema>;
 export type MkdirBody = z.infer<typeof MkdirBodySchema>;
 export type CopyBody = z.infer<typeof CopyBodySchema>;
 export type MoveBody = z.infer<typeof MoveBodySchema>;
+export type ChmodBody = z.infer<typeof ChmodBodySchema>;
+export type ExtractBody = z.infer<typeof ExtractBodySchema>;
+export type CompressBody = z.infer<typeof CompressBodySchema>;

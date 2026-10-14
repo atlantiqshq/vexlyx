@@ -46,6 +46,7 @@ const groups: Group[] = [
     text: "Access and security",
     pages: [
       "reference/authentication",
+      "reference/password-recovery",
       "reference/roles-permissions",
       "reference/fine-grained-permissions",
       "reference/reseller-overselling",
@@ -63,6 +64,7 @@ const groups: Group[] = [
       "reference/github-webhooks",
       "reference/build-system",
       "reference/deployment-engine",
+      "reference/scheduled-tasks",
       "reference/realtime-logs",
       "reference/environment-variables",
     ],
@@ -100,13 +102,18 @@ const groups: Group[] = [
       "reference/email/authentication",
       "reference/email/aliases",
       "reference/email/vacation-responder",
+      "reference/email/signatures",
       "reference/email/mail-operations",
       "reference/system-transactional-email",
     ],
   },
   {
     text: "Databases and files",
-    pages: ["reference/database-provisioning", "reference/file-manager-sftp"],
+    pages: [
+      "reference/database-provisioning",
+      "reference/file-manager-sftp",
+      "reference/file-manager-permissions-archives",
+    ],
   },
   {
     text: "Operations",

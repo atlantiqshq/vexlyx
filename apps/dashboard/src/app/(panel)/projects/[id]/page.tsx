@@ -43,6 +43,7 @@ import { DatabasePanel } from "@/components/projects/DatabasePanel";
 import { DomainPanel } from "@/components/projects/DomainPanel";
 import { FileManagerCard } from "@/components/projects/FileManagerCard";
 import { SftpPanel } from "@/components/projects/SftpPanel";
+import { ScheduledTasksPanel } from "@/components/projects/ScheduledTasksPanel";
 import type { Project, ProjectStatus, ProjectType } from "@vexlyx/shared";
 
 // ---------------------------------------------------------------------------
@@ -90,6 +91,7 @@ const TAB_VALUES = [
   "database",
   "domains",
   "files",
+  "tasks",
   "advanced",
 ] as const;
 
@@ -300,6 +302,7 @@ export default function ProjectDetailPage() {
           <TabsTrigger value="database">Database</TabsTrigger>
           <TabsTrigger value="domains">Domains</TabsTrigger>
           <TabsTrigger value="files">Files</TabsTrigger>
+          <TabsTrigger value="tasks">Tasks</TabsTrigger>
           <TabsTrigger value="advanced">Git & Advanced</TabsTrigger>
         </TabsList>
 
@@ -416,6 +419,11 @@ export default function ProjectDetailPage() {
 
           {/* SFTP Access (F2.8) */}
           <SftpPanel projectId={project.id} />
+        </TabsContent>
+
+        <TabsContent value="tasks" className="space-y-6">
+          {/* Scheduled Tasks (F5.28) */}
+          <ScheduledTasksPanel project={project} />
         </TabsContent>
 
         <TabsContent value="advanced" className="space-y-6">

@@ -41,6 +41,8 @@ const envSchema = z
     // Build integration (F1.4)
     NIXPACKS_IMAGE_PREFIX: z.string().min(1).default("vexlyx"),
     BUILD_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(5),
+    // How many scheduled-task commands (F5.28) may run at the same time across all projects.
+    SCHEDULED_TASK_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(4),
     // Deploy integration (F1.5)
     // Base domain used to generate per-project Traefik hostnames: {name}.{BASE_DOMAIN}
     BASE_DOMAIN: z.string().min(1).default("vexlyx.localhost"),
@@ -80,6 +82,14 @@ const envSchema = z
     WEBMAIL_CONTAINER_NAME: z.string().min(1).default("vexlyx-roundcube"),
     // File Manager & SFTP (F2.8)
     FILE_UPLOAD_MAX_MB: z.coerce.number().int().min(1).max(1000).default(1000),
+    // Mail signatures (F5.31). SIGNATURES_DIR is where the per-mailbox signature files are written
+    // for Roundcube and Postfix to read (default: docker/mail-data/signatures); SIGNATURE_ASSETS_DIR
+    // holds uploaded logo images.
+    SIGNATURES_DIR: z.string().min(1).optional(),
+    SIGNATURE_ASSETS_DIR: z.string().min(1).default("./workspaces/signature-assets"),
+    // Archive extract/compress limits (F5.24)
+    ARCHIVE_MAX_ENTRIES: z.coerce.number().int().min(1).default(100_000),
+    ARCHIVE_MAX_EXTRACT_MB: z.coerce.number().int().min(1).default(5120),
     SFTP_HOST: z.string().min(1).default("0.0.0.0"),
     SFTP_PORT: z.coerce.number().int().default(22),
     // Backup System (F5.3) — these are only first-boot defaults for the

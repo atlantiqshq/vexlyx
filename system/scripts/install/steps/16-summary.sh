@@ -15,6 +15,12 @@ else
   echo "  Admin password: the one you provided via VEXLYX_ADMIN_PASSWORD."
 fi
 echo ""
+echo "  Locked out later? Admin accounts are not reset by email by default — recover one from this server."
+echo "  This prints a single-use link and changes nothing until you open it:"
+echo "    cd ${VEXLYX_HOME}"
+echo "    docker compose --env-file ${VEXLYX_SECRETS_FILE} -f docker-compose.yml -f docker-compose.prod.yml \\"
+echo "      run --rm --no-deps api pnpm exec tsx prisma/reset-password.ts --email ${VEXLYX_ADMIN_EMAIL}"
+echo ""
 echo "  Install root:  ${VEXLYX_HOME}"
 echo "  Secrets file:  ${VEXLYX_SECRETS_FILE} (mode 0600 — back this up)"
 echo ""

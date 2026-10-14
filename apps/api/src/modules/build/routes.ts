@@ -13,7 +13,7 @@ function handleBuildError(err: unknown, reply: FastifyReply): void {
     reply.status(err.statusCode).send({
       error: err.message,
       code: err.code,
-      details: {},
+      details: err.details,
     });
     return;
   }

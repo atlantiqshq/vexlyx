@@ -28,10 +28,14 @@ export const AUDIT_ACTIONS = [
   "database.deleted",
   "mailbox.created",
   "mailbox.deleted",
+  "mailbox.signature_updated",
+  "domain.mail_signature_updated",
+  "mail.signature_enforcement_changed",
   "user.2fa_enabled",
   "user.2fa_disabled",
   "user.2fa_reset",
   "user.password_reset",
+  "user.password_reset_issued",
   "system_email.test_sent",
   "github.app_created",
   "github.app_replaced",
@@ -40,6 +44,10 @@ export const AUDIT_ACTIONS = [
   "github.installation_link_rejected",
   "github.project_connected",
   "github.project_disconnected",
+  "scheduled_task.created",
+  "scheduled_task.updated",
+  "scheduled_task.deleted",
+  "scheduled_task.run_manual",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

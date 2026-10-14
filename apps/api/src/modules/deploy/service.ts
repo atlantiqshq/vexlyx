@@ -26,7 +26,7 @@ export class DeployError extends Error {
 // Helper — locate docker_manager.py
 // ---------------------------------------------------------------------------
 
-function getDockerManagerScriptPath(): string {
+export function getDockerManagerScriptPath(): string {
   const currentDir = dirname(fileURLToPath(import.meta.url));
   const candidates = [
     resolve(currentDir, "../../../../../system/python/docker_manager.py"),

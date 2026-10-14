@@ -131,7 +131,10 @@ docker exec -it vexlyx-redis redis-cli keys "session:*"
 2. Add OAuth routes (e.g., `GET /api/auth/github`, `GET /api/auth/github/callback`)
 3. Use the same `createSession()` helper after OAuth verification
 
-### Adding password reset
+### Password reset
+Password reset is built — see [Password recovery](password-recovery.md) for the self-service, admin-initiated and server-side flows and the password policy.
+
+### Adding password reset (original plan, kept for reference)
 1. Create `POST /api/auth/forgot-password` — generates reset token, sends email
 2. Create `POST /api/auth/reset-password` — validates token, updates password
 3. Store tokens in Redis with short TTL (15 minutes)

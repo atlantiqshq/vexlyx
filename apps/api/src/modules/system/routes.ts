@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { SystemService } from "./service.js";
 import { UpdateSystemSettingsSchema } from "@vexlyx/shared";
 import { rescheduleBackupJob } from "../backups/scheduler.js";
+import { rearmAllTasks } from "../scheduled-tasks/scheduler.js";
 
 export async function systemRoutes(app: FastifyInstance) {
   const service = new SystemService(app.prisma);
@@ -46,6 +47,13 @@ export async function systemRoutes(app: FastifyInstance) {
     // effect without a restart, mirroring how a scheduleCron edit already
     // re-upserts (backups/routes.ts).
     await rescheduleBackupJob(timezone);
+
+    // Users' scheduled tasks (F5.28) are evaluated in this timezone too.
+    try {
+      await rearmAllTasks(app.prisma, timezone);
+    } catch (err) {
+      app.log.error({ err }, "Failed to re-arm scheduled tasks after a timezone change");
+    }
 
     return updated;
   });

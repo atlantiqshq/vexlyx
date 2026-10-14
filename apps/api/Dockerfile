@@ -62,7 +62,7 @@ RUN install -d -m 0755 /etc/apt/keyrings \
 # cryptography (ssl_manager.py) — installed into the system interpreter;
 # this container is disposable, so PEP 668's "externally managed" guard is
 # not a concern here.
-RUN pip3 install --break-system-packages --no-cache-dir cryptography
+RUN pip3 install --break-system-packages --no-cache-dir cryptography PyYAML==6.0.3
 
 # Nixpacks — required by build_manager.py to build user projects.
 RUN curl -fsSL https://nixpacks.com/install.sh | bash

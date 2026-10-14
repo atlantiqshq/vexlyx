@@ -13,6 +13,7 @@ import { getGitHubInstallationToken } from "../github/service.js";
 import { CleanupService } from "../cleanup/service.js";
 import { getIO } from "../../plugins/socket.js";
 import type { BuildJobData, DeploymentListQuery, TriggerBuildBody } from "./schema.js";
+import { BUILD_FAILURE_PREFIX, readBuildFailure } from "./diagnostics.js";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -23,6 +24,7 @@ export class BuildError extends Error {
     message: string,
     public code: string,
     public statusCode: number,
+    public details: { file?: string; remediation?: string } = {},
   ) {
     super(message);
     this.name = "BuildError";
@@ -68,6 +70,8 @@ interface BuildManagerLine {
   buildCmd?: string;
   error?: string;
   code?: string;
+  details?: { file?: string; remediation?: string };
+  warnings?: string[];
 }
 
 interface PlanResult {
@@ -75,15 +79,17 @@ interface PlanResult {
   buildCmd: string | null;
   startCmd: string | null;
   detectedType: string | null;
+  warnings: string[];
 }
 
 function runBuildPlan(
   projectDir: string,
   envVars?: Record<string, string>,
+  overrides?: { buildCmd?: string | null; startCmd?: string | null; installCmd?: string },
 ): Promise<PlanResult> {
   return new Promise((resolveP, rejectP) => {
     const scriptPath = getBuildManagerScriptPath();
-    const payload = JSON.stringify({ command: "plan", projectDir, envVars });
+    const payload = JSON.stringify({ command: "plan", projectDir, envVars, ...overrides });
 
     const child = spawn("python", [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
@@ -117,7 +123,7 @@ function runBuildPlan(
       }
 
       if (parsed.error) {
-        rejectP(new BuildError(parsed.error, parsed.code ?? "BUILD_PLAN_ERROR", 422));
+        rejectP(new BuildError(parsed.error, parsed.code ?? "BUILD_PLAN_ERROR", 422, parsed.details));
         return;
       }
 
@@ -126,6 +132,7 @@ function runBuildPlan(
         buildCmd: parsed.buildCmd ?? null,
         startCmd: parsed.startCmd ?? null,
         detectedType: parsed.detectedType ?? null,
+        warnings: parsed.warnings ?? [],
       });
     });
 
@@ -148,6 +155,7 @@ interface BuildImageOptions {
   startCmd?: string | null;
   cacheKey?: string | null;
   envVars?: Record<string, string>;
+  installCmd?: string;
 }
 
 function runBuildImage(
@@ -164,6 +172,7 @@ function runBuildImage(
       startCmd: options.startCmd,
       cacheKey: options.cacheKey,
       envVars: options.envVars,
+      installCmd: options.installCmd,
     });
 
     const child = spawn("python", [scriptPath], {
@@ -172,49 +181,48 @@ function runBuildImage(
 
     let buffer = "";
     let stderrBuffer = "";
+    let buildFailure: BuildError | null = null;
 
     child.stderr.on("data", (chunk: Buffer) => {
       stderrBuffer += chunk.toString();
     });
 
+    const consumeLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+
+      let parsed: BuildManagerLine;
+      try {
+        parsed = JSON.parse(trimmed) as BuildManagerLine;
+      } catch {
+        // Treat non-JSON output as plain log line
+        void onLog(trimmed);
+        return;
+      }
+
+      if (parsed.error) {
+        buildFailure = new BuildError(parsed.error, parsed.code ?? "BUILD_ERROR", 422, parsed.details);
+        return;
+      }
+
+      if (parsed.log) {
+        void onLog(parsed.log);
+      }
+    };
+
     child.stdout.on("data", (chunk: Buffer) => {
       buffer += chunk.toString();
       const lines = buffer.split("\n");
-      // Keep last incomplete line in buffer
       buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        let parsed: BuildManagerLine;
-        try {
-          parsed = JSON.parse(trimmed) as BuildManagerLine;
-        } catch {
-          // Treat non-JSON output as plain log line
-          void onLog(trimmed);
-          continue;
-        }
-
-        if (parsed.error) {
-          rejectP(new BuildError(parsed.error, parsed.code ?? "BUILD_ERROR", 422));
-          return;
-        }
-
-        if (parsed.log) {
-          void onLog(parsed.log);
-        }
-
-        if (parsed.done) {
-          resolveP();
-        }
-      }
+      for (const line of lines) consumeLine(line);
     });
 
     child.on("close", (code) => {
       // Flush remaining buffer
-      if (buffer.trim()) void onLog(buffer.trim());
-      if (code !== 0) {
+      if (buffer.trim()) consumeLine(buffer);
+      if (buildFailure) {
+        rejectP(buildFailure);
+      } else if (code !== 0) {
         const errDetails = stderrBuffer.trim() ? `:\n${stderrBuffer.trim()}` : "";
         rejectP(new BuildError(
           `build_manager.py (build) exited with code ${code}${errDetails}`,
@@ -335,35 +343,27 @@ export function createBuildProcessor(
   logger: FastifyBaseLogger,
 ) {
   return async (job: { id?: string; name: string; data: BuildJobData }): Promise<void> => {
-    const { deploymentId, projectId, projectDir, imageName, buildCmd } = job.data;
+    const { deploymentId, projectId, projectDir, imageName, buildCmd, installCmd } = job.data;
     const startedAt = Date.now();
 
     // Maintain an in-memory log accumulator to prevent async race conditions
     let accumulatedLogs = "";
-    let isPersisting = false;
-    let pendingPersist = false;
+    let persistence = Promise.resolve();
     let saveTimeout: NodeJS.Timeout | null = null;
 
-    const flushLogsToDb = async () => {
-      if (isPersisting) {
-        pendingPersist = true;
-        return;
-      }
-      isPersisting = true;
-      try {
-        await prisma.deployment.update({
-          where: { id: deploymentId },
-          data: { buildLogs: accumulatedLogs },
-        });
-      } catch (err) {
-        logger.error({ deploymentId, err }, "Failed to update buildLogs in DB");
-      } finally {
-        isPersisting = false;
-        if (pendingPersist) {
-          pendingPersist = false;
-          void flushLogsToDb();
+    const flushLogsToDb = () => {
+      const snapshot = accumulatedLogs;
+      persistence = persistence.then(async () => {
+        try {
+          await prisma.deployment.update({
+            where: { id: deploymentId },
+            data: { buildLogs: snapshot },
+          });
+        } catch (err) {
+          logger.error({ deploymentId, err }, "Failed to update buildLogs in DB");
         }
-      }
+      });
+      return persistence;
     };
 
     const appendLog = async (line: string) => {
@@ -451,15 +451,17 @@ export function createBuildProcessor(
       const envVars = await envService.getDecryptedMap(projectId);
 
       // Phase 1 — detect framework
-      await appendLog("[vexlyx] Detecting framework with nixpacks plan…");
+      await appendLog("[vexlyx] Validating build configuration and detecting framework…");
       let planResult: PlanResult;
       try {
-        planResult = await runBuildPlan(projectDir, envVars);
+        planResult = await runBuildPlan(projectDir, envVars, { buildCmd, startCmd: project.startCmd, installCmd });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         await appendLog(`[vexlyx:error] Framework detection failed: ${msg}`);
         throw err;
       }
+
+      for (const warning of planResult.warnings) await appendLog(`[vexlyx:warn] ${warning}`);
 
       const displayFramework =
         planResult.framework === "dockerfile" || planResult.framework === "docker"
@@ -568,6 +570,7 @@ export function createBuildProcessor(
             startCmd: project.startCmd ?? planResult.startCmd,
             cacheKey: `vexlyx-${projectId}`,
             envVars,
+            installCmd,
           },
           appendLog,
         );
@@ -644,6 +647,8 @@ export function createBuildProcessor(
       // Ensure all logs are flushed
       if (saveTimeout) clearTimeout(saveTimeout);
 
+      await persistence;
+
       const duration = Math.round((Date.now() - startedAt) / 1000);
 
       // Update project with container details
@@ -674,6 +679,12 @@ export function createBuildProcessor(
       const msg = err instanceof Error ? err.message : String(err);
 
       accumulatedLogs += `[vexlyx:error] ${msg}\n`;
+      if (err instanceof BuildError) {
+        await appendLog(BUILD_FAILURE_PREFIX + JSON.stringify({ code: err.code, message: msg, details: err.details }));
+        if (saveTimeout) clearTimeout(saveTimeout);
+      }
+
+      await persistence;
 
       try {
         await prisma.deployment.update({
@@ -745,6 +756,7 @@ export class BuildService {
       projectDir,
       imageName,
       buildCmd: effectiveBuildCmd,
+      ...(body.installCmd === undefined ? {} : { installCmd: body.installCmd }),
     });
 
     return this.toDeploymentShape(deployment);
@@ -814,6 +826,7 @@ export class BuildService {
       commitHash: d.commitHash,
       commitMsg: d.commitMsg,
       buildLogs: d.buildLogs,
+      failure: d.status === "FAILED" ? readBuildFailure(d.buildLogs) : null,
       duration: d.duration,
       projectId: d.projectId,
       createdAt: d.createdAt,

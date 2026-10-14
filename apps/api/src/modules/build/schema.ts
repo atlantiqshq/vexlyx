@@ -6,6 +6,7 @@ import { z } from "zod";
 
 export const TriggerBuildBodySchema = z.object({
   buildCmd: z.string().max(500).optional(),
+  installCmd: z.string().trim().min(1).max(500).optional(),
 });
 
 export type TriggerBuildBody = z.infer<typeof TriggerBuildBodySchema>;
@@ -32,4 +33,5 @@ export interface BuildJobData {
   projectDir: string;
   imageName: string;
   buildCmd: string | null;
+  installCmd?: string;
 }

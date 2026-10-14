@@ -142,6 +142,23 @@ reads your `EXPOSE` directive to know which port to route traffic to, and passes
 environment variables in as `--build-arg`s. A `.dockerignore` is supported the same way it would
 be locally.
 
+## Scheduled tasks
+
+Open a project and choose the **Tasks** tab to run a command inside its container on a schedule:
+a nightly script, `php artisan schedule:run` for Laravel (every minute), or `php wp-cron.php` for
+WordPress. Pick a preset (every minute, hour, day, week) or write a five-field cron expression; the
+dialog shows the next run times in the server timezone as you type.
+
+Each task keeps its last 50 runs with their exit code, duration and output, has a **Run now**
+button, and a timeout (default 5 minutes) after which the run and everything it started are
+stopped. A run is skipped, not failed, when the project isn't running or the previous run is still
+going. If a task fails three times in a row you get one email, and no more until it succeeds once.
+
+Tasks run in the project's own container, never on the host, and only you can see their output.
+Your administrator can cap how many scheduled tasks you may have. Static sites have nothing to run
+commands in. If the panel was down when a run was due, that run is not made up afterwards. See the
+[technical reference](/reference/scheduled-tasks) for the details.
+
 ## Next steps
 
 - [Domains, subdomains and SSL](/guide/domains-and-ssl) — replace the generated subdomain with

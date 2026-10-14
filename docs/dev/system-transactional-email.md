@@ -46,7 +46,7 @@ This is separate from the customer mail-hosting stack ([Postfix](email/postfix.m
 
 `changePassword` also ends the user's *other* sessions and sends the same notice.
 
-**Admin accounts are not email-resettable** unless `ALLOW_ADMIN_EMAIL_RESET=true`. An admin is root-equivalent on the host, so a compromised mailbox must not be enough to take one over. Server-side admin recovery is tracked in issue #19.
+**Admin accounts are not email-resettable** unless `ALLOW_ADMIN_EMAIL_RESET=true`. An admin is root-equivalent on the host, so a compromised mailbox must not be enough to take one over. Admins recover from the server shell instead (`prisma/reset-password.ts`), and admins or resellers can issue a reset link for a user from **Users → Edit**; see [Password recovery](password-recovery.md).
 
 ## Configuration
 

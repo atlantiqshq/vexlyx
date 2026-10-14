@@ -20,13 +20,19 @@ function makeService() {
       return "OK";
     }),
     get: vi.fn(async (k: string) => store.get(k) ?? null),
-    del: vi.fn(async (k: string) => {
-      store.delete(k);
+    del: vi.fn(async (...keys: string[]) => {
+      keys.forEach((k) => store.delete(k));
     }),
   };
   const prisma = {
     user: { findUnique: vi.fn(), update: vi.fn() },
     recoveryCode: { createMany: vi.fn(), findMany: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
+    session: {
+      findMany: vi.fn(async ({ where }: { where: { id?: { not: string } } }) =>
+        [{ id: "s1" }, { id: "s2" }].filter((row) => row.id !== where.id?.not),
+      ),
+      deleteMany: vi.fn(async () => ({ count: 0 })),
+    },
   };
   const auditLog = { log: vi.fn(async () => undefined) };
   const service = new TwoFactorService(prisma as never, redis as never, auditLog as never);
@@ -181,5 +187,40 @@ describe("TwoFactorService challenge store", () => {
     expect(token).toHaveLength(64);
     expect(await service.consumeChallenge(token)).toBe("u1");
     expect(await service.consumeChallenge(token)).toBeNull();
+  });
+});
+
+describe("TwoFactorService ends sessions when protection is weakened", () => {
+  it("adminReset logs the target out everywhere", async () => {
+    const { service, prisma, redis } = makeService();
+    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "u2", email: "u2@example.com", name: "Bo", totpEnabled: true,
+    });
+
+    await service.adminReset("admin1", "u2");
+
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ totpEnabled: false }) }),
+    );
+    expect(redis.del).toHaveBeenCalledWith("session:s1", "session:s2");
+    expect(prisma.session.deleteMany).toHaveBeenCalled();
+  });
+
+  it("disable ends every other session but spares the caller's own", { timeout: 30000 }, async () => {
+    const { service, prisma, redis } = makeService();
+    const secret = authenticator.generateSecret();
+    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "u1",
+      email: "u1@example.com",
+      name: "Ada",
+      password: await argon2.hash("correct horse battery staple", { type: argon2.argon2id }),
+      totpSecretEncrypted: encrypt(secret),
+      totpEnabled: true,
+    });
+
+    await service.disable("u1", "correct horse battery staple", authenticator.generate(secret), "s1");
+
+    expect(redis.del).toHaveBeenCalledWith("session:s2");
+    expect(redis.del).not.toHaveBeenCalledWith("session:s1", expect.anything());
   });
 });

@@ -12,6 +12,9 @@ import {
   MkdirBodySchema,
   CopyBodySchema,
   MoveBodySchema,
+  ChmodBodySchema,
+  ExtractBodySchema,
+  CompressBodySchema,
 } from "./schema.js";
 
 // ---------------------------------------------------------------------------
@@ -179,6 +182,53 @@ export async function fileRoutes(app: FastifyInstance) {
         const { from, to } = MoveBodySchema.parse(request.body);
         await service.move(request.userId!, id, from, to);
         return { success: true };
+      } catch (err) {
+        handleFileError(err, reply);
+      }
+    },
+  );
+
+  // ── POST /api/files/:id/chmod ────────────────────────────────────────
+  app.post(
+    "/:id/chmod",
+    { preHandler: [app.requireAuth] },
+    async (request, reply) => {
+      try {
+        const { id } = ProjectIdParamSchema.parse(request.params);
+        const { path, mode, recursive } = ChmodBodySchema.parse(request.body);
+        return await service.chmod(request.userId!, id, path, mode, recursive);
+      } catch (err) {
+        handleFileError(err, reply);
+      }
+    },
+  );
+
+  // ── POST /api/files/:id/extract ──────────────────────────────────────
+  app.post(
+    "/:id/extract",
+    { preHandler: [app.requireAuth] },
+    async (request, reply) => {
+      try {
+        const { id } = ProjectIdParamSchema.parse(request.params);
+        const { path, destination, overwrite } = ExtractBodySchema.parse(request.body);
+        return await service.extract(request.userId!, id, path, destination, overwrite);
+      } catch (err) {
+        handleFileError(err, reply);
+      }
+    },
+  );
+
+  // ── POST /api/files/:id/compress ─────────────────────────────────────
+  app.post(
+    "/:id/compress",
+    { preHandler: [app.requireAuth] },
+    async (request, reply) => {
+      try {
+        const { id } = ProjectIdParamSchema.parse(request.params);
+        const { paths, archivePath } = CompressBodySchema.parse(request.body);
+        const result = await service.compress(request.userId!, id, paths, archivePath);
+        reply.status(201);
+        return result;
       } catch (err) {
         handleFileError(err, reply);
       }

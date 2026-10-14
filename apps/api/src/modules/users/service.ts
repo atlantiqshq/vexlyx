@@ -32,6 +32,7 @@ const PUBLIC_USER_SELECT = {
   maxDatabases: true,
   maxMailboxes: true,
   maxSubAccounts: true,
+  maxScheduledTasks: true,
   permissions: true,
   oversellingEnabled: true,
   createdAt: true,
@@ -178,6 +179,7 @@ export class UserService {
           maxDatabases: target.maxDatabases,
           maxMailboxes: target.maxMailboxes,
           maxSubAccounts: target.maxSubAccounts,
+          maxScheduledTasks: target.maxScheduledTasks,
           ...(data.oversellingEnabled !== undefined ? { oversellingEnabled: target.oversellingEnabled } : {}),
         },
         after: data,
@@ -207,6 +209,21 @@ export class UserService {
       { type: "User", id },
       { before: { email: target.email, role: target.role } },
     );
+  }
+
+  /**
+   * Who may start a password reset for a user (F5.30): an ADMIN for any
+   * non-admin account, a RESELLER only for their own sub-accounts. Admin
+   * accounts are never resettable from the panel — they recover from the
+   * server shell, so a compromised panel session can't take one over.
+   */
+  async getResettableUser(requester: Requester, id: string) {
+    const target = await this.ensureExists(id);
+    this.assertCanManage(requester, target);
+    if (target.role === "ADMIN") {
+      throw new UserError("Admin accounts are recovered from the server", "ADMIN_NOT_RESETTABLE", 403);
+    }
+    return target;
   }
 
   /**
@@ -271,6 +288,7 @@ export class UserService {
       select: {
         id: true,
         email: true,
+        name: true,
         role: true,
         resellerId: true,
         maxProjects: true,
@@ -278,6 +296,7 @@ export class UserService {
         maxDatabases: true,
         maxMailboxes: true,
         maxSubAccounts: true,
+        maxScheduledTasks: true,
         permissions: true,
         oversellingEnabled: true,
       },

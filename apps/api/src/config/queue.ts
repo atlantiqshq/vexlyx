@@ -34,11 +34,12 @@ export function createWorker<T>(
   name: string,
   processor: (job: { id?: string; name: string; data: T }) => Promise<void>,
   app: FastifyInstance,
-  options?: { concurrency?: number },
+  options?: { concurrency?: number; maxStalledCount?: number },
 ): Worker {
   const worker = new Worker(name, processor as unknown as Processor, {
     connection: redisConnection(),
     concurrency: options?.concurrency ?? env.BUILD_CONCURRENCY ?? 5,
+    ...(options?.maxStalledCount !== undefined ? { maxStalledCount: options.maxStalledCount } : {}),
   });
 
   worker.on("completed", (job) => {

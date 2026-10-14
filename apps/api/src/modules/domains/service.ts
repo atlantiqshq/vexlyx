@@ -23,6 +23,7 @@ import type {
 import { env } from "../../config/env.js";
 import { assertUnderQuota, notifyQuotaThreshold } from "../../utils/quota.js";
 import type { AuditLogService } from "../audit-log/service.js";
+import type { SignatureSync } from "../mail-signatures/sync.js";
 import { PUBLIC_RESOLVER_IPS } from "./resolvers.js";
 
 // ---------------------------------------------------------------------------
@@ -165,6 +166,8 @@ export class DomainService {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly auditLog?: AuditLogService,
+    /** Removes a deleted domain's mail signature files (F5.31). Optional so unit tests stay hermetic. */
+    private readonly signatureSync?: SignatureSync,
   ) {}
 
   /**
@@ -810,6 +813,8 @@ http:
       }
     }
 
+    const logoFiles = (await this.signatureSync?.assetFileNames(domain.id)) ?? [];
+
     // Delete domain (cascades to subdomains and dnsRecords in database)
     await this.prisma.domain.delete({
       where: { id: domain.id },
@@ -818,6 +823,8 @@ http:
     await this.auditLog?.log(userId, "domain.deleted", { type: "Domain", id: domain.id }, {
       before: { hostname: domain.hostname },
     });
+    void this.signatureSync?.removeDomain(domain.hostname);
+    void this.signatureSync?.deleteAssetFiles(logoFiles);
 
     return { success: true };
   }

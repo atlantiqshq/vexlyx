@@ -10,6 +10,7 @@ import type {
 import { runDovecotManager, MailService } from "../mail/service.js";
 import { assertUnderQuota, notifyQuotaThreshold } from "../../utils/quota.js";
 import type { AuditLogService } from "../audit-log/service.js";
+import type { SignatureSync } from "../mail-signatures/sync.js";
 
 export class MailboxError extends Error {
   constructor(
@@ -32,6 +33,8 @@ export class MailboxService {
   constructor(
     private readonly prisma: PrismaClient,
     private readonly auditLog: AuditLogService,
+    /** Keeps mail signature files in step with mailboxes (F5.31). Optional so unit tests stay hermetic. */
+    private readonly signatureSync?: SignatureSync,
   ) {
     this.mailService = new MailService(prisma);
   }
@@ -120,6 +123,8 @@ export class MailboxService {
     void notifyQuotaThreshold(this.prisma, userId, "mailbox");
 
     await this.mailService.syncVirtualDomains(userId);
+    // The domain's default signature applies to a new mailbox straight away.
+    void this.signatureSync?.syncMailbox(mailbox.id);
 
     if (isFirstMailbox) {
       // Auto-configure SPF/DKIM/DMARC/MX (F4.5). Never blocks mailbox
@@ -213,6 +218,7 @@ export class MailboxService {
     await this.prisma.mailbox.delete({ where: { id: mailbox.id } });
 
     await this.mailService.syncVirtualDomains(userId);
+    void this.signatureSync?.removeAddresses([mailbox.address]);
 
     await this.auditLog.log(userId, "mailbox.deleted", { type: "Mailbox", id: mailboxId }, {
       before: { address: mailbox.address },

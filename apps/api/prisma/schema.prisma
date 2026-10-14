@@ -96,6 +96,27 @@ enum MailboxStatus {
   DELETED
 }
 
+/// How a mailbox gets its signature (F5.31): INHERIT follows the group or
+/// domain template, CUSTOM uses the mailbox's own template, NONE sends none.
+enum SignatureMode {
+  INHERIT
+  CUSTOM
+  NONE
+}
+
+/// Which senders a domain's signature applies to (F5.31).
+enum SignatureSenderListMode {
+  ALL
+  ONLY_LISTED
+  EXCEPT_LISTED
+}
+
+/// What a signature version snapshot belongs to (F5.31).
+enum SignatureScope {
+  DOMAIN
+  MAILBOX
+}
+
 /// Type of SSL/TLS certificate attached to a domain.
 enum CertType {
   LETS_ENCRYPT
@@ -140,6 +161,15 @@ enum CleanupTrigger {
   REDEPLOY
 }
 
+/// Who issued a password reset link (F5.30). SELF_SERVICE links come from the
+/// public forgot-password form; ADMIN links from an admin or reseller; CLI
+/// links from shell access to the server, which is itself the proof of ownership.
+enum PasswordResetSource {
+  SELF_SERVICE
+  ADMIN
+  CLI
+}
+
 /// Transport protocol a firewall rule applies to.
 enum FirewallProtocol {
   TCP
@@ -180,6 +210,8 @@ model User {
   maxDatabases   Int?     @map("max_databases")
   maxMailboxes   Int?     @map("max_mailboxes")
   maxSubAccounts Int?     @map("max_sub_accounts")
+  /// Cap on scheduled tasks across all of the user's projects (F5.28).
+  maxScheduledTasks Int?  @map("max_scheduled_tasks")
   /// Named capabilities granted on top of the role (F5.19). Additive only —
   /// never removes what the role itself already grants.
   permissions Permission[] @default([])
@@ -198,7 +230,9 @@ model User {
   sessions       Session[]
   recoveryCodes RecoveryCode[]
   passwordResetTokens PasswordResetToken[]
+  issuedResetTokens   PasswordResetToken[] @relation("PasswordResetIssuer")
   quotaNotices QuotaNotice[]
+  scheduledTasks ScheduledTask[]
   projects       Project[]
   domains        Domain[]
   databases      Database[]
@@ -250,9 +284,13 @@ model PasswordResetToken {
   expiresAt DateTime  @map("expires_at")
   usedAt    DateTime? @map("used_at")
   requestIp String?   @map("request_ip")
+  source    PasswordResetSource @default(SELF_SERVICE)
+  /// The admin or reseller who issued the link; null for self-service and CLI links.
+  createdById String? @map("created_by_id")
   createdAt DateTime  @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("PasswordResetIssuer", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([userId])
   @@map("password_reset_tokens")
@@ -272,6 +310,64 @@ model QuotaNotice {
 
   @@unique([userId, resource, level])
   @@map("quota_notices")
+}
+
+enum ScheduledTaskTrigger {
+  SCHEDULED
+  MANUAL
+}
+
+enum ScheduledTaskStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  TIMEOUT
+  SKIPPED
+}
+
+/// A command a user runs on a cron schedule inside one of their project's containers (F5.28).
+model ScheduledTask {
+  id                  String   @id @default(cuid())
+  projectId           String   @map("project_id")
+  userId              String   @map("user_id")
+  name                String
+  command             String
+  /// Five-field cron expression, evaluated in the server timezone (F5.13).
+  schedule            String
+  timeoutSeconds      Int      @default(300) @map("timeout_seconds")
+  enabled             Boolean  @default(true)
+  notifyOnFailure     Boolean  @default(true) @map("notify_on_failure")
+  /// Runs in a row that ended FAILED or TIMEOUT; reset by a SUCCESS. Skipped runs leave it alone.
+  consecutiveFailures Int      @default(0) @map("consecutive_failures")
+  lastRunAt           DateTime? @map("last_run_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  project Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  runs    ScheduledTaskRun[]
+
+  @@index([projectId])
+  @@index([userId])
+  @@map("scheduled_tasks")
+}
+
+/// One execution (or skipped attempt) of a scheduled task. Only the latest 50 per task are kept (F5.28).
+model ScheduledTaskRun {
+  id         String               @id @default(cuid())
+  taskId     String               @map("task_id")
+  trigger    ScheduledTaskTrigger
+  status     ScheduledTaskStatus
+  exitCode   Int?                 @map("exit_code")
+  /// Combined stdout/stderr, capped. May contain secrets the command printed, so it is only ever shown to the owner.
+  output     String               @default("")
+  startedAt  DateTime             @default(now()) @map("started_at")
+  finishedAt DateTime?            @map("finished_at")
+
+  task ScheduledTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, startedAt])
+  @@map("scheduled_task_runs")
 }
 
 /// A hosted application or website managed by the panel.
@@ -320,6 +416,7 @@ model Project {
   envVars     EnvVar[]
   domains     Domain[]
   databases   Database[]
+  scheduledTasks ScheduledTask[]
   githubInstallation GitHubInstallation? @relation(fields: [githubInstallationId], references: [id], onDelete: SetNull)
 
   @@unique([userId, name])
@@ -429,6 +526,10 @@ model Domain {
   virtualAliases VirtualAlias[]
   dkimKeys       DkimKey[]
   certificate    Certificate?
+  mailSignature  DomainSignature?
+  signatureGroups  SignatureGroup[]
+  signatureBanners SignatureBanner[]
+  signatureAssets  SignatureAsset[]
 
   @@index([userId])
   @@index([parentId])
@@ -522,10 +623,133 @@ model Mailbox {
   user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   domain            Domain             @relation(fields: [domainId], references: [id], onDelete: Cascade)
   vacationResponder VacationResponder?
+  signature         MailboxSignature?
 
   @@index([userId])
   @@index([domainId])
   @@map("mailboxes")
+}
+
+/// Domain-wide signature policy and default template for its mailboxes (F5.31).
+model DomainSignature {
+  id                String                  @id @default(cuid())
+  domainId          String                  @unique @map("domain_id")
+  enabled           Boolean                 @default(true)
+  /// Plain text with {{variables}} and the **bold** / [label](https://…) markup. Never HTML.
+  template          String                  @default("")
+  company           String?
+  website           String?
+  /// HTTPS URL of a logo shown above the signature (an uploaded asset or an external image).
+  logoUrl           String?                 @map("logo_url")
+  /// Webmail users can't edit the signature, and mailbox-level templates are ignored.
+  locked            Boolean                 @default(false)
+  /// Add the signature on the mail server to mail sent from any client, not just webmail.
+  enforceServerSide Boolean                 @default(false) @map("enforce_server_side")
+  /// Server-side only: skip mail whose recipients are all on the account's own domains.
+  externalOnly      Boolean                 @default(false) @map("external_only")
+  /// Server-side only: skip replies and forwards.
+  newMessagesOnly   Boolean                 @default(false) @map("new_messages_only")
+  senderListMode    SignatureSenderListMode @default(ALL) @map("sender_list_mode")
+  /// Mailbox addresses the sender list applies to.
+  senderList        String[]                @default([]) @map("sender_list")
+  /// Separate legal footer, independent of the personal signature.
+  complianceEnabled Boolean                 @default(false) @map("compliance_enabled")
+  complianceText    String                  @default("") @map("compliance_text")
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+
+  domain Domain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@map("domain_signatures")
+}
+
+/// A department-level template (Sales, Support, …) between the domain default and a mailbox (F5.31).
+model SignatureGroup {
+  id        String   @id @default(cuid())
+  domainId  String   @map("domain_id")
+  name      String
+  template  String   @default("")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  domain  Domain             @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  members MailboxSignature[]
+  banners SignatureBanner[]
+
+  @@unique([domainId, name])
+  @@index([domainId])
+  @@map("signature_groups")
+}
+
+/// One mailbox's signature settings and the profile that fills template variables (F5.31).
+model MailboxSignature {
+  id          String        @id @default(cuid())
+  mailboxId   String        @unique @map("mailbox_id")
+  mode        SignatureMode @default(INHERIT)
+  /// Only used when mode is CUSTOM.
+  template    String?
+  groupId     String?       @map("group_id")
+  displayName String?       @map("display_name")
+  title       String?
+  department  String?
+  phone       String?
+  mobile      String?
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  mailbox Mailbox         @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  group   SignatureGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  @@index([groupId])
+  @@map("mailbox_signatures")
+}
+
+/// A time-boxed notice appended to signatures between two dates (F5.31).
+model SignatureBanner {
+  id        String   @id @default(cuid())
+  domainId  String   @map("domain_id")
+  /// Null applies to the whole domain.
+  groupId   String?  @map("group_id")
+  text      String
+  startsAt  DateTime @map("starts_at")
+  endsAt    DateTime @map("ends_at")
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  domain Domain          @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  group  SignatureGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
+  @@map("signature_banners")
+}
+
+/// A snapshot of a signature before a change, kept so it can be restored (F5.31).
+model SignatureVersion {
+  id             String         @id @default(cuid())
+  scope          SignatureScope
+  targetId       String         @map("target_id")
+  snapshot       Json
+  createdById    String?        @map("created_by_id")
+  createdByEmail String?        @map("created_by_email")
+  createdAt      DateTime       @default(now()) @map("created_at")
+
+  @@index([scope, targetId, createdAt])
+  @@map("signature_versions")
+}
+
+/// A logo image uploaded for a domain's signatures, served publicly so mail clients can load it (F5.31).
+model SignatureAsset {
+  id          String   @id @default(cuid())
+  domainId    String   @map("domain_id")
+  fileName    String   @unique @map("file_name")
+  contentType String   @map("content_type")
+  size        Int
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  domain Domain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  @@index([domainId])
+  @@map("signature_assets")
 }
 
 /// A Postfix virtual alias forwarding one address to one or more destinations.
@@ -727,6 +951,8 @@ model FirewallRule {
 model SystemSettings {
   id        String   @id @default("default")
   timezone  String
+  /// Global kill switch for server-side signature enforcement (F5.31). Off = mail passes through untouched.
+  signatureEnforcement Boolean @default(true) @map("signature_enforcement")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("system_settings")

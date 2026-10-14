@@ -23,6 +23,11 @@ touch docker/traefik/acme.json
 chmod 600 docker/traefik/acme.json
 log_ok "docker/traefik/acme.json ready (mode 600)."
 
+# Mail signature files (F5.31): written by the API, mounted read-only into Roundcube
+# and Postfix. Created here so the bind mounts exist before the containers start.
+mkdir -p docker/mail-data/signatures
+chmod 755 docker/mail-data/signatures
+
 # Production mail containers mount this directory read-only. Seed a temporary
 # certificate so their first start is reliable while Traefik completes ACME;
 # step 14 replaces it with the trusted certificate before install completion.

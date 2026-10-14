@@ -29,6 +29,9 @@ import { mailRoutes } from "./modules/mail/routes.js";
 import { mailboxRoutes } from "./modules/mailboxes/routes.js";
 import { aliasRoutes } from "./modules/aliases/routes.js";
 import { vacationRoutes } from "./modules/vacation/routes.js";
+import { mailSignatureRoutes } from "./modules/mail-signatures/routes.js";
+import { scheduledTaskRoutes } from "./modules/scheduled-tasks/routes.js";
+import { SignatureSync } from "./modules/mail-signatures/sync.js";
 import { fileRoutes } from "./modules/files/routes.js";
 import { sftpRoutes } from "./modules/sftp/routes.js";
 import { monitoringRoutes } from "./modules/monitoring/routes.js";
@@ -95,6 +98,7 @@ async function buildApp() {
   await app.register(deployRoutes, { prefix: "/api/projects" });
   await app.register(logRoutes, { prefix: "/api/projects" });
   await app.register(envRoutes, { prefix: "/api/projects" });
+  await app.register(scheduledTaskRoutes, { prefix: "/api/projects" });
   await app.register(wordpressRoutes, { prefix: "/api/projects" });
   await app.register(dockerfileRoutes, { prefix: "/api/projects" });
   await app.register(databaseRoutes, { prefix: "/api/databases" });
@@ -104,6 +108,7 @@ async function buildApp() {
   await app.register(mailboxRoutes, { prefix: "/api/mailboxes" });
   await app.register(aliasRoutes, { prefix: "/api/aliases" });
   await app.register(vacationRoutes, { prefix: "/api/mailboxes" });
+  await app.register(mailSignatureRoutes, { prefix: "/api" });
   await app.register(fileRoutes, { prefix: "/api/files" });
   await app.register(sftpRoutes, { prefix: "/api/sftp" });
   await app.register(monitoringRoutes, { prefix: "/api/monitoring" });
@@ -159,6 +164,12 @@ async function start() {
       .syncAllManagedZones()
       .then((count) => app.log.info(`Synced ${count} hosted DNS zone(s)`))
       .catch((err: unknown) => app.log.error(err, "Failed to sync hosted DNS zones"));
+
+    // Logo files left behind by a deleted user or domain (F5.31).
+    new SignatureSync(app.prisma, app.log)
+      .sweepOrphanAssets()
+      .then((count) => count > 0 && app.log.info(`Removed ${count} orphaned signature logo file(s)`))
+      .catch((err: unknown) => app.log.error(err, "Failed to sweep orphaned signature logos"));
   } catch (err) {
     app.log.error(err, "Failed to start server");
     process.exit(1);

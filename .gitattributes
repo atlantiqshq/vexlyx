@@ -1,0 +1,4 @@
+*.sh text eol=lf
+# Run inside the Postfix container; a CR in the shebang line would stop the filter starting.
+docker/postfix/*.py text eol=lf
+docker/postfix/*.sh text eol=lf

@@ -3,6 +3,7 @@ import { DomainService, DomainError } from "./service.js";
 import { DnsService } from "./dns-service.js";
 import { SslService } from "./ssl-service.js";
 import { AuditLogService } from "../audit-log/service.js";
+import { SignatureSync } from "../mail-signatures/sync.js";
 import {
   CreateDomainSchema,
   UpdateDomainSchema,
@@ -40,7 +41,7 @@ function handleDomainError(err: unknown, reply: FastifyReply): void {
 
 export async function domainRoutes(app: FastifyInstance) {
   const auditLog = new AuditLogService(app.prisma, app.log);
-  const service = new DomainService(app.prisma, auditLog);
+  const service = new DomainService(app.prisma, auditLog, new SignatureSync(app.prisma, app.log));
   const dnsService = new DnsService(app.prisma);
   const sslService = new SslService(app.prisma);
 

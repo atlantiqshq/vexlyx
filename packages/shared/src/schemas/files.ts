@@ -11,6 +11,7 @@ export type FileNode = {
   size?: number;
   mtime?: string;
   extension?: string;
+  mode?: string;
   children?: FileNode[];
 };
 
@@ -22,6 +23,7 @@ export const FileNodeSchema: z.ZodType<FileNode> = z.lazy(() =>
     size: z.number().optional(),
     mtime: z.string().optional(),
     extension: z.string().optional(),
+    mode: z.string().optional(),
     children: z.array(FileNodeSchema).optional(),
   }),
 );
@@ -80,6 +82,26 @@ export const MoveBodySchema = z.object({
   projectId: z.string().min(1),
   from: z.string().min(1),
   to: z.string().min(1),
+});
+
+export const ChmodBodySchema = z.object({
+  projectId: z.string().min(1),
+  path: z.string().min(1),
+  mode: z.string().regex(/^[0-7]{3}$/),
+  recursive: z.boolean().optional(),
+});
+
+export const ExtractBodySchema = z.object({
+  projectId: z.string().min(1),
+  path: z.string().min(1),
+  destination: z.string().optional(),
+  overwrite: z.boolean().optional(),
+});
+
+export const CompressBodySchema = z.object({
+  projectId: z.string().min(1),
+  paths: z.array(z.string().min(1)).min(1).max(500),
+  archivePath: z.string().min(1).optional(),
 });
 
 // ---------------------------------------------------------------------------

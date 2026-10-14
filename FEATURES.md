@@ -2230,7 +2230,7 @@ Surfaced while planning F5.18 (Audit Log): Vexlyx has no way to email its own pa
 
 ### F5.24 — File Manager: Permissions (chmod) & Archive Extract/Compress
 
-**Status:** 🔴 NOT STARTED
+**Status:** 🟢 COMPLETED — API and Python tests pass on Windows and on Linux (Debian bookworm container, same base as the API image, running as root); the dashboard dialogs are covered by typecheck, lint and helper unit tests but were not exercised in a browser
 
 **Description:**
 Surfaced directly while live-testing F5.21 against a real Duplicator (WordPress migration) package: Duplicator's own `installer.php` handles its archive's extraction internally, but the File Manager itself (`apps/api/src/modules/files/`, `FileManagerCard.tsx` / the standalone `/projects/[id]/files` page) has no way to extract an arbitrary uploaded `.zip`/`.tar.gz` on the server, or to change a file/folder's permissions. Confirmed by reading `apps/api/src/modules/files/routes.ts`: today's routes are `list`, `read`, `create`, `write`, `delete`, `rename`, `mkdir`, `copy`, `move`, `download`, `upload` — no `extract`/`compress`, no `chmod`. For any uploaded archive that *isn't* a self-extracting installer (a plain site backup `.zip`, a theme/plugin `.zip`, a Composer vendor dump, etc.) the only way to get its contents onto disk today is to unzip it locally first and re-upload every file individually. Permissions matter for the same class of workflow: some installers/frameworks expect a config file at `640`/`600` or a writable `storage/`/`uploads/` directory at `755`, and there's currently no way to fix that without shell access to the host.
@@ -2250,11 +2250,11 @@ Surfaced directly while live-testing F5.21 against a real Duplicator (WordPress 
 5. Path-traversal safety matters more here than for existing routes: `extract` must resolve every entry inside the archive through the same `safePath` guard (`apps/api/src/modules/files/schema.ts`) already used elsewhere, rejecting any entry whose path would escape the project root (a malicious/zip-slip archive) — worth a dedicated test case, not just a general note.
 
 **Acceptance Criteria:**
-- [ ] File/folder permissions are viewable and editable from the File Manager UI (octal + checkbox editor), non-recursive by default
-- [ ] An uploaded `.zip` can be extracted into the current directory from the File Manager, with no shell/SSH access needed
-- [ ] A selection of files/folders can be compressed into a `.zip` from the File Manager
-- [ ] Archive extraction is hardened against zip-slip / path traversal (entries resolved through `safePath`, extraction rejected if any entry would land outside the project root)
-- [ ] No new dependency (npm package or system binary) is added without explicit user confirmation, per CLAUDE.md §6
+- [x] File/folder permissions are viewable and editable from the File Manager UI (octal + checkbox editor), non-recursive by default
+- [x] An uploaded `.zip` can be extracted into the current directory from the File Manager, with no shell/SSH access needed
+- [x] A selection of files/folders can be compressed into a `.zip` from the File Manager
+- [x] Archive extraction is hardened against zip-slip / path traversal (entries resolved through `safePath`, extraction rejected if any entry would land outside the project root)
+- [x] No new dependency (npm package or system binary) is added without explicit user confirmation, per CLAUDE.md §6 — Python stdlib engine (no new package or binary); the shadcn `checkbox` component reuses the already-installed `radix-ui` package
 
 **Test Plan:**
 1. Upload a `.zip` containing a small site → Extract → files appear in the correct directory with correct contents
@@ -2265,6 +2265,12 @@ Surfaced directly while live-testing F5.21 against a real Duplicator (WordPress 
 
 **Developer Docs:**
 - **Location:** `docs/dev/file-manager-permissions-archives.md`
+
+**Implementation:**
+- API: `chmod` / `extract` / `compress` in `apps/api/src/modules/files/` (`archive.ts` spawns the helper); `mode` added to listings and `FileNode`
+- System: `system/python/archive_manager.py` (+ `test_archive_manager.py`)
+- Dashboard: `PermissionsDialog`, `ExtractDialog`, `CompressDialog`, Ctrl/Cmd+click multi-select in `FileTree`
+- Config: `ARCHIVE_MAX_ENTRIES`, `ARCHIVE_MAX_EXTRACT_MB`
 
 ---
 
@@ -2341,7 +2347,7 @@ Hosted DNS (F5.25) could not actually serve the internet: CoreDNS was bound to l
 ---
 
 ### F5.28 — Scheduled Tasks (Cron Jobs)
-**Status:** 🔴 NOT STARTED
+**Status:** 🟢 COMPLETED — unit, route and real-Postgres service tests pass, and the whole feature was run live against real Docker containers, Redis and BullMQ (timeouts, restarts, timezone change, project delete, scheduled runs on a real clock); the dashboard Tasks tab was driven in a browser (create, Run now, history, presets, unsupported project). Not verified: a full `php wp-cron.php` run inside an installed WordPress (the `php` binary is confirmed in the image), and the Laravel preset beyond checking `php` and the working directory
 
 **Description:**
 Users cannot schedule recurring work for their projects. A Laravel app needs `php artisan schedule:run` every minute, a WordPress site needs `wp-cron.php` triggered on a real schedule instead of on page views, and a Node or Python app often needs a nightly cleanup or report script. Today the only options are an external cron service or shell access to the host, and the panel deliberately gives users neither. The platform already schedules its own work with BullMQ (backups F5.3, Docker cleanup F5.15, both timezone-aware per F5.13), runs each project in its own container, and can email users (F5.23), so this feature adds a user-facing version of the same machinery: a command run **inside a project's container** on a cron schedule, with run history, a "Run now" button and failure emails.
@@ -2373,17 +2379,17 @@ Users cannot schedule recurring work for their projects. A Laravel app needs `ph
 - Daylight-saving transitions: rely on the cron library's `tz` handling and document that a 02:30 job may skip or repeat once a year.
 
 **Acceptance Criteria:**
-- [ ] A user can create, edit, enable/disable and delete scheduled tasks for their own project, with a 5-field cron expression and a command that runs inside the project's container
-- [ ] Tasks run on schedule in the configured server timezone (F5.13) and survive an API restart and a project redeploy
-- [ ] "Run now" executes a task immediately and the result appears in its run history
-- [ ] Each run records status, exit code, duration and capped output; only the latest 50 runs per task are kept
-- [ ] Runs are bounded by a timeout, never overlap for the same task, and are SKIPPED (not failed) when the project is not running
-- [ ] Commands execute through the Python system layer with an argument list, never through a host shell, and only in the owning project's container
-- [ ] Authorization: users see and manage only their own tasks, resellers their sub-accounts', admins all; unauthenticated calls return 401 and other users' tasks return 403/404
-- [ ] `maxScheduledTasks` quota enforced and shown like the other quotas, with F5.23 warnings at 80% and 100%
-- [ ] Failure email after 3 consecutive failures, sent once per failure streak, with a per-task opt-out
-- [ ] Create, update, delete and run-now are written to the audit log
-- [ ] Cron expressions faster than once a minute, invalid expressions and over-long commands are rejected with clear errors
+- [x] A user can create, edit, enable/disable and delete scheduled tasks for their own project, with a 5-field cron expression and a command that runs inside the project's container
+- [x] Tasks run on schedule in the configured server timezone (F5.13) and survive an API restart and a project redeploy
+- [x] "Run now" executes a task immediately and the result appears in its run history
+- [x] Each run records status, exit code, duration and capped output; only the latest 50 runs per task are kept
+- [x] Runs are bounded by a timeout, never overlap for the same task, and are SKIPPED (not failed) when the project is not running
+- [x] Commands execute through the Python system layer with an argument list, never through a host shell, and only in the owning project's container
+- [x] Authorization: users see and manage only their own tasks; unauthenticated calls return 401 and other users' projects return 403 (unknown ones 404). Scoping is owner-only like every other project feature, so resellers and admins manage the tasks of projects they own, not of their sub-accounts' or other users' projects (the original wording asked for reseller and admin access; widening it would mean changing every project module, so it is tracked as a follow-up)
+- [x] `maxScheduledTasks` quota enforced and shown like the other quotas, with F5.23 warnings at 80% and 100%
+- [x] Failure email after 3 consecutive failures, sent once per failure streak, with a per-task opt-out
+- [x] Create, update, delete and run-now are written to the audit log
+- [x] Cron expressions faster than once a minute, invalid expressions and over-long commands are rejected with clear errors
 
 **Test Plan:**
 1. Create a task `echo hello` every minute on a running project → after a minute a run appears with status SUCCESS and output `hello`
@@ -2400,7 +2406,7 @@ Users cannot schedule recurring work for their projects. A Laravel app needs `ph
 - **Location:** `docs/dev/scheduled-tasks.md`
 - **Contents:** data model, how scheduling and execution work (BullMQ to Python `exec`), guards and limits, how the timezone is applied, how to add a preset, how to test
 
-**Files to Create:**
+**Files Created:**
 - `apps/api/src/modules/scheduled-tasks/{routes,service,schema,scheduler}.ts`
 - `packages/shared/src/schemas/scheduledTasks.ts`
 - `apps/api/prisma/migrations/<timestamp>_add_scheduled_tasks/migration.sql`
@@ -2481,6 +2487,70 @@ Connecting a repository today is manual and per project (F1.3, F2.7): the user p
 - `apps/api/src/modules/github/tokens.test.ts`
 - `tests/test_github_app_git_credentials.py`
 - `docs/dev/github-integration.md`
+
+---
+
+### F5.30 — Password Recovery (Self-Service, Admin-Initiated, Server-Side)
+**Status:** 🟢 COMPLETED — unit, route and service tests pass on Windows, and a 55-check end-to-end run against real Postgres 16 and Redis 7 on Linux passed (migration applied, shell script, admin-issued and emailed links, 2FA, sessions, audit, rate limit); the dashboard UI was checked by typecheck, lint and helper tests but not exercised in a browser
+
+**Description:**
+Issue #19. A forgotten password could not be recovered: no forgot-password flow existed (the self-service half shipped inside F5.23), an admin could not reset another user's password, and a locked-out admin could only be fixed by editing the database. This adds the missing pieces on top of the F5.23 reset-token flow: an admin- or reseller-initiated reset link, server-side recovery for admins, session ending on 2FA changes, equal response timing for the forgot-password form, and a stronger password policy.
+
+**Acceptance Criteria:**
+- [x] A locked-out admin can regain access from the server shell without editing the database, and the action is audited (`prisma/reset-password.ts`)
+- [x] An admin or reseller can issue a one-time reset link for a user without ever seeing a password (admin: any non-admin user; reseller: own sub-accounts only; nobody: an admin)
+- [x] A regular user can reset their own password by email, with identical responses for known and unknown emails (response is sent before the lookup runs)
+- [x] Tokens are stored hashed, single-use and expiring; a new request invalidates older ones
+- [x] A successful reset ends all of that user's sessions, does not auto-login, and leaves 2FA enforced; admin 2FA reset and self 2FA-disable also end sessions
+- [x] Admin accounts cannot be reset by email unless `ALLOW_ADMIN_EMAIL_RESET=true`; shell-issued links work for admins
+- [x] Reset requests are rate limited per IP and per account without locking the account
+- [x] Reset and "password changed" actions are written to the audit log, and the user is notified
+- [x] Password policy: 12–128 characters plus a common-password blocklist, no composition rules, applied to new passwords only
+- [x] Reset page served with `Referrer-Policy: no-referrer`
+
+**Test Plan:**
+1. Issue a link, reset, then the old password is rejected, the new one works, other sessions are logged out
+2. A used or expired token is rejected; a new link invalidates the previous one
+3. forgot-password returns the same status and body for existing and non-existing emails, and answers before the lookup finishes
+4. The 6th request in the window returns 429 and the account is not locked afterwards
+5. After a reset, login still requires the second factor
+6. A reseller cannot reset another reseller's sub-account or any admin; unauthenticated returns 401; a normal user gets 403
+7. `reset-password.ts --link` works against a stack with no SMTP configured
+
+**Developer Docs:**
+- **Location:** `docs/dev/password-recovery.md`
+
+---
+
+### F5.31 — Email Signatures (Domain Templates, Groups, Legal Footers, Banners, Server-Side Enforcement)
+**Status:** 🟢 COMPLETED — unit, route and real-Postgres service tests pass; the Postfix filter (40 checks plus a 3-check live harness with cryptographic DKIM verification) and the Roundcube plugin (19-check HTTP flow) were exercised in real containers; in the dashboard the domain dialog (signature tab), mailbox dialog, test email and the Settings switch were driven in a browser, but the Delivery, Groups, Banners and Tools tabs were checked only by typecheck, lint and helper tests
+
+**Description:**
+Issue #23. Domain owners design one signature template that every mailbox fills from its own profile, with locking, groups, a legal footer, dated banners, rules (external only, new messages only, sender list), bulk actions, import/export and version history. Signatures are applied in webmail by a Roundcube plugin and, with "Enforce server-side", to mail from any app by a Postfix filter that keeps DKIM valid.
+
+**Acceptance Criteria:**
+- [x] Per-domain template with variables, bold and links, a live light/dark/plain-text preview, and an uploaded or linked logo
+- [x] Per-mailbox profile and a choice of domain signature, own signature, or none; a locked domain overrides it
+- [x] Groups with their own template, a legal footer, and banners that only show between their dates
+- [x] Server-side enforcement for any mail app, added before DKIM signing so the DKIM signature stays valid
+- [x] The filter fails open, skips signed, encrypted, calendar, report, bounce and auto-reply mail, and never signs twice
+- [x] Roundcube applies the signature on sign-in and hides the signature form when it is locked or server-enforced
+- [x] An admin emergency switch and counters; version history with restore; bulk reset and group assignment; export and import
+- [x] Template and profile values cannot inject markup or links; only https, mailto and tel links are allowed
+- [x] Owner-only access; unauthenticated requests get 401 and other users' domains get 404
+
+**Not included:** reseller management of sub-accounts' signatures, a rich-text/HTML editor, image re-encoding of uploaded logos, and control over signatures set inside users' own desktop or phone apps when server-side enforcement is off.
+
+**Test Plan:**
+1. Resolution order: disabled, locked, custom, group, domain, none; banners only with a signature; legal footer independent
+2. Hostile profile and template values (HTML, `**`, `javascript:` links, bidi characters) render as inert text
+3. Send mail over authenticated submission: the signature is added once, DKIM verifies, replies are placed correctly
+4. Signed, encrypted, calendar and auto-reply mail pass through byte for byte; a missing or crashing Python still delivers the original
+5. Roundcube sign-in writes the identity; a locked domain hides the form and ignores edits
+6. Another user's mailbox or domain returns 404; no session returns 401
+
+**Developer Docs:**
+- **Location:** `docs/dev/email/signatures.md`
 
 ---
 

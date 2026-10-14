@@ -71,6 +71,9 @@ importers:
       bullmq:
         specifier: ^6.3.1
         version: 6.3.1(ioredis@6.0.0(supports-color@7.2.0))
+      cron-parser:
+        specifier: ^5.10.0
+        version: 5.10.0
       fastify:
         specifier: ^5.12.1
         version: 5.12.1

@@ -5,6 +5,68 @@ export const VEXLYX_VERSION = "0.0.1";
 export const APP_NAME = "Vexlyx";
 
 export {
+  PasswordSchema,
+  MIN_PASSWORD_LENGTH,
+  MAX_PASSWORD_LENGTH,
+  isCommonPassword,
+} from "./schemas/password.js";
+
+export {
+  SIGNATURE_VARIABLES,
+  composeSignature,
+  escapeHtml,
+  isSafeLogoUrl,
+  renderNoticeBlock,
+  renderSignatureTemplate,
+  sanitizeUrl,
+  validateSignatureTemplate,
+} from "./mailSignature/render.js";
+export type {
+  ComposeParts,
+  RenderOptions,
+  RenderedBlock,
+  SignatureVariable,
+  SignatureVars,
+} from "./mailSignature/render.js";
+export {
+  DomainSignaturePolicySchema,
+  MailboxProfileSchema,
+  SIGNATURE_BANNER_MAX,
+  SIGNATURE_EXPORT_FORMAT,
+  SIGNATURE_LOGO_MAX_BYTES,
+  SIGNATURE_NOTICE_MAX,
+  SIGNATURE_TEMPLATE_MAX,
+  SIGNATURE_VERSIONS_KEPT,
+  SignatureBannerSchema,
+  SignatureBulkSchema,
+  SignatureExportSchema,
+  SignatureGroupSchema,
+  SignatureModeSchema,
+  SignatureSenderListModeSchema,
+  UpdateMailboxSignatureSchema,
+} from "./mailSignature/schemas.js";
+export type {
+  DomainSignaturePolicy,
+  DomainSignatureResponse,
+  MailboxProfile,
+  MailboxSignatureResponse,
+  ResolvedSignatureResponse,
+  SignatureBannerInput,
+  SignatureBulkInput,
+  SignatureBulkResult,
+  SignatureEnforcementStatus,
+  SignatureExport,
+  SignatureFile,
+  SignatureGroupInput,
+  SignatureMode,
+  SignatureSenderListMode,
+  SignatureSource,
+  SignatureVersionResponse,
+  UpdateDomainSignatureInput,
+  UpdateMailboxSignatureInput,
+} from "./mailSignature/schemas.js";
+
+export {
   RegisterSchema,
   LoginSchema,
   ChangePasswordSchema,
@@ -296,6 +358,9 @@ export {
   MkdirBodySchema,
   CopyBodySchema,
   MoveBodySchema,
+  ChmodBodySchema,
+  ExtractBodySchema,
+  CompressBodySchema,
   SftpUserSchema,
   SftpAddSshKeyBodySchema,
 } from "./schemas/files.js";
@@ -435,6 +500,7 @@ export type {
   QuotaUsage,
   UsageSummary,
   CreateSubAccountInput,
+  AdminPasswordResetResult,
   UpdateUserRoleInput,
   UpdateUserQuotasInput,
   UpdateUserPermissionsInput,
@@ -489,3 +555,38 @@ export type {
   SystemEmailStatusResponse,
   SystemEmailDnsRecord,
 } from "./schemas/systemEmail.js";
+
+export {
+  CreateScheduledTaskSchema,
+  CronExpressionSchema,
+  SCHEDULE_PRESETS,
+  SCHEDULED_TASK_COMMAND_MAX,
+  SCHEDULED_TASK_FAILURE_EMAIL_AFTER,
+  SCHEDULED_TASK_NAME_MAX,
+  SCHEDULED_TASK_OUTPUT_MAX_BYTES,
+  SCHEDULED_TASK_RUNS_KEPT,
+  SCHEDULED_TASK_TIMEOUT_DEFAULT,
+  SCHEDULED_TASK_TIMEOUT_MAX,
+  SCHEDULED_TASK_TIMEOUT_MIN,
+  SCHEDULED_TASK_UNSUPPORTED_PROJECT_TYPES,
+  SchedulePreviewSchema,
+  ScheduledTaskRunsQuerySchema,
+  ScheduledTaskStatusSchema,
+  ScheduledTaskTriggerSchema,
+  TASK_PRESETS,
+  UpdateScheduledTaskSchema,
+} from "./schemas/scheduledTasks.js";
+export type {
+  CreateScheduledTaskInput,
+  SchedulePreset,
+  SchedulePreviewInput,
+  SchedulePreviewResponse,
+  ScheduledTaskListResponse,
+  ScheduledTaskResponse,
+  ScheduledTaskRunResponse,
+  ScheduledTaskRunsQuery,
+  ScheduledTaskStatus,
+  ScheduledTaskTrigger,
+  TaskPreset,
+  UpdateScheduledTaskInput,
+} from "./schemas/scheduledTasks.js";

@@ -2,7 +2,7 @@ import type { SystemEmailEvent } from "@vexlyx/shared";
 import { env } from "../../config/env.js";
 
 export type EmailParams = {
-  password_reset: { name: string; resetUrl: string; expiresMinutes: number };
+  password_reset: { name: string; resetUrl: string; expiresMinutes: number; initiatedByAdmin?: boolean };
   password_changed: { name: string };
   role_changed: { name: string; newRole: string };
   two_factor_enabled: { name: string };
@@ -10,6 +10,9 @@ export type EmailParams = {
   two_factor_reset: { name: string };
   quota_warning: { name: string; resource: string; used: number; limit: number; level: 80 | 100 };
   backup_failed: { error: string; snapshotId: string };
+  scheduled_task_failed: { name: string; taskName: string; projectName: string; projectId: string; status: "FAILED" | "TIMEOUT"; failures: number };
+  /** signatureHtml is HTML produced by the signature renderer, which escapes everything it is given. */
+  signature_test: { name: string; address: string; signatureHtml: string; signatureText: string };
   test: Record<string, never>;
 };
 
@@ -37,17 +40,20 @@ interface Layout {
   heading: string;
   paragraphs: string[];
   action?: { label: string; url: string };
+  /** Already-escaped HTML (and its plain-text twin) shown below the text, e.g. a rendered signature. */
+  extra?: { html: string; text: string };
 }
 
 // Inline styles are deliberate here: email clients strip <style> blocks and
 // ignore Tailwind, so inline CSS is the only portable option. The UI-wide
 // "no inline styles" rule applies to the dashboard, not to HTML email.
-function render({ subject, heading, paragraphs, action }: Layout): RenderedEmail {
+function render({ subject, heading, paragraphs, action, extra }: Layout): RenderedEmail {
   const text = [
     heading,
     "",
     ...paragraphs,
     ...(action ? ["", `${action.label}: ${action.url}`] : []),
+    ...(extra ? ["", extra.text] : []),
     "",
     "— Vexlyx",
   ].join("\n");
@@ -59,11 +65,24 @@ function render({ subject, heading, paragraphs, action }: Layout): RenderedEmail
     action
       ? `<p style="margin:20px 0"><a href="${escapeHtml(action.url)}" style="background:#4f46e5;color:#f8fafc;padding:10px 16px;border-radius:8px;text-decoration:none">${escapeHtml(action.label)}</a></p><p style="margin:0 0 12px;color:#64748b;font-size:12px">${escapeHtml(action.url)}</p>`
       : "",
+    extra ? extra.html : "",
     '<p style="margin:24px 0 0;color:#64748b;font-size:12px">Sent automatically by your Vexlyx panel. Please do not reply.</p>',
     "</div>",
   ].join("");
 
   return { subject, text, html };
+}
+
+function formatDuration(minutes: number): string {
+  if (minutes % 1440 === 0) {
+    const days = minutes / 1440;
+    return days === 1 ? "24 hours" : `${days} days`;
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return hours === 1 ? "1 hour" : `${hours} hours`;
+  }
+  return `${minutes} minutes`;
 }
 
 const NOT_YOU = "If this wasn't you, reset your password right away and contact your administrator.";
@@ -74,16 +93,23 @@ const RESOURCE_LABELS: Record<string, string> = {
   database: "databases",
   mailbox: "mailboxes",
   subAccount: "sub-accounts",
+  scheduledTask: "scheduled tasks",
 };
 
 const TEMPLATES: { [E in SystemEmailEvent]: (params: EmailParams[E]) => RenderedEmail } = {
-  password_reset: ({ name, resetUrl, expiresMinutes }) =>
+  password_reset: ({ name, resetUrl, expiresMinutes, initiatedByAdmin }) =>
     render({
       subject: "Reset your Vexlyx password",
       heading: "Reset your password",
       paragraphs: [
-        `Hi ${name}, we received a request to reset your password.`,
-        `This link works once and expires in ${expiresMinutes} minutes. If you didn't ask for it, you can ignore this email — your password won't change.`,
+        initiatedByAdmin
+          ? `Hi ${name}, an administrator started a password reset for your account.`
+          : `Hi ${name}, we received a request to reset your password.`,
+        `This link works once and expires in ${formatDuration(expiresMinutes)}. ${
+          initiatedByAdmin
+            ? "If you weren't expecting it, you can ignore this email — your password won't change."
+            : "If you didn't ask for it, you can ignore this email — your password won't change."
+        }`,
       ],
       action: { label: "Choose a new password", url: resetUrl },
     }),
@@ -92,6 +118,18 @@ const TEMPLATES: { [E in SystemEmailEvent]: (params: EmailParams[E]) => Rendered
       subject: "Your Vexlyx password was changed",
       heading: "Your password was changed",
       paragraphs: [`Hi ${name}, the password for your account was just changed.`, NOT_YOU],
+    }),
+  signature_test: ({ name, address, signatureHtml, signatureText }) =>
+    render({
+      subject: `Signature preview for ${address}`,
+      heading: "Your signature",
+      paragraphs: [
+        `Hi ${name}, here is how the signature for ${address} looks. This preview was sent by your panel, not from the mailbox itself.`,
+      ],
+      extra: {
+        html: `<div style="margin:16px 0;padding-top:12px;border-top:1px solid #e2e8f0">${signatureHtml}</div>`,
+        text: signatureText,
+      },
     }),
   role_changed: ({ name, newRole }) =>
     render({
@@ -142,6 +180,16 @@ const TEMPLATES: { [E in SystemEmailEvent]: (params: EmailParams[E]) => Rendered
       heading: "A backup failed",
       paragraphs: [`Backup ${snapshotId} did not complete.`, `Error: ${error}`],
       action: { label: "View backups", url: panelUrl("/settings") },
+    }),
+  scheduled_task_failed: ({ name, taskName, projectName, projectId, status, failures }) =>
+    render({
+      subject: `Scheduled task "${taskName}" keeps failing`,
+      heading: "A scheduled task keeps failing",
+      paragraphs: [
+        `Hi ${name}, the task "${taskName}" in project "${projectName}" has now ${status === "TIMEOUT" ? "timed out or failed" : "failed"} ${failures} times in a row.`,
+        "You won't get another email about it until it succeeds once. Open the run history to see what it printed.",
+      ],
+      action: { label: "Open the project", url: panelUrl(`/projects/${projectId}`) },
     }),
   test: () =>
     render({

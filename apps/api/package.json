@@ -16,6 +16,7 @@
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
     "db:create-admin": "tsx prisma/create-admin.ts",
+    "db:reset-password": "tsx prisma/reset-password.ts",
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset"
   },
@@ -32,6 +33,7 @@
     "@vexlyx/shared": "workspace:*",
     "argon2": "^0.45.1",
     "bullmq": "^6.3.1",
+    "cron-parser": "^5.10.0",
     "fastify": "^5.12.1",
     "fastify-plugin": "^5.0.1",
     "ioredis": "^6.0.0",

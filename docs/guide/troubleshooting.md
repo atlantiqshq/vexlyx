@@ -35,21 +35,26 @@ Vexlyx surfaces logs in the dashboard rather than requiring SSH access for routi
 
 ## Recovering admin access
 
-There's no self-service "forgot password" flow — while logged in, **Settings → Change Password**
-is the only self-service option. If you're locked out entirely, create a brand-new admin account
-directly on the server (this never touches or resets any existing account):
+Regular users can use **Forgot password?** on the sign-in page, and an admin or reseller can send a
+reset link from **Users → Edit**. **Admin accounts are not reset by email** — an admin is
+root-equivalent on the server, so recovery needs shell access to it. From the server, print a
+single-use reset link for the locked-out admin:
 
 ```bash
 cd /opt/vexlyx
 docker compose --env-file /etc/vexlyx/vexlyx.env -f docker-compose.yml -f docker-compose.prod.yml \
-  run --rm --no-deps \
-  -e VEXLYX_ADMIN_EMAIL="newadmin@example.com" \
-  -e VEXLYX_ADMIN_PASSWORD="a-strong-password" \
-  -e VEXLYX_ADMIN_NAME="Admin" \
-  api pnpm exec tsx prisma/create-admin.ts
+  run --rm --no-deps api pnpm exec tsx prisma/reset-password.ts --email admin@example.com
 ```
 
-Log in with the new account, then use **Users** to fix or remove the old one.
+Open the printed link (valid for an hour, works once) and choose a new password. This works with no
+email set up. Other options:
+
+- `--password-stdin` sets the password from standard input instead, for when the panel itself is
+  unreachable: `printf '%s' 'a long passphrase' | … reset-password.ts --email … --password-stdin`
+- `--disable-2fa` also turns off two-factor, if the authenticator and recovery codes are lost.
+
+Every use is written to the audit log. See [Password recovery](/reference/password-recovery) for the
+details. New passwords must be at least 12 characters and not a common password.
 
 ## Deploys and builds
 

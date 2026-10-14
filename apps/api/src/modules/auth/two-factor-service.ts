@@ -4,6 +4,7 @@ import QRCode from "qrcode";
 import * as argon2 from "argon2";
 import type { PrismaClient } from "@prisma/client";
 import { encrypt, decrypt } from "../../utils/encryption.js";
+import { destroyUserSessions } from "../../plugins/auth.js";
 import type { AuditLogService } from "../audit-log/service.js";
 import { notifyUser } from "../system-email/notifier.js";
 import { AuthError } from "./service.js";
@@ -24,7 +25,7 @@ function newRecoveryCodes(): string[] {
 export class TwoFactorService {
   constructor(
     private prisma: PrismaClient,
-    private redis: { set(k: string, v: string, mode: string, ttl: number): Promise<unknown>; get(k: string): Promise<string | null>; del(k: string): Promise<unknown> },
+    private redis: { set(k: string, v: string, mode: string, ttl: number): Promise<unknown>; get(k: string): Promise<string | null>; del(...keys: string[]): Promise<unknown> },
     private auditLog: AuditLogService,
   ) {}
 
@@ -74,13 +75,15 @@ export class TwoFactorService {
     return false;
   }
 
-  async disable(userId: string, password: string, codeOrRecovery: string) {
+  async disable(userId: string, password: string, codeOrRecovery: string, currentSessionId?: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
     if (!(await argon2.verify(user.password, password))) throw new AuthError("Invalid email or password", "INVALID_CREDENTIALS", 401);
     if (!(await this.verifyLoginCode(userId, codeOrRecovery))) throw new AuthError("Invalid code", "2FA_INVALID_CODE", 401);
     await this.prisma.user.update({ where: { id: userId }, data: { totpSecretEncrypted: null, totpEnabled: false, totpVerifiedAt: null } });
     await this.prisma.recoveryCode.deleteMany({ where: { userId } });
+    // Weakening the account's protection ends every other login, but not the one making the change.
+    await destroyUserSessions(this.prisma, this.redis, userId, currentSessionId);
     await this.auditLog.log(userId, "user.2fa_disabled", { type: "User", id: userId }, {});
     notifyUser("two_factor_disabled", user.email, { name: user.name });
   }
@@ -90,6 +93,7 @@ export class TwoFactorService {
     if (!target) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
     await this.prisma.user.update({ where: { id: targetUserId }, data: { totpSecretEncrypted: null, totpEnabled: false, totpVerifiedAt: null } });
     await this.prisma.recoveryCode.deleteMany({ where: { userId: targetUserId } });
+    await destroyUserSessions(this.prisma, this.redis, targetUserId);
     await this.auditLog.log(actorId, "user.2fa_reset", { type: "User", id: targetUserId }, {});
     notifyUser("two_factor_reset", target.email, { name: target.name });
   }

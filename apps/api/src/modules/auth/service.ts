@@ -14,6 +14,7 @@ const PUBLIC_USER_SELECT = {
   maxDatabases: true,
   maxMailboxes: true,
   maxSubAccounts: true,
+  maxScheduledTasks: true,
   permissions: true,
   totpEnabled: true,
   createdAt: true,

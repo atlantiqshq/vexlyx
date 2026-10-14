@@ -19,6 +19,7 @@ interface PrismaMock {
   domain: { count: ReturnType<typeof vi.fn> };
   database: { count: ReturnType<typeof vi.fn> };
   mailbox: { count: ReturnType<typeof vi.fn> };
+  scheduledTask: { count: ReturnType<typeof vi.fn> };
 }
 
 function createPrismaMock(): PrismaMock {
@@ -28,6 +29,7 @@ function createPrismaMock(): PrismaMock {
     domain: { count: vi.fn() },
     database: { count: vi.fn() },
     mailbox: { count: vi.fn() },
+    scheduledTask: { count: vi.fn(async () => 0) },
   };
 }
 
@@ -55,7 +57,7 @@ describe("assertNominalPoolWithinCap", () => {
         prisma as unknown as PrismaClient,
         "reseller-1",
         "sub-2",
-        { project: 6, domain: null, database: null, mailbox: null },
+        { project: 6, domain: null, database: null, mailbox: null, scheduledTask: null },
         makeError,
       ),
     ).rejects.toMatchObject({ code: "OVERSELL_NOT_ENABLED" });
@@ -79,7 +81,7 @@ describe("assertNominalPoolWithinCap", () => {
         prisma as unknown as PrismaClient,
         "reseller-1",
         "sub-2",
-        { project: 6, domain: null, database: null, mailbox: null },
+        { project: 6, domain: null, database: null, mailbox: null, scheduledTask: null },
         makeError,
       ),
     ).resolves.toBeUndefined();
@@ -102,7 +104,7 @@ describe("assertNominalPoolWithinCap", () => {
         prisma as unknown as PrismaClient,
         "reseller-1",
         "sub-2",
-        { project: null, domain: null, database: null, mailbox: null },
+        { project: null, domain: null, database: null, mailbox: null, scheduledTask: null },
         makeError,
       ),
     ).rejects.toMatchObject({ code: "OVERSELL_NOT_ENABLED" });
@@ -116,9 +118,10 @@ describe("assertNominalPoolWithinCap", () => {
       maxDomains: null,
       maxDatabases: null,
       maxMailboxes: null,
+      maxScheduledTasks: null,
     });
     prisma.user.findMany.mockResolvedValue([
-      { maxProjects: 3, maxDomains: null, maxDatabases: null, maxMailboxes: null },
+      { maxProjects: 3, maxDomains: null, maxDatabases: null, maxMailboxes: null, maxScheduledTasks: null },
     ]);
 
     await expect(
@@ -126,7 +129,7 @@ describe("assertNominalPoolWithinCap", () => {
         prisma as unknown as PrismaClient,
         "reseller-1",
         "sub-2",
-        { project: 5, domain: null, database: null, mailbox: null },
+        { project: 5, domain: null, database: null, mailbox: null, scheduledTask: null },
         makeError,
       ),
     ).resolves.toBeUndefined();
@@ -188,10 +191,11 @@ describe("getUsageSummary — F5.20 oversold reporting", () => {
       maxDatabases: null,
       maxMailboxes: null,
       maxSubAccounts: null,
+      maxScheduledTasks: null,
     });
     prisma.user.findMany.mockResolvedValue([
-      { maxProjects: 8, maxDomains: null, maxDatabases: null, maxMailboxes: null },
-      { maxProjects: 8, maxDomains: null, maxDatabases: null, maxMailboxes: null },
+      { maxProjects: 8, maxDomains: null, maxDatabases: null, maxMailboxes: null, maxScheduledTasks: null },
+      { maxProjects: 8, maxDomains: null, maxDatabases: null, maxMailboxes: null, maxScheduledTasks: null },
     ]);
     prisma.project.count.mockResolvedValue(3);
     prisma.domain.count.mockResolvedValue(0);
@@ -213,6 +217,7 @@ describe("getUsageSummary — F5.20 oversold reporting", () => {
       maxDatabases: null,
       maxMailboxes: null,
       maxSubAccounts: null,
+      maxScheduledTasks: null,
     });
     prisma.project.count.mockResolvedValue(1);
     prisma.domain.count.mockResolvedValue(0);

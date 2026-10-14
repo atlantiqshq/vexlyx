@@ -1,13 +1,13 @@
 import type { PrismaClient } from "@prisma/client";
 import { notifyUser } from "../modules/system-email/notifier.js";
 
-export type QuotaResource = "project" | "domain" | "database" | "mailbox" | "subAccount";
+export type QuotaResource = "project" | "domain" | "database" | "mailbox" | "subAccount" | "scheduledTask";
 
 /** Resources that participate in reseller pooling/overselling (F5.20). `subAccount` is excluded — there's no reseller-of-reseller nesting, so sub-account counts don't aggregate the same way. */
 type PoolResource = Exclude<QuotaResource, "subAccount">;
 
-const QUOTA_RESOURCES: QuotaResource[] = ["project", "domain", "database", "mailbox", "subAccount"];
-const POOL_RESOURCES: PoolResource[] = ["project", "domain", "database", "mailbox"];
+const QUOTA_RESOURCES: QuotaResource[] = ["project", "domain", "database", "mailbox", "subAccount", "scheduledTask"];
+const POOL_RESOURCES: PoolResource[] = ["project", "domain", "database", "mailbox", "scheduledTask"];
 
 const QUOTA_FIELD: Record<QuotaResource, string> = {
   project: "maxProjects",
@@ -15,6 +15,7 @@ const QUOTA_FIELD: Record<QuotaResource, string> = {
   database: "maxDatabases",
   mailbox: "maxMailboxes",
   subAccount: "maxSubAccounts",
+  scheduledTask: "maxScheduledTasks",
 };
 
 export interface QuotaUsage {
@@ -38,6 +39,8 @@ async function countExisting(prisma: PrismaClient, userId: string, resource: Quo
       return prisma.mailbox.count({ where: { userId, status: { not: "DELETED" } } });
     case "subAccount":
       return prisma.user.count({ where: { resellerId: userId } });
+    case "scheduledTask":
+      return prisma.scheduledTask.count({ where: { userId } });
   }
 }
 
@@ -136,13 +139,14 @@ export async function assertNominalPoolWithinCap(
       maxDomains: true,
       maxDatabases: true,
       maxMailboxes: true,
+      maxScheduledTasks: true,
     },
   });
   if (!reseller || reseller.oversellingEnabled) return;
 
   const siblings = await prisma.user.findMany({
     where: { resellerId, id: { not: targetSubAccountId } },
-    select: { maxProjects: true, maxDomains: true, maxDatabases: true, maxMailboxes: true },
+    select: { maxProjects: true, maxDomains: true, maxDatabases: true, maxMailboxes: true, maxScheduledTasks: true },
   });
 
   for (const resource of POOL_RESOURCES) {
@@ -194,6 +198,7 @@ export async function getUsageSummary(
       maxDatabases: true,
       maxMailboxes: true,
       maxSubAccounts: true,
+      maxScheduledTasks: true,
     },
   });
 
@@ -203,7 +208,7 @@ export async function getUsageSummary(
   const subAccountQuotas = isReseller
     ? await prisma.user.findMany({
         where: { resellerId: userId },
-        select: { maxProjects: true, maxDomains: true, maxDatabases: true, maxMailboxes: true },
+        select: { maxProjects: true, maxDomains: true, maxDatabases: true, maxMailboxes: true, maxScheduledTasks: true },
       })
     : [];
 

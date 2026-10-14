@@ -343,6 +343,28 @@ export type {
 } from "./schemas/cleanup.js";
 
 export {
+  ScheduledTaskRunStatusSchema,
+  ScheduledTaskRunTriggerSchema,
+  CreateScheduledTaskSchema,
+  UpdateScheduledTaskSchema,
+  ScheduledTaskIdParamSchema,
+  ScheduledTaskProjectParamSchema,
+  RunNowBodySchema,
+  ScheduledTaskResponseSchema,
+  ScheduledTaskRunResponseSchema,
+  ScheduledTaskListQuerySchema,
+} from "./schemas/scheduledTasks.js";
+export type {
+  CreateScheduledTaskInput,
+  UpdateScheduledTaskInput,
+  ScheduledTaskResponse,
+  ScheduledTaskRunResponse,
+  ScheduledTaskRunStatus,
+  ScheduledTaskRunTrigger,
+  ScheduledTaskListQuery,
+} from "./schemas/scheduledTasks.js";
+
+export {
   FirewallProtocolSchema,
   FirewallActionSchema,
   FirewallPolicySchema,

@@ -8,6 +8,7 @@ declare module "fastify" {
   interface FastifyRequest {
     userId: string | null;
     userRole: Role | null;
+    userResellerId: string | null;
   }
   interface FastifyInstance {
     requireAuth: (
@@ -41,6 +42,7 @@ async function authPlugin(app: FastifyInstance) {
 
   app.decorateRequest("userId", null);
   app.decorateRequest("userRole", null);
+  app.decorateRequest("userResellerId", null);
 
   // On every request, check for session cookie and populate request.userId
   app.addHook("onRequest", async (request) => {
@@ -64,7 +66,24 @@ async function authPlugin(app: FastifyInstance) {
     }
   });
 
-  // Shared preHandler hook to require authentication
+  // Populate userRole and userResellerId on each authenticated request
+  app.addHook("preHandler", async (request) => {
+    if (!request.userId) return;
+
+    const user = await app.prisma.user.findUnique({
+      where: { id: request.userId },
+      select: { role: true, resellerId: true },
+    });
+
+    if (user) {
+      request.userRole = user.role;
+      request.userResellerId = user.resellerId;
+    }
+  });
+
+  // Shared preHandler hook to require authentication. The session itself was
+  // already validated by the onRequest hook above, so this is a pure
+  // "is there a signed-in user" check — no extra DB lookup needed.
   const requireAuth = async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.userId) {
       return reply.status(401).send({
@@ -94,7 +113,7 @@ async function authPlugin(app: FastifyInstance) {
 
       const user = await app.prisma.user.findUnique({
         where: { id: request.userId },
-        select: { role: true },
+        select: { role: true, resellerId: true },
       });
 
       if (!user || !roles.includes(user.role)) {
@@ -106,6 +125,7 @@ async function authPlugin(app: FastifyInstance) {
       }
 
       request.userRole = user.role;
+      request.userResellerId = user.resellerId;
     };
 
   app.decorate("requireRole", requireRole);
@@ -129,7 +149,7 @@ async function authPlugin(app: FastifyInstance) {
 
       const user = await app.prisma.user.findUnique({
         where: { id: request.userId },
-        select: { role: true, permissions: true },
+        select: { role: true, permissions: true, resellerId: true },
       });
 
       if (!user || (!roles.includes(user.role) && !user.permissions.includes(permission))) {
@@ -141,6 +161,7 @@ async function authPlugin(app: FastifyInstance) {
       }
 
       request.userRole = user.role;
+      request.userResellerId = user.resellerId;
     };
 
   app.decorate("requireRoleOrPermission", requireRoleOrPermission);

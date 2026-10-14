@@ -8,6 +8,7 @@ import type { AuditLogService } from "../audit-log/service.js";
 
 const mocks = vi.hoisted(() => ({
   action: vi.fn(),
+  stopByProject: vi.fn(),
   spawn: vi.fn(),
   workspaceExists: true,
 }));
@@ -27,6 +28,7 @@ vi.mock("../deploy/service.js", () => ({
   DeployService: class {
     containerAction = mocks.action;
   },
+  runDockerStopByProject: mocks.stopByProject,
 }));
 vi.mock("../domains/dns-service.js", () => ({ DnsService: class {} }));
 
@@ -76,6 +78,7 @@ function setup(containerId: string | null = "container-1") {
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.workspaceExists = true;
+  mocks.stopByProject.mockResolvedValue(undefined);
   mocks.action.mockResolvedValue({ containerStatus: "exited" });
   mocks.spawn.mockImplementation(() => {
     const child = Object.assign(new EventEmitter(), {
@@ -149,21 +152,33 @@ describe("project restore safety", () => {
     expect(audit.log).toHaveBeenCalledOnce();
   });
 
-  it("restores a soft-deleted project whose workspace was already torn down", async () => {
+  it("restores a soft-deleted project whose workspace is gone, stopping its containers by identity", async () => {
     mocks.workspaceExists = false;
     const { restore, audit, emit } = setup("container-1");
 
     await restore();
 
-    // Nothing is running and there is no compose directory to stop; the old
-    // containerId must not turn this into an unrecoverable RESTORE_STOP_FAILED.
+    // The compose file containerAction needs is gone, so the containers are
+    // stopped and verified by project identity instead; the stale containerId
+    // must not make the project unrecoverable.
     expect(mocks.action).not.toHaveBeenCalledWith("owner-1", "project-1", "stop");
+    expect(mocks.stopByProject).toHaveBeenCalledWith("project-1");
     expect(mocks.spawn).toHaveBeenCalledOnce();
     expect(audit.log).toHaveBeenCalledOnce();
     expect(emit).toHaveBeenCalledWith(
       "restore:completed",
       expect.objectContaining({ status: "COMPLETED" }),
     );
+  });
+
+  it("aborts when containers of a workspace-less project cannot be confirmed stopped", async () => {
+    mocks.workspaceExists = false;
+    mocks.stopByProject.mockRejectedValue(new Error("containers still running"));
+    const { restore, audit } = setup("container-1");
+
+    await expect(restore()).rejects.toMatchObject({ code: "RESTORE_STOP_FAILED" });
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(audit.log).not.toHaveBeenCalled();
   });
 
   it("still aborts when the workspace exists and stopping fails", async () => {

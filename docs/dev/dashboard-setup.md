@@ -147,6 +147,29 @@ On screens narrower than `md` (768px):
 
 ---
 
+## Security Headers (#73)
+
+`next.config.ts` applies a `headers()` block to every route, built by `buildSecurityHeaders()` in `src/lib/securityHeaders.ts`:
+
+| Header | Value / purpose |
+|--------|-----------------|
+| `Content-Security-Policy` | `default-src 'self'`; `connect-src` limited to self plus the API origin (`NEXT_PUBLIC_API_URL`) over http(s) and ws(s) for Socket.io; `frame-src`/`object-src 'none'`; `base-uri`/`form-action 'self'`; `frame-ancestors 'none'` (clickjacking) |
+| `X-Frame-Options` | `DENY` (browsers without CSP `frame-ancestors`) |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Permissions-Policy` | camera, microphone and geolocation disabled |
+| `Strict-Transport-Security` | `max-age=31536000`, production only, no `includeSubDomains`/`preload` |
+
+**Known weakness:** `script-src` keeps `'unsafe-inline'` because Next.js emits inline bootstrap scripts and `next-themes` injects an inline theme script. Tightening it needs per-request nonces, which makes every page render dynamically; that is deliberately out of scope. `'unsafe-eval'` is added in development only (React Refresh).
+
+**Build-time value:** the API origin comes from `NEXT_PUBLIC_API_URL`, which is fixed at `next build` (Dockerfile `ARG`), so the policy always matches the origin the client bundle actually calls. A malformed value fails the build.
+
+**If you add a new external resource** (a CDN script, an embedded iframe, an image host, another API origin) it will be blocked until its origin is added to the matching directive in `securityHeaders.ts`. Watch the browser console for `Refused to ...` messages.
+
+Tests: `src/lib/securityHeaders.test.ts`.
+
+---
+
 ## Running Locally
 
 ```bash

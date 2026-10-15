@@ -21,5 +21,6 @@ All notable changes to Vexlyx are documented here. The format follows [Keep a Ch
 - GitHub App manifest OAuth configuration.
 - Production domain assignment and routing behavior.
 - System transactional email sender configuration.
+- Development Postgres, MySQL and Redis ports are bound to loopback only, and the MySQL healthcheck no longer exposes the root password in its command line.
 
 Release automation updates this file from Conventional Commits through git-cliff. See [`docs/dev/ci-cd.md`](docs/dev/ci-cd.md).

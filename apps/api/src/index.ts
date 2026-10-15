@@ -52,6 +52,7 @@ import { checkBackupScriptHealth } from "./modules/backups/service.js";
  */
 async function buildApp() {
   const app = Fastify({
+    trustProxy: env.TRUST_PROXY.length > 0 ? env.TRUST_PROXY : false,
     logger: {
       level: env.NODE_ENV === "production" ? "info" : "debug",
       // Pretty-print logs in development for readability

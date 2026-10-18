@@ -22,7 +22,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ApiRequestError } from "@/lib/api";
-import type { CreateProjectInput, ProjectType } from "@vexlyx/shared";
+import { fetchAPI } from "@/lib/api";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GitHubRepoPicker, type GitHubRepoSelection } from "./GitHubRepoPicker";
+import type { CreateProjectInput, Project, ProjectType } from "@vexlyx/shared";
 
 // ---------------------------------------------------------------------------
 // Project type options shown in the select dropdown
@@ -84,7 +87,7 @@ function validateForm(state: FormState): FormErrors {
 interface CreateProjectModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (data: CreateProjectInput) => Promise<unknown>;
+  onSubmit: (data: CreateProjectInput) => Promise<Project>;
 }
 
 export function CreateProjectModal({
@@ -95,6 +98,8 @@ export function CreateProjectModal({
   const [form, setForm] = useState<FormState>({ name: "", type: "", gitUrl: "" });
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [sourceMode, setSourceMode] = useState<"github" | "manual">("github");
+  const [githubSelection, setGitHubSelection] = useState<GitHubRepoSelection | null>(null);
 
   const handleOpenChange = (next: boolean) => {
     if (!isSubmitting) {
@@ -102,6 +107,8 @@ export function CreateProjectModal({
       if (!next) {
         setForm({ name: "", type: "", gitUrl: "" });
         setErrors({});
+        setSourceMode("github");
+        setGitHubSelection(null);
       }
     }
   };
@@ -117,12 +124,28 @@ export function CreateProjectModal({
 
     setIsSubmitting(true);
     try {
-      await onSubmit({
+      if (sourceMode === "github" && !githubSelection) {
+        toast.error("Select a GitHub repository and branch");
+        return;
+      }
+      const project = await onSubmit({
         name: form.name.trim(),
         type: form.type as ProjectType,
-        gitUrl: form.gitUrl.trim() || undefined,
-        branch: "main",
+        gitUrl: sourceMode === "manual" ? form.gitUrl.trim() || undefined : undefined,
+        branch: sourceMode === "github" ? githubSelection?.branch ?? "main" : "main",
       });
+      if (sourceMode === "github" && githubSelection) {
+        try {
+          await fetchAPI(`/api/projects/${project.id}/git/connect-github`, {
+            method: "POST",
+            body: JSON.stringify({ installationId: githubSelection.installationId, repositoryId: githubSelection.repositoryId, branch: githubSelection.branch }),
+          });
+        } catch {
+          toast.error("Project created, but GitHub cloning failed. Retry from the project's Git settings.");
+          handleOpenChange(false);
+          return;
+        }
+      }
       toast.success(`Project "${form.name}" created`);
       handleOpenChange(false);
     } catch (err) {
@@ -196,27 +219,15 @@ export function CreateProjectModal({
             )}
           </div>
 
-          {/* Git URL (optional) */}
-          <div className="space-y-1.5">
-            <Label htmlFor="project-git-url">
-              Git URL{" "}
-              <span className="text-xs text-muted-foreground font-normal">optional</span>
-            </Label>
-            <Input
-              id="project-git-url"
-              placeholder="https://github.com/user/repo"
-              type="url"
-              value={form.gitUrl}
-              onChange={(e) => {
-                setForm((prev) => ({ ...prev, gitUrl: e.target.value }));
-                if (errors.gitUrl) setErrors((prev) => ({ ...prev, gitUrl: undefined }));
-              }}
-              disabled={isSubmitting}
-            />
-            {errors.gitUrl && (
-              <p className="text-xs text-destructive">{errors.gitUrl}</p>
-            )}
-          </div>
+          <Tabs value={sourceMode} onValueChange={(value) => setSourceMode(value as "github" | "manual")}>
+            <TabsList className="grid w-full grid-cols-2"><TabsTrigger value="github">Import from GitHub</TabsTrigger><TabsTrigger value="manual">Manual Git URL</TabsTrigger></TabsList>
+            <TabsContent value="github" className="pt-3"><GitHubRepoPicker value={githubSelection} onChange={setGitHubSelection} disabled={isSubmitting} /></TabsContent>
+            <TabsContent value="manual" className="space-y-1.5 pt-3">
+              <Label htmlFor="project-git-url">Git URL <span className="text-xs font-normal text-muted-foreground">optional</span></Label>
+              <Input id="project-git-url" placeholder="https://github.com/user/repo" type="url" value={form.gitUrl} onChange={(e) => { setForm((prev) => ({ ...prev, gitUrl: e.target.value })); if (errors.gitUrl) setErrors((prev) => ({ ...prev, gitUrl: undefined })); }} disabled={isSubmitting} />
+              {errors.gitUrl && <p className="text-xs text-destructive">{errors.gitUrl}</p>}
+            </TabsContent>
+          </Tabs>
         </form>
 
         <DialogFooter>

@@ -1,0 +1,19 @@
+{
+  "name": "vexlyx-docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "sync-docs": "node scripts/sync-docs.mjs",
+    "dev": "node scripts/sync-docs.mjs && vitepress dev .",
+    "build": "node scripts/sync-docs.mjs && vitepress build .",
+    "preview": "vitepress preview ."
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  }
+}

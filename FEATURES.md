@@ -31,10 +31,10 @@ This document is the **single source of truth** for all Vexlyx features.
 | Phase 2: Multi-Runtime Support | 🟢 COMPLETED | 100% (8/8) |
 | Phase 3: Domain & DNS | 🟡 IN PROGRESS | 80% (4/5) |
 | Phase 4: Email Server | 🟡 IN PROGRESS | 88% (7/8) |
-| Phase 5: System & Administration | 🟡 IN PROGRESS | 45% (9/20) |
-| Phase 6: Ecosystem & Launch | 🔴 NOT STARTED | 0% (0/3) |
+| Phase 5: System & Administration | 🟡 IN PROGRESS | 40% (10/25) |
+| Phase 6: Ecosystem & Launch | 🟡 IN PROGRESS | 33% (1/3) |
 
-**Overall Completion:** 71% (42/59 features)
+**Overall Completion:** 69% (44/64 features)
 
 ---
 
@@ -1006,6 +1006,8 @@ Allow users to attach custom domains to projects. Validate domain ownership and 
 
 **Acceptance Criteria:**
 - [x] `POST /api/domains` — add domain to project
+- [x] `PATCH /api/domains/:id` — assign, move, or unassign an existing owned domain without deleting DNS, certificates, or mail (issue #14)
+- [x] Domain cards provide project assignment; project tabs offer to attach existing owned domains and confirm moves
 - [x] Domain validation via DNS TXT record
 - [x] `GET /api/domains` — list domains
 - [x] `DELETE /api/domains/:id` — remove domain
@@ -1845,21 +1847,23 @@ Closes gaps found while testing F5.5: there was no way to log out of the dashboa
 ---
 
 ### F5.9 — Onboarding: DNS Records & Public IP Visibility
-**Status:** 🟢 COMPLETED — verified live on `panel.mindgera.site`: fresh install detected the correct public IP, printed all four records, and the dashboard/API reflected them correctly
+**Status:** 🟢 COMPLETED — the original application-record flow was verified live on `panel.mindgera.site`; issue #40 extends the installer and dashboard checklist with the hosted-mail A/MX records and custom mail hostname/domain support
 
 **Description:**
 Neither the installer nor the dashboard ever tells the installing admin what DNS records to create or what IP to point them at. Confirmed by code audit: `system/scripts/install/config.sh` only prompts for the single panel domain (`VEXLYX_DOMAIN`); `steps/16-summary.sh` prints a generic "make sure your domain points here" warning without stating the server's actual public IP or listing the other hostnames that need records (`webmail.<domain>` for Roundcube, a wildcard `*.<domain>` for deployed project subdomains since `BASE_DOMAIN` defaults to the same zone as the panel — see `docker-compose.prod.yml`'s `BASE_DOMAIN: ${VEXLYX_DOMAIN}`). No code anywhere in the repo currently detects/exposes the server's public IP.
 
 **Acceptance Criteria:**
 - [x] Installer detects the server's public IP (e.g. via a simple external lookup, or the primary route's source address) and prints it plainly at the end of setup
-- [x] Installer lists every DNS record the admin needs to create: `A <domain> -> <ip>`, `A api.<domain> -> <ip>`, `A webmail.<domain> -> <ip>` (if mail is enabled), `A *.<domain> -> <ip>` (wildcard, for deployed project subdomains) — the `api.<domain>` record was added after live-server testing caught that it's genuinely required (not just covered by the wildcard) whenever `VEXLYX_BASE_DOMAIN` differs from `VEXLYX_DOMAIN`, since the dashboard's browser JS calls `https://api.<domain>` directly
+- [x] Installer lists every DNS record the admin needs to create: panel, API, webmail and project-wildcard A records, plus `A <VEXLYX_MAIL_HOSTNAME> -> <ip>` and `MX <VEXLYX_MAIL_DOMAIN> -> <VEXLYX_MAIL_HOSTNAME>` (priority 10) for inbound hosted mail — the `api.<domain>` record remains explicit whenever `VEXLYX_BASE_DOMAIN` differs from `VEXLYX_DOMAIN`
 - [x] The same information is available post-install in the dashboard (F5.11 Settings page) — `GET /api/system/dns-info` + the DNS Records & Public IP card, plus a live "Verify DNS" check
 - [x] Works whether the panel domain and the deployed-app base domain are the same zone (default) or configured separately (`VEXLYX_BASE_DOMAIN`)
+- [x] Custom `VEXLYX_MAIL_HOSTNAME` and `VEXLYX_MAIL_DOMAIN` values are preserved in installer output and Settings; inbound routing is kept separate from panel SPF/DKIM/DMARC guidance
 
 **Test Plan:**
 1. Run the installer against a fresh server → output clearly lists the IP and every required DNS record before finishing — ✅ verified on `panel.mindgera.site`
 2. Skip DNS setup, finish install anyway → dashboard Settings page still shows the same records/IP for later reference — ✅ verified
 3. Point DNS as instructed → panel, api, webmail, and a deployed test project's subdomain all resolve and load correctly — ✅ verified (`panel.mindgera.site`, `api.panel.mindgera.site`, `static-app.panel.mindgera.site` all serve real, trusted HTTPS)
+4. Exercise default and custom mail hostname/domain configurations → installer output and `GET /api/system/dns-info` contain the expected mail-host A and priority-10 mail-domain MX records; A/MX verification uses the matching DNS lookup type — covered by automated installer and API tests
 
 **Developer Docs:**
 - **Location:** `docs/dev/dns-onboarding.md`
@@ -2041,16 +2045,16 @@ Comparable tools all solve this: **Coolify** runs configurable automated cleanup
 ---
 
 ### F5.17 — Two-Factor Authentication (2FA/TOTP)
-**Status:** 🔴 NOT STARTED
+**Status:** 🟢 COMPLETED
 
 **Description:**
 Competitor audit (F5.5 follow-up): Plesk, cPanel/WHM, and CapRover all support 2FA on login, tied to their access-control system — Vexlyx currently has none, at any role. Given Vexlyx's ADMIN role has unrestricted access (including firewall and backups), this is a meaningfully higher-value security feature than for a typical SaaS app.
 
 **Acceptance Criteria:**
-- [ ] TOTP-based 2FA (compatible with standard authenticator apps), optional per-user, enforceable-by-policy for ADMIN (e.g. an env flag requiring it for the ADMIN role specifically)
-- [ ] Setup flow: QR code + manual secret entry, backup/recovery codes shown once
-- [ ] Login flow: password, then TOTP challenge if enabled, before session creation
-- [ ] Works alongside the existing Argon2id + Redis session auth (`apps/api/src/plugins/auth.ts`) without replacing it
+- [x] TOTP-based 2FA (compatible with standard authenticator apps), optional per-user, enforceable-by-policy for ADMIN (e.g. an env flag requiring it for the ADMIN role specifically)
+- [x] Setup flow: QR code + manual secret entry, backup/recovery codes shown once
+- [x] Login flow: password, then TOTP challenge if enabled, before session creation
+- [x] Works alongside the existing Argon2id + Redis session auth (`apps/api/src/plugins/auth.ts`) without replacing it
 
 **Test Plan:**
 1. Enable 2FA on an account → login requires password + valid TOTP code
@@ -2192,7 +2196,7 @@ Found live while testing custom domain attachment on `panel.mindgera.site`: afte
 ---
 
 ### F5.23 — System Transactional Email (Panel-to-User Notifications)
-**Status:** 🔴 NOT STARTED
+**Status:** 🟢 COMPLETED
 
 **Description:**
 Surfaced while planning F5.18 (Audit Log): Vexlyx has no way to email its own panel users for critical/informational events (password reset, security alerts like a new-role/2FA change, quota-warning notices, backup-failure notices, audit events, etc.). This is distinct from the existing `docker/postfix` stack (F4.1, completed), which is customer-facing mail *hosting* — it lets Vexlyx-hosted domains send/receive mail via their own mailboxes, with no involvement from the Vexlyx application itself. There is currently no password-reset flow, no email-verification flow, and no notification/email-template model in the schema at all — this would need to be built from scratch, not just wired up.
@@ -2205,13 +2209,13 @@ Surfaced while planning F5.18 (Audit Log): Vexlyx has no way to email its own pa
 - `User` model (`apps/api/prisma/schema.prisma:142`) has no `resetToken`, `emailVerified`, or similar fields; no `Notification`/`EmailTemplate` model exists anywhere in the schema.
 
 **Acceptance Criteria:**
-- [ ] Decide delivery mechanism (internal Postfix relay vs. third-party provider) — needs explicit user sign-off given CLAUDE.md's "no new dependencies without confirming" rule
-- [ ] Password-reset flow (request → emailed token → reset), since none exists today
-- [ ] Critical/security notifications: role change, 2FA enabled/disabled (once F5.17 ships), new login from unrecognized location (if in scope), backup failure
-- [ ] Quota-warning notification (approaching/at plan limits)
-- [ ] Simple email template system (plain layout + subject/body per event type), no marketing/HTML-builder scope
-- [ ] Per-install SMTP/provider configuration (env vars, documented in `.env.example` per CLAUDE.md §14 process)
-- [ ] Does not duplicate or interfere with the existing customer mail-hosting stack (F4.1)
+- [x] Decide delivery mechanism (internal Postfix relay vs. third-party provider) — needs explicit user sign-off given CLAUDE.md's "no new dependencies without confirming" rule
+- [x] Password-reset flow (request → emailed token → reset), since none exists today
+- [x] Critical/security notifications: role change, 2FA enabled/disabled (once F5.17 ships), backup failure (new login from unrecognized location deferred — needs login history)
+- [x] Quota-warning notification (approaching/at plan limits)
+- [x] Simple email template system (plain layout + subject/body per event type), no marketing/HTML-builder scope
+- [x] Per-install SMTP/provider configuration (env vars, documented in `.env.example` per CLAUDE.md §14 process)
+- [x] Does not duplicate or interfere with the existing customer mail-hosting stack (F4.1)
 
 **Test Plan:**
 1. Trigger password reset → email received with working, single-use, expiring token
@@ -2226,7 +2230,7 @@ Surfaced while planning F5.18 (Audit Log): Vexlyx has no way to email its own pa
 
 ### F5.24 — File Manager: Permissions (chmod) & Archive Extract/Compress
 
-**Status:** 🔴 NOT STARTED
+**Status:** 🟢 COMPLETED
 
 **Description:**
 Surfaced directly while live-testing F5.21 against a real Duplicator (WordPress migration) package: Duplicator's own `installer.php` handles its archive's extraction internally, but the File Manager itself (`apps/api/src/modules/files/`, `FileManagerCard.tsx` / the standalone `/projects/[id]/files` page) has no way to extract an arbitrary uploaded `.zip`/`.tar.gz` on the server, or to change a file/folder's permissions. Confirmed by reading `apps/api/src/modules/files/routes.ts`: today's routes are `list`, `read`, `create`, `write`, `delete`, `rename`, `mkdir`, `copy`, `move`, `download`, `upload` — no `extract`/`compress`, no `chmod`. For any uploaded archive that *isn't* a self-extracting installer (a plain site backup `.zip`, a theme/plugin `.zip`, a Composer vendor dump, etc.) the only way to get its contents onto disk today is to unzip it locally first and re-upload every file individually. Permissions matter for the same class of workflow: some installers/frameworks expect a config file at `640`/`600` or a writable `storage/`/`uploads/` directory at `755`, and there's currently no way to fix that without shell access to the host.
@@ -2246,11 +2250,11 @@ Surfaced directly while live-testing F5.21 against a real Duplicator (WordPress 
 5. Path-traversal safety matters more here than for existing routes: `extract` must resolve every entry inside the archive through the same `safePath` guard (`apps/api/src/modules/files/schema.ts`) already used elsewhere, rejecting any entry whose path would escape the project root (a malicious/zip-slip archive) — worth a dedicated test case, not just a general note.
 
 **Acceptance Criteria:**
-- [ ] File/folder permissions are viewable and editable from the File Manager UI (octal + checkbox editor), non-recursive by default
-- [ ] An uploaded `.zip` can be extracted into the current directory from the File Manager, with no shell/SSH access needed
-- [ ] A selection of files/folders can be compressed into a `.zip` from the File Manager
-- [ ] Archive extraction is hardened against zip-slip / path traversal (entries resolved through `safePath`, extraction rejected if any entry would land outside the project root)
-- [ ] No new dependency (npm package or system binary) is added without explicit user confirmation, per CLAUDE.md §6
+- [x] File/folder permissions are viewable and editable from the File Manager UI (octal + checkbox editor), non-recursive by default
+- [x] An uploaded `.zip` can be extracted into the current directory from the File Manager, with no shell/SSH access needed (also `.tar`, `.tar.gz`, `.tar.bz2`)
+- [x] A selection of files/folders can be compressed into a `.zip` from the File Manager
+- [x] Archive extraction is hardened against zip-slip / path traversal (whole archive rejected if any entry would land outside the project root; links, size and ratio limits enforced)
+- [x] No new dependency (npm package or system binary) is added without explicit user confirmation, per CLAUDE.md §6 — archives use the Python standard library
 
 **Test Plan:**
 1. Upload a `.zip` containing a small site → Extract → files appear in the correct directory with correct contents
@@ -2336,23 +2340,397 @@ Hosted DNS (F5.25) could not actually serve the internet: CoreDNS was bound to l
 
 ---
 
+### F5.28 — Scheduled Tasks (Cron Jobs)
+**Status:** 🔴 NOT STARTED
+
+**Description:**
+Users cannot schedule recurring work for their projects. A Laravel app needs `php artisan schedule:run` every minute, a WordPress site needs `wp-cron.php` triggered on a real schedule instead of on page views, and a Node or Python app often needs a nightly cleanup or report script. Today the only options are an external cron service or shell access to the host, and the panel deliberately gives users neither. The platform already schedules its own work with BullMQ (backups F5.3, Docker cleanup F5.15, both timezone-aware per F5.13), runs each project in its own container, and can email users (F5.23), so this feature adds a user-facing version of the same machinery: a command run **inside a project's container** on a cron schedule, with run history, a "Run now" button and failure emails.
+
+**Competitor research (2026):**
+- **cPanel**: a Cron Jobs page with common-interval presets and a free-form 5-field editor. Output of each run is emailed to the account by default, which is also its biggest annoyance (users silence it with `>/dev/null 2>&1`); the contact address is configurable. ([cPanel cron email behaviour](https://www.inmotionhosting.com/support/email/cron-job-email.md))
+- **Plesk**: "Scheduled Tasks" with three task types (run a command, fetch a URL, run a PHP script) and a notification choice per task: do not notify, errors only, every time. ([Plesk: scheduling tasks](https://www.plesk.com/kb/docs/scheduling-tasks-4/))
+- **HestiaCP**: a basic Cron section (add a command and a schedule, with simple presets); no run history, no output capture, no failure notification. ([Hestia cron guide](https://fornex.com/help/cron-hestia-cp/))
+- **Coolify**: Scheduled Tasks on an application or service, each with a name, command, 5-field cron or named frequency, timeout and target container; runs the command in a shell inside the running container. ([Coolify docs](https://coolify.io/docs/core/automation/scheduled-tasks/overview))
+- **Dokploy**: Schedule Jobs with four scopes (application, compose, server, Dokploy itself); application and compose jobs use `docker exec`, and every run writes a log entry with its output and status. ([Dokploy docs](https://docs.dokploy.com/docs/core/schedule-jobs))
+- **Takeaway**: the traditional panels offer presets and email but little observability; the PaaS tools run commands inside containers with a timeout and per-run logs. Vexlyx can combine both: Plesk-style presets and "errors only" notification on top of Coolify/Dokploy-style container execution and run history. Where it can differ: runs never touch the host, failures email **once per streak** instead of on every run, and the schedule respects the server timezone setting.
+
+**Proposed plan (for whoever picks this up):**
+1. **Data model** (one Prisma migration): `ScheduledTask` (`id`, `projectId`, `userId`, `name`, `command`, `schedule` (5-field cron), `timeoutSeconds` default 300, `enabled` default true, `notifyOnFailure` default true, `consecutiveFailures`, `lastRunAt`, timestamps; cascades with the project) and `ScheduledTaskRun` (`taskId`, `trigger` SCHEDULED or MANUAL, `status` RUNNING/SUCCESS/FAILED/TIMEOUT/SKIPPED, `exitCode`, `output` capped at 64 KB, `startedAt`, `finishedAt`; only the latest 50 runs per task are kept).
+2. **Module** `apps/api/src/modules/scheduled-tasks/` (`routes.ts`, `service.ts`, `schema.ts`, `scheduler.ts`) following the existing layering; Zod schemas shared via `packages/shared/src/schemas/scheduledTasks.ts`. Endpoints: list/create/update/delete under `/api/projects/:id/scheduled-tasks`, `POST .../:taskId/run` (run now), `GET .../:taskId/runs`.
+3. **Scheduling** mirrors `backups/scheduler.ts` and `cleanup/scheduler.ts`: one BullMQ `upsertJobScheduler` per task (`scheduled-task:<id>`) with `tz` from the F5.13 system timezone. All schedulers are re-armed on API boot, removed on disable or delete, and re-upserted when the timezone changes. Missed runs while the API was down are not back-filled (documented).
+4. **Execution goes through the Python system layer**, never from a route: add an `exec` action to `system/python/docker_manager.py` that runs `docker exec <container> sh -c <command>` with the command passed as an argument list (never interpolated into a host shell), a hard timeout, and an output cap. The container name is resolved at run time from the project (the `vexlyx-<service_name>-app-1` convention already used there), so a redeploy that replaces the container does not break the task.
+5. **Guards**: a Redis lock per task so a run never overlaps its predecessor (the new run is recorded as SKIPPED); a run is SKIPPED when the project is not running; minimum interval of one minute (6-field seconds expressions are rejected); command length capped at 2,000 characters; timeout 1 to 3,600 seconds.
+6. **Authorization and limits**: owners manage tasks of their own projects, resellers those of their sub-accounts, admins all (the same ownership scoping as projects). New nullable quota `maxScheduledTasks` on `User` through the F5.20 quota machinery (`assertUnderQuota`, `notifyQuotaThreshold`). Every create/update/delete/run-now is written to the audit log (F5.18).
+7. **Failure emails (F5.23)**: new `scheduled_task_failed` event, sent after 3 consecutive failures and not again until the task succeeds once. A per-task toggle turns it off.
+8. **UI**: a "Scheduled Tasks" panel on the project detail page next to the other panels (`apps/dashboard/src/components/projects/`): list with enable switch, last status and next run; create/edit dialog with presets (every minute, hourly, daily, weekly) plus a custom cron field that previews the next runs and labels the timezone; "Run now"; a run-history drawer showing output in the always-dark terminal style from the design system. Skeleton loading, empty state with a CTA, confirmation before delete, refresh button with the `isRefreshing` animation.
+9. **Presets for common stacks**: Laravel (`php artisan schedule:run`, every minute) and WordPress (`php wp-cron.php`, every 5 minutes; a note recommends setting `DISABLE_WP_CRON`). Confirm in the actual runtime images which binaries exist (for example `wp`) before shipping a preset that needs them.
+10. **Out of scope for the first version**: fetch-URL tasks (webhook style), host-level "server tasks" for admins, second-level schedules, job chaining or dependencies, per-run environment overrides, and importing an existing crontab. Track as follow-ups.
+
+**Risks to handle in the implementation:**
+- Users run arbitrary commands: contained to their own container and its resource limits; never `docker exec` on a container the user does not own (ownership check on every run, including scheduled ones).
+- Output can contain secrets: shown only to the project's owner (and admins), size-capped, never written to the application log at info level.
+- Many tasks firing in the same minute: BullMQ worker concurrency cap, and the one-minute minimum interval.
+- Daylight-saving transitions: rely on the cron library's `tz` handling and document that a 02:30 job may skip or repeat once a year.
+
+**Acceptance Criteria:**
+- [ ] A user can create, edit, enable/disable and delete scheduled tasks for their own project, with a 5-field cron expression and a command that runs inside the project's container
+- [ ] Tasks run on schedule in the configured server timezone (F5.13) and survive an API restart and a project redeploy
+- [ ] "Run now" executes a task immediately and the result appears in its run history
+- [ ] Each run records status, exit code, duration and capped output; only the latest 50 runs per task are kept
+- [ ] Runs are bounded by a timeout, never overlap for the same task, and are SKIPPED (not failed) when the project is not running
+- [ ] Commands execute through the Python system layer with an argument list, never through a host shell, and only in the owning project's container
+- [ ] Authorization: users see and manage only their own tasks, resellers their sub-accounts', admins all; unauthenticated calls return 401 and other users' tasks return 403/404
+- [ ] `maxScheduledTasks` quota enforced and shown like the other quotas, with F5.23 warnings at 80% and 100%
+- [ ] Failure email after 3 consecutive failures, sent once per failure streak, with a per-task opt-out
+- [ ] Create, update, delete and run-now are written to the audit log
+- [ ] Cron expressions faster than once a minute, invalid expressions and over-long commands are rejected with clear errors
+
+**Test Plan:**
+1. Create a task `echo hello` every minute on a running project → after a minute a run appears with status SUCCESS and output `hello`
+2. Create a task that sleeps longer than its timeout → run recorded as TIMEOUT and the process is gone from the container
+3. Create a task that exits non-zero three times in a row → exactly one failure email; succeed once, then fail three times again → a second email
+4. Stop the project → the next run is SKIPPED; start it again → runs resume without editing the task
+5. Redeploy the project (new container) → the task still runs in the new container
+6. Restart the API → schedules are restored; change the server timezone → next-run times shift accordingly
+7. As another user, call the endpoints for the first user's project → 403/404; signed out → 401
+8. Submit `* * * * * *` (seconds) and a 5,000-character command → both rejected
+9. Hit the `maxScheduledTasks` quota → creation refused with `QUOTA_EXCEEDED`
+
+**Developer Docs:**
+- **Location:** `docs/dev/scheduled-tasks.md`
+- **Contents:** data model, how scheduling and execution work (BullMQ to Python `exec`), guards and limits, how the timezone is applied, how to add a preset, how to test
+
+**Files to Create:**
+- `apps/api/src/modules/scheduled-tasks/{routes,service,schema,scheduler}.ts`
+- `packages/shared/src/schemas/scheduledTasks.ts`
+- `apps/api/prisma/migrations/<timestamp>_add_scheduled_tasks/migration.sql`
+- `apps/dashboard/src/components/projects/ScheduledTasksPanel.tsx` and `src/hooks/useScheduledTasks.ts`
+
+---
+
+### F5.29 — GitHub Integration (Connect Your GitHub Account, Pick a Repo, Auto-Deploy)
+**Status:** 🟢 COMPLETED
+
+**Description:**
+Connecting a repository today is manual and per project (F1.3, F2.7): the user pastes a Git URL, copies a generated SSH deploy key into the repository's settings on GitHub, then copies the webhook URL and secret into GitHub as well, and repeats all of it for every project. There is no way to sign in to GitHub from Vexlyx, so users cannot browse their repositories, private repositories need a deploy key each, and a mistyped URL is only discovered when the clone fails. This feature adds a first-class GitHub connection: the operator creates a GitHub App for the install once (one click), each user installs it on their GitHub account or organization, and from then on projects are created by **picking a repository and branch from a list**. Cloning uses short-lived tokens, and push-to-deploy webhooks are delivered by the App with nothing to copy by hand. The existing manual Git URL flow stays as the fallback for GitLab, Bitbucket, Gitea and self-hosted Git servers.
+
+**Competitor research (2026):**
+- **Coolify**: a "GitHub App" source that gives access to one repository, selected repositories or all repositories of an account or organization, with automatic deployments and pull-request events through one integration. It is created through GitHub's app **manifest flow** (permissions, webhook, credentials and callback are filled in automatically), with a manual path only for GitHub Enterprise or custom permissions; on a self-hosted instance the App can be made available system-wide to every team. Deploy keys remain available as the alternative. ([Coolify: Set up a GitHub App](https://coolify.io/docs/applications/sources/github/app), [Coolify: CI/CD with Git providers](https://coolify.io/docs/applications/ci-cd))
+- **Dokploy**: supports GitHub, GitLab, Bitbucket and Gitea as providers (its exact GitHub setup should be re-checked in its own docs before implementation). ([comparison](https://use-apify.com/blog/coolify-vs-dokploy-2026))
+- **GitHub's own guidance**: GitHub Apps are generally preferred over OAuth apps. Installation tokens carry only the permissions the app declared and only the repositories the installer selected, they expire after a short time (currently 1 hour) while OAuth tokens stay valid until revoked, and an App keeps working if the person who installed it leaves the organization. ([GitHub Apps vs OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/differences-between-github-apps-and-oauth-apps))
+- **Traditional panels (cPanel, Plesk, HestiaCP)**: Git support is "clone a URL (with a deploy key)", the same model Vexlyx has today; none of them offers a GitHub account connection or repository picker.
+- **Takeaway**: the self-hosted PaaS tools that users compare Vexlyx with already offer "connect GitHub, pick a repo". A GitHub App with a manifest-based setup is the established, least-privilege way to do it. Vexlyx can differ by keeping the manual flow fully working beside it, and by storing no long-lived GitHub token anywhere.
+
+**Implementation:**
+1. **GitHub App per install, created from a manifest.** An ADMIN opens Settings → GitHub and clicks "Create GitHub App". The API serves the manifest (name `Vexlyx (<panel domain>)`, homepage, OAuth callback and webhook URLs built from `API_BASE_URL`, never from request headers) and GitHub redirects back with a code that the API exchanges for the App's id, slug, private key, client secret and webhook secret. A "Use an existing GitHub App" manual form is the fallback for custom setups.
+2. **Minimal permissions**: Repository contents (read), Metadata (read); optionally Commit statuses or Deployments (write) as a later step for reporting deploy results on commits. Subscribed events: `push`, `installation`, `installation_repositories`.
+3. **Data model** (one Prisma migration): `GitHubApp` singleton (`appId`, `slug`, `clientId`, and `privateKey`, `clientSecret`, `webhookSecret` encrypted with the existing AES-256-GCM helper in `utils/encryption.ts`); `GitHubInstallation` (`installationId`, account identity, repository selection, owner and lifecycle state); and on `Project` the optional GitHub installation, repository identity, connection state and disconnect reason. A project with these set is connected through GitHub; without them it behaves exactly as today.
+4. **Linking an installation**: a user clicks "Connect GitHub", is sent to the App's installation page with a random, single-use `state` (stored in Redis, bound to their session, short TTL) and returns to the OAuth callback. The API proves the installation belongs to that user by checking it against `GET /user/installations` with the temporary user-to-server token, because the `installation_id` in the redirect can be forged. Users only ever see and use installations they linked themselves.
+5. **Tokens**: the API signs a short-lived RS256 JWT with the App's private key using Node's built-in `crypto` (no new dependency), exchanges it for an installation token (about one hour), and caches it only in process memory until shortly before expiry. No GitHub token is stored in Redis, the database or on disk.
+6. **Cloning without leaking the token**: the token is passed to `system/python/git_manager.py` on stdin like the rest of its payload and used for the clone and pull through a one-shot credential header or `GIT_ASKPASS`, so the remote URL stored in `.git/config` stays token-free. Builds (F1.4) and redeploys call the same path to fetch a fresh token each time.
+7. **Webhooks**: one App-level endpoint `POST /api/webhooks/github-app` verifies `x-hub-signature-256` with the App's webhook secret using the existing timing-safe verifier, de-duplicates on `x-github-delivery`, then looks up projects by numeric installation and repository IDs and queues matching-branch deployments. The per-project webhook route from F2.7 stays for manual projects. `installation` and `installation_repositories` events keep access and suspension state in sync; an uninstall disconnects affected projects without stopping their running containers.
+8. **Repository picker API**: `GET /api/github/installations`, paginated/searchable `GET /api/github/installations/:id/repositories`, and `GET .../repositories/:repoId/branches`; `POST /api/projects/:id/git/connect-github` revalidates access, records the repository and runs the first clone. All routes are scoped to the caller's own installations.
+9. **UI**: a Settings → GitHub card (admin: create/replace the App and see its status; every user: connect, list and disconnect their installations); an "Import from GitHub" tab in the project creation flow with a searchable repository list and a branch select; in `GitSettings.tsx` a connected project shows `owner/repo`, the branch and "Connected via GitHub", hides the SSH key and webhook sections, and offers "Switch to manual URL". Empty and error states explain what to do when the install has no public HTTPS panel URL (GitHub cannot reach `localhost`), with a pointer to a tunnel for local development.
+10. **Audit log** (F5.18) entries for creating or replacing the App, linking or unlinking an installation, and connecting a project to a repository. Secrets and tokens are never part of audit metadata or logs.
+11. **Out of scope for the first version**: GitLab, Bitbucket and Gitea account connections (the provider interface should be shaped so they can follow), pull-request preview deployments, GitHub Enterprise Server base-URL support beyond the manual App form, writing commit statuses or deployments back to GitHub, and bulk-creating a project per repository. Track as follow-ups.
+
+**Risks to handle in the implementation:**
+- Stolen or forged `installation_id` in the setup redirect: verify ownership as described in step 4; reject and audit mismatches.
+- App private key and webhook secret are high-value: encrypt at rest, never return them from any API response, and keep them out of logs and error messages.
+- Webhook replay or forgery: signature check on the raw body, delivery-id de-duplication, and the existing branch filter.
+- A user must not deploy a repository they cannot access: repository selection is always resolved through the user's own installation, and the repository id is re-checked at clone time.
+- GitHub API rate limits and large accounts: paginate, search server-side, and cache repository lists for a short time.
+- Operators without a public HTTPS URL cannot receive webhooks: detect this up front and say so instead of failing silently.
+
+**Acceptance Criteria:**
+- [x] An admin can create the GitHub App for the install from Settings with one click (manifest flow), or enter an existing App's credentials; its private key, client secret and webhook secret are stored encrypted and never returned by the API
+- [x] A user can connect their own GitHub account or organization to the panel and disconnect it again; other users cannot see or use that installation
+- [x] Creating or editing a project offers a searchable list of the repositories the installation can access, with a branch selector, and connecting performs the first clone with no SSH key or URL typing
+- [x] Private repositories work without a per-repository deploy key
+- [x] Cloning, pulling and building use short-lived installation tokens fetched on demand; no GitHub token is persisted in the database or on disk, and the stored remote URL contains no credentials
+- [x] Pushing to the connected branch triggers a deployment through the App webhook with no manual webhook setup; pushes to other branches are ignored, and a repeated delivery id is processed once
+- [x] Webhook requests with a missing or invalid signature are rejected with 401
+- [x] Uninstalling the App, removing a repository from it, or suspending it disconnects the affected projects cleanly without stopping their running containers, and the dashboard says why
+- [x] Projects connected the manual way (Git URL, SSH key, per-project webhook) keep working unchanged
+- [x] Forged or mismatched installation ids in the setup redirect are rejected
+- [x] Linking, unlinking, App creation and repository connection are written to the audit log
+- [x] Unauthenticated calls return 401 and calls for another user's installation or repository return 403/404
+
+**Test Plan:**
+1. As admin, click "Create GitHub App" on a server with a public HTTPS panel URL → GitHub shows the pre-filled manifest, and after confirming, Settings shows the App as connected
+2. As a user, connect a GitHub account → the account appears; as a second user, it does not
+3. Create a project via "Import from GitHub", choose a private repository and a branch → it clones and builds with no deploy key
+4. Push a commit to that branch → a deployment starts within seconds; push to another branch → no deployment
+5. Replay the same webhook delivery → processed once; send it with a wrong signature → 401
+6. Inspect the cloned project's `.git/config` and the database → no token anywhere
+7. Remove the repository from the installation on GitHub → the project shows "disconnected", its container keeps running, and switching to the manual URL flow works
+8. Tamper with `installation_id` in the setup redirect → linking is rejected
+9. Run the same flow on a server without a public HTTPS URL → the card explains why GitHub cannot be connected instead of failing
+10. Existing manual-flow project → still deploys on its own webhook exactly as before
+
+**Developer Docs:**
+- **Location:** `docs/dev/github-integration.md`
+- **Contents:** App creation and permissions, the linking and verification flow, token lifecycle, webhook handling, how repository selection is authorized, how to add another Git provider, how to test locally with a tunnel
+
+**Files to Create:**
+- `apps/api/src/modules/github/{client,routes,service,schema,tokens}.ts`
+- `apps/api/src/modules/webhooks/github-app.ts` (App webhook handler reusing `WebhookService`)
+- `packages/shared/src/schemas/github.ts`
+- `apps/api/prisma/migrations/<timestamp>_add_github_integration/migration.sql`
+- `apps/dashboard/src/components/settings/GitHubCard.tsx`, `src/components/projects/GitHubRepoPicker.tsx`, `src/hooks/useGitHub.ts`
+- `apps/api/src/modules/github/tokens.test.ts`
+- `tests/test_github_app_git_credentials.py`
+- `docs/dev/github-integration.md`
+
+---
+
+### F5.30 — Redis Instances
+**Status:** 🔴 NOT STARTED
+
+**Description:**
+Users can create PostgreSQL and MySQL databases (F2.6) but have no key-value store: an app that needs a cache, a session store or a job queue (BullMQ, Sidekiq, Celery, Laravel queues) has to bundle its own Redis in its project or go without. This feature lets a user create a **Redis instance** from the dashboard: a dedicated, password-protected Redis container with a memory limit that their projects reach over the internal Docker network, with a ready-to-paste connection URL. It is a standalone feature with its own module, table, manager script, quota and UI, and does not depend on any other database feature.
+
+**Why a container per instance (not a shared server):** Redis has no real multi-tenancy. Logical databases (0-15) share one memory pool, one CPU thread and one set of dangerous commands (`FLUSHALL`, `CONFIG`, `KEYS`, `DEBUG`), and one tenant can evict or wipe another's keys. PostgreSQL and MySQL are shared because a per-database user is a real isolation boundary there; for Redis the boundary is the container. The panel's own `vexlyx-redis` (sessions, BullMQ queues, rate limits, `allkeys-lru` eviction) must **never** be used for tenant data.
+
+**Competitor research (2026):**
+- **Coolify**: one-click Redis (and the Redis-compatible Dragonfly and KeyDB) as a standalone container with its own volume; default port 6379. Database-aware scheduled backups exist for PostgreSQL, MySQL, MariaDB, MongoDB and ClickHouse but, per its docs, not for the Redis family, which only get persistent storage. It also states a one-click database is not a managed cluster (no replication or failover). ([Coolify: choose a database](https://coolify.io/docs/databases/choose-a-database), [Coolify: backups](https://coolify.io/docs/knowledge-base/databases/backups))
+- **Dokploy**: Redis is created like any other database service with a name, password and image, a Docker volume at `/data`, optional memory and CPU limits and reservations, and an optional external port; its docs advise setting `maxmemory` and an eviction policy so Redis cannot consume the host's memory, and keeping databases on internal networks where possible. ([Dokploy databases](https://docs.dokploy.com/docs/core/databases), [Redis page (mirror)](https://www.mintlify.com/Dokploy/dokploy/databases/redis))
+- **cPanel / Plesk / HestiaCP**: no managed Redis for users out of the box (MySQL/MariaDB and PostgreSQL only); caching on those panels usually means a host-level Redis the user cannot manage themselves.
+- **Takeaway**: the PaaS tools treat Redis as "one container per instance with limits and an internal address", which is also the only safe model here. Where Vexlyx can differ: a hard per-instance memory cap by default, no public port unless explicitly opted in later, and quota and usage shown next to the user's other databases.
+- **Licensing note**: Redis moved to RSALv2/SSPL from 7.4 and added AGPLv3 with 8.0; Valkey is the BSD-licensed fork of Redis 7.2.4. The implementation must choose and document one pinned image line (for example a BSD-licensed Redis 7.2.x or Valkey) rather than pull `latest`. ([Redis licensing summary](https://www.infoq.com/news/2025/05/redis-agpl-license))
+
+**Proposed plan (for whoever picks this up):**
+1. **Data model** (own migration, own table; does **not** extend `DatabaseType` or the `Database` model): `RedisInstance` (`id`, `userId`, `projectId?`, `name` unique per user, `containerName`, `imageTag`, `memoryLimitMb`, `evictionPolicy`, `persistence` NONE/RDB/AOF, `passwordEncrypted` (AES-256-GCM via `utils/encryption.ts`), `status` CREATING/RUNNING/STOPPED/ERROR/DELETED, timestamps).
+2. **Module** `apps/api/src/modules/redis/` (`routes.ts`, `service.ts`, `schema.ts`), schemas shared via `packages/shared/src/schemas/redis.ts`. Endpoints under `/api/redis`: create, list, get, start/stop/restart, update limits, rotate password, delete, and `GET /:id/stats`.
+3. **System layer**: a new `system/python/redis_manager.py`, following `database_manager.py` (JSON on stdin, JSON on stdout, strict identifier validation, argument lists only, a hard timeout). It starts `redis-server` with `--requirepass`, `--maxmemory`, `--maxmemory-policy`, `--appendonly`/`--save` from the settings, a Docker memory limit slightly above `maxmemory`, a named volume at `/data`, a restart policy, and a healthcheck. The password is passed through an environment file or config mount, never on a command line visible in `ps`.
+4. **Network**: instances join the same internal Docker network project containers use (the F2.6 "accessible only from project containers" model) and publish **no** host port. The connection URL uses the container hostname: `redis://:<password>@<container>:6379`. Public exposure is explicitly out of scope for the first version.
+5. **Safe defaults**: default `memoryLimitMb` 64, admin-configurable maximum (`REDIS_MAX_MEMORY_MB`), `evictionPolicy` default `noeviction` for queues with an `allkeys-lru` preset for caches, persistence default RDB, `protected-mode` on, dangerous administrative commands disabled for the instance.
+6. **Linking to a project**: optionally set `REDIS_URL` in the project's environment variables (F1.7) from the instance, so the next deploy picks it up; unlinking removes it.
+7. **Usage and limits**: new nullable quota `maxRedisInstances` on `User` through the F5.20 quota machinery (`assertUnderQuota`, F5.23 warnings via `notifyQuotaThreshold`); list and detail show memory used vs limit, key count and uptime from `INFO`, refreshed on demand.
+8. **UI**: a "Redis" page next to Databases: list with status, memory and a "Create instance" dialog (name, version, memory, preset: cache/queue/persistent), detail page with connection URL (password revealed on demand, copy button), start/stop/restart, change limits, rotate password, and delete with typed-name confirmation. Skeletons, empty state with CTA, refresh button animation per the design system.
+9. **Lifecycle and safety**: deleting an instance removes the container and volume after confirmation; an instance that exceeds its memory limit is restarted by Docker, not left to starve the host; admins see all instances and can stop any of them. Create, delete, rotate and limit changes are written to the audit log (F5.18); the password never appears in logs, audit metadata or list responses.
+10. **Out of scope for the first version**: public host port / TLS, replication, Sentinel or cluster mode, a built-in web browser for keys, and scheduled backups of Redis data (RDB file download from the volume is a possible follow-up).
+
+**Risks to handle in the implementation:**
+- Sharing the panel's own Redis with tenants would let a tenant read or evict sessions and queues; the manager must never address `vexlyx-redis`.
+- A user with no memory cap can exhaust the host: always set both `maxmemory` and a Docker limit, and cap the admin maximum.
+- Passwords on command lines leak through `ps` and Docker inspect; pass them through a file or environment source that is not logged.
+- Container-name collisions across users (the F5.21 "bare service name" bug class): always use a unique, Compose-independent container name.
+- Orphaned containers and volumes when a delete half-fails (the F5.21 teardown bug class): tear down both and log, without making the instance undeletable.
+- The image line has a licence decision attached; do not float on `latest`.
+
+**Acceptance Criteria:**
+- [ ] A user can create, list, start, stop, restart and delete Redis instances from the dashboard and API, each running in its own container with a password
+- [ ] Each instance has an enforced memory limit (`maxmemory` plus a Docker limit) and a chosen eviction policy and persistence mode
+- [ ] The connection URL works from a project container on the internal network and the instance publishes no host port
+- [ ] The panel's own Redis is never reachable through this feature
+- [ ] The password is encrypted at rest, can be rotated, and is never returned by list endpoints or written to logs or the audit log
+- [ ] `maxRedisInstances` quota enforced and shown like the other quotas, with F5.23 warnings at 80% and 100%
+- [ ] Users see and manage only their own instances; admins see all; unauthenticated calls return 401 and other users' instances return 403/404
+- [ ] Deleting an instance removes its container and volume; a failed teardown is reported but does not leave the instance stuck
+- [ ] Create, update, rotate and delete are written to the audit log
+- [ ] The image is pinned to a documented version line, and the licence choice is recorded in the docs
+- [ ] The feature works with PostgreSQL/MySQL provisioning (F2.6) untouched, and can ship without any other new database feature
+
+**Test Plan:**
+1. Create an instance with 64 MB → container running, `redis-cli -a <password> ping` from a project container returns PONG
+2. Connect without the password or from the host → refused or unreachable
+3. Fill it past 64 MB with the `noeviction` policy → writes fail with an OOM error, the host is unaffected; with `allkeys-lru` → old keys are evicted
+4. Rotate the password → the old password stops working, the new one works
+5. Stop and start → data survives with RDB persistence, is gone with persistence NONE
+6. Delete → container and volume are removed and the name can be reused
+7. As another user, call the endpoints for the first user's instance → 403/404; signed out → 401
+8. Reach the quota → creation refused with `QUOTA_EXCEEDED`
+9. Confirm `vexlyx-redis` (the panel's) is untouched and still serving sessions throughout
+
+**Developer Docs:**
+- **Location:** `docs/dev/redis-instances.md`
+- **Contents:** isolation model and why a container per instance, data model, lifecycle, limits and eviction presets, networking and the connection URL, licence decision, how to test, how to extend
+
+**Files to Create:**
+- `system/python/redis_manager.py`
+- `apps/api/src/modules/redis/{routes,service,schema}.ts`
+- `packages/shared/src/schemas/redis.ts`
+- `apps/api/prisma/migrations/<timestamp>_add_redis_instances/migration.sql`
+- `apps/dashboard/src/app/(panel)/redis/page.tsx`, `src/components/redis/*`, `src/hooks/useRedis.ts`
+
+---
+
+### F5.31 — MongoDB Databases
+**Status:** 🔴 NOT STARTED
+
+**Description:**
+Users can create PostgreSQL and MySQL databases (F2.6) but not a document database. Node.js, Python and PHP apps built on MongoDB (Mongoose, Prisma with MongoDB, PyMongo) have to bundle their own MongoDB container or use an external service. This feature lets a user create a **MongoDB database** from the dashboard: a database and a dedicated database user with a generated password on a MongoDB server managed by the panel, a connection string for their projects, and clean removal. It is a standalone feature with its own module, table, manager script, quota and UI, and does not depend on the Redis feature or any other database feature.
+
+**Isolation model:** one shared `mongod` container with authentication enabled, and one database plus one user per created database, where the user holds the `readWrite` role on that database only. This mirrors how F2.6 isolates PostgreSQL and MySQL tenants, and avoids running one memory-hungry `mongod` per user (WiredTiger's cache defaults to roughly half of available RAM, so each extra process would otherwise compete for the host's memory). The WiredTiger cache is capped and the container gets a Docker memory limit.
+
+**Competitor research (2026):**
+- **Coolify**: one-click MongoDB as its own container (default port 27017), and database-aware scheduled backups for MongoDB (together with PostgreSQL, MySQL, MariaDB and ClickHouse) to local storage or an S3-compatible bucket. Its docs state a one-click database is not a managed cluster. ([Coolify: choose a database](https://coolify.io/docs/databases/choose-a-database), [Coolify: backups](https://coolify.io/docs/knowledge-base/databases/backups))
+- **Dokploy**: MongoDB created like any other database service, with a Docker volume at `/data/db`, optional memory and CPU limits, an optional external port and an optional single-member replica set (`rs0`) for apps that need transactions; connection strings differ for internal and external access. ([Dokploy databases](https://docs.dokploy.com/docs/core/databases), [MongoDB page (mirror)](https://www.mintlify.com/Dokploy/dokploy/databases/mongodb))
+- **cPanel / Plesk / HestiaCP**: MySQL/MariaDB and PostgreSQL only for end users; MongoDB is not part of the standard user-facing database offer.
+- **Takeaway**: PaaS panels give MongoDB its own container per resource; traditional panels do not offer it at all. Vexlyx can offer it with per-user databases on one managed server (cheaper on RAM and consistent with F2.6), internal-only by default, with the backup integration (F5.3) as the differentiator.
+- **Licensing question that needs a decision before building**: MongoDB Community Server is published under the Server Side Public License (SSPL), which is not OSI-approved and contains a clause aimed at offering the database's functionality to third parties as a service. Running an unmodified `mongod` for your own users on your own server is likely fine, but a panel that exposes "create a MongoDB database" to other people is exactly the situation to have reviewed. The maintainers must record a decision in the docs, and consider wire-compatible alternatives (for example FerretDB, Apache-2.0, backed by PostgreSQL) as a follow-up or a swap-in. Do not assume either way.
+
+**Proposed plan (for whoever picks this up):**
+1. **Data model** (own migration, own table; does **not** extend `DatabaseType` or the `Database` model, so Adminer and the SQL tooling are untouched): `MongoDatabase` (`id`, `userId`, `projectId?`, `name`, `dbUser`, `passwordEncrypted` (AES-256-GCM via `utils/encryption.ts`), `status`, timestamps; unique `(userId, name)`; the real database name is namespaced so two users can never collide).
+2. **Module** `apps/api/src/modules/mongodb/` (`routes.ts`, `service.ts`, `schema.ts`), schemas shared via `packages/shared/src/schemas/mongodb.ts`. Endpoints under `/api/mongodb`: create, list, get, delete, rotate password, test connection, and `GET /:id/stats` (size, collections, indexes from `dbStats`).
+3. **Server container**: a `mongodb` service in `docker-compose.yml` (pinned image line, auth enabled, named volume, healthcheck, WiredTiger cache cap, Docker memory limit, internal network only, no published port), with the root credentials generated once by the installer into the secrets file like the Postgres and MySQL passwords, and the installer step idempotent on re-runs and upgrades.
+4. **System layer**: a new `system/python/mongodb_manager.py`, following `database_manager.py` (strict identifier validation, JSON in and out, a hard timeout). It runs `mongosh` through `docker exec` with the script and credentials passed as data, never concatenated into a shell string, to create the database and user (`createUser` with `readWrite` on that database only), drop both on delete, change the password, and report stats. Root credentials stay inside the API/manager and are never returned.
+5. **Connection string**: `mongodb://<user>:<password>@mongodb:27017/<db>?authSource=<db>` for the internal network. No host port in the first version.
+6. **Linking to a project**: optionally set `MONGODB_URL` in the project's environment variables (F1.7) from the database.
+7. **Backups (F5.3)**: include MongoDB databases in snapshots with `mongodump --archive --gzip` for the one database (via `docker exec`, streamed like the existing SQL dumps) and restore with `mongorestore`, so users do not get a database that silently falls outside backups.
+8. **Limits**: new nullable quota `maxMongoDatabases` on `User` through the F5.20 quota machinery with F5.23 warnings; an optional per-database size limit is a follow-up.
+9. **UI**: a "MongoDB" page next to Databases: list, "Create database" dialog (name, optional project to link), a detail page with the connection string (password revealed on demand, copy button), size and collection count, rotate password, test connection, and delete with typed-name confirmation. Skeletons, empty state with CTA, refresh animation per the design system.
+10. **Audit log** (F5.18) entries for create, delete and password rotation; passwords never appear in logs, audit metadata or list responses.
+11. **Out of scope for the first version**: public host port or TLS, a web admin UI such as mongo-express (Adminer does not cover MongoDB), replica sets and sharding, per-user server instances, and importing an existing dump from the UI.
+
+**Risks to handle in the implementation:**
+- The `mongod` root credentials give access to every tenant: keep them out of API responses, logs, error messages, the process list and the project containers' environment.
+- Script injection through names or passwords into `mongosh --eval`: validate identifiers strictly, pass values as data (for example through stdin or `--eval` with JSON-encoded arguments), never string-concatenate.
+- Memory pressure from a shared server: cap the WiredTiger cache and the container, and surface usage to admins.
+- Data directory growth with no per-database quota: show size per database and plan the follow-up limit.
+- A database that survives a half-failed delete (user dropped but data kept, or the reverse): make delete idempotent and re-runnable.
+- The licence question above.
+
+**Acceptance Criteria:**
+- [ ] A user can create, list, delete, test and rotate the password of MongoDB databases from the dashboard and API; each gets its own database and a user limited to that database
+- [ ] The MongoDB server requires authentication and publishes no host port; the connection string works from a project container on the internal network
+- [ ] One user's credentials cannot read or list another user's database
+- [ ] Root credentials are generated once by the installer, never returned by the API and never present in logs, audit metadata or project environments
+- [ ] Database and user names are validated and cannot inject script into the manager
+- [ ] The password is encrypted at rest, can be rotated, and is never returned by list endpoints
+- [ ] MongoDB databases are included in backup snapshots and can be restored (F5.3)
+- [ ] `maxMongoDatabases` quota enforced and shown like the other quotas, with F5.23 warnings at 80% and 100%
+- [ ] Users see and manage only their own databases; admins see all; unauthenticated calls return 401 and other users' databases return 403/404
+- [ ] Deleting a database drops both the database and its user, and can be retried safely after a partial failure
+- [ ] Create, delete and rotate are written to the audit log
+- [ ] The licensing decision for MongoDB is recorded in the docs before release
+- [ ] PostgreSQL/MySQL provisioning (F2.6) is untouched, and the feature ships without requiring any other new database feature
+
+**Test Plan:**
+1. Create a database → server shows the database and a user with only `readWrite` on it
+2. From a project container, connect with the connection string and insert and read a document → works
+3. Connect with the user to a different database or run `show dbs` for others → denied
+4. Connect without credentials, and from the host → refused or unreachable
+5. Rotate the password → old password fails, new one works
+6. Create a snapshot and restore it after dropping the data → documents are back
+7. Create a database named with quotes, `$`, `;` or JS injection → rejected by validation
+8. Delete → database and user are gone and the name can be reused; interrupt a delete mid-way and retry → completes
+9. As another user, call the endpoints for the first user's database → 403/404; signed out → 401
+10. Reach the quota → creation refused with `QUOTA_EXCEEDED`
+
+**Developer Docs:**
+- **Location:** `docs/dev/mongodb-databases.md`
+- **Contents:** isolation model, data model, installer and compose changes, manager script and how scripts are passed safely, backups, licensing decision, limits, how to test, how to extend
+
+**Files to Create:**
+- `system/python/mongodb_manager.py`
+- `apps/api/src/modules/mongodb/{routes,service,schema}.ts`
+- `packages/shared/src/schemas/mongodb.ts`
+- `apps/api/prisma/migrations/<timestamp>_add_mongodb_databases/migration.sql`
+- `apps/dashboard/src/app/(panel)/mongodb/page.tsx`, `src/components/mongodb/*`, `src/hooks/useMongoDb.ts`
+
+---
+
+### F5.32 — Anonymous Usage Statistics (Opt-In Telemetry)
+**Status:** 🔴 NOT STARTED
+
+**Description:**
+Vexlyx is self-hosted, so the maintainers have no way to know how many installs exist, which versions are in use, or whether a release was adopted: the only signals are GitHub stars and clones, docs traffic, and (once releases exist) download and image-pull counts, none of which measures real installs. This feature adds **opt-in, anonymous, transparent** usage statistics: an admin can choose to let their panel send a small, fixed, documented payload once a day, which lets the project count active installs and see the version spread. It is off until an admin turns it on, shows exactly what it would send, and can be switched off at any time or forced off by the operator. It never sends anything that identifies a person, a domain, a server or a project.
+
+**Design principles (non-negotiable):**
+1. **Opt-in, never opt-out.** The default is off; nothing is sent until an admin explicitly enables it.
+2. **Transparent.** The exact payload is visible in the dashboard before and after enabling, and the schema is published in the docs. The payload is built from an allow-list of fields, so adding a field requires a code change, a schema version bump and a docs update.
+3. **Anonymous by construction.** No emails, names, hostnames, domains, IP addresses, project or repository names, secrets, logs or error messages. Counts are bucketed, not exact.
+4. **Operator stays in control.** A hard off-switch (`VEXLYX_TELEMETRY=off`), respect for the `DO_NOT_TRACK=1` convention, and a configurable collector URL for operators who want to inspect or redirect the traffic.
+5. **Never breaks the panel.** Short timeout, no retries beyond the next scheduled run, no effect on any request, and silent in the logs apart from one debug line.
+
+**What is sent (schema v1):**
+
+| Field | Example | Notes |
+| --- | --- | --- |
+| `schemaVersion` | `1` | Bumped whenever the field list changes |
+| `installId` | random UUID v4 | Generated only when telemetry is first enabled; not derived from hardware, hostname, domain or IP; resettable |
+| `vexlyxVersion` | `0.3.1` | From `VEXLYX_VERSION` |
+| `nodeMajor`, `os`, `arch` | `22`, `linux`, `x64` | Runtime environment only |
+| `environment` | `production` | `production` only; development and test installs never send |
+| `counts` | `{ "users": "2-5", "projects": "6-20", "domains": "1", ... }` | Buckets `0`, `1`, `2-5`, `6-20`, `21-100`, `>100` for users, projects, domains, databases and mailboxes |
+| `features` | `{ "githubIntegration": true, "systemEmail": "bundled" }` | A few booleans/enums about which optional features are configured, never their settings |
+
+**Proposed plan (for whoever picks this up):**
+1. **Data model** (one Prisma migration): a `TelemetrySettings` singleton row (`enabled` default false, `installId` nullable, `decidedAt`, `decidedById`, `promptDismissedAt`, `lastSentAt`, `lastStatus`), following the singleton pattern used by `BackupSettings` and `CleanupSettings`.
+2. **Module** `apps/api/src/modules/telemetry/` (`routes.ts`, `service.ts`, `schema.ts`, `scheduler.ts`), with the payload schema shared via `packages/shared/src/schemas/telemetry.ts`. ADMIN-only endpoints: `GET /api/telemetry` (status, whether the operator forced it off, last result and the **exact payload that would be sent**), `PUT /api/telemetry` (`{ enabled }`), `POST /api/telemetry/reset-id`.
+3. **Payload builder** is a pure function over counts the service reads from the database, using the bucket table above; unit tests assert the output contains only allow-listed keys and that no value from the database (an email, a hostname, a project name) can appear in it.
+4. **Scheduling** mirrors `backups/scheduler.ts`: one BullMQ job scheduler, daily at a minute derived from the install id (so installs do not all ping at once), with the first send shortly after enabling. One `POST` with a 5-second timeout; any failure is recorded in `lastStatus` and not retried until the next run. Never sends when `NODE_ENV` is not `production`, or when disabled.
+5. **Operator controls** (validated in `env.ts`, documented in `.env.example` and the docs): `VEXLYX_TELEMETRY` (`off` forces it off and hides the prompt; `on` pre-enables it for operators who consent through configuration management; unset leaves the choice to the admin), `DO_NOT_TRACK=1` forces it off, and `TELEMETRY_URL` points at a different collector.
+6. **Installer** asks once during an interactive install, with the default "No": "Share anonymous usage statistics to help the project? (y/N)". Non-interactive installs pass `VEXLYX_TELEMETRY`; the summary states the current setting and how to change it. Re-running the installer never flips an earlier choice.
+7. **UI**: a "Usage statistics" card in Settings (admin only) with the on/off switch, a "See exactly what is sent" panel showing the live payload and when it was last sent, "Reset install ID", and a link to the privacy page. A one-time dismissible prompt for admins on first login, with "No thanks" as prominent as "Share", and no repeated nagging after dismissal.
+8. **Audit log** (F5.18): `telemetry.enabled`, `telemetry.disabled`, `telemetry.id_reset`.
+9. **Collector** (separate small service run by the maintainers, specified here and implemented outside this repo or under `tools/`): `POST /v1/ping` validating the published schema, storing only `installId`, first and last seen, version and the bucketed values, discarding IP addresses and user agents at the edge, rate-limited per install id. It publishes aggregates only: active installs over 7 and 30 days, installs by version, and a trend line. A reference implementation and the deployment notes live in the docs so the numbers can be audited.
+10. **Docs and privacy**: `docs/dev/telemetry.md` and a short public privacy page covering the schema, what is never collected, retention (for example, an install not seen for 90 days is dropped), how to opt out, and how to ask for an install id to be deleted.
+11. **Out of scope for the first version**: crash or error reporting, feature-click analytics, per-user tracking of any kind, and an "update available" check. The update check is a natural follow-up that can reuse the same endpoint, but it must stay separate from statistics and be just as transparent.
+
+**Risks to handle in the implementation:**
+- Scope creep in the payload: the allow-list and schema-version rule exist so that nobody quietly adds fields; reviewers should treat a payload change like a privacy change.
+- A stable `installId` is pseudonymous: generate it only after consent, make it resettable, and delete the row on disable if the operator asks.
+- Opt-in will undercount: the collector's numbers are a lower bound, and the docs and public page must say so rather than present them as exact.
+- Outbound calls from a server that otherwise sends nothing: the `off` switch, the `TELEMETRY_URL` override and the payload preview exist so operators can verify this themselves.
+- The collector becomes a piece of infrastructure to run and secure: keep it tiny, stateless where possible, and separate from the panel's own services.
+
+**Acceptance Criteria:**
+- [ ] Nothing is sent by a fresh install, an upgraded install or a development environment until an admin explicitly enables statistics
+- [ ] An admin can enable and disable statistics from Settings, see the exact payload that would be sent, and reset the install id
+- [ ] `VEXLYX_TELEMETRY=off` and `DO_NOT_TRACK=1` force statistics off regardless of the stored choice and hide the prompt; the dashboard says why it is off
+- [ ] The payload contains only the allow-listed fields of the published schema, with bucketed counts, and no email, name, hostname, domain, IP address, project or repository name, secret or log text
+- [ ] The install id is a random UUID created only after consent and is deleted or regenerated on reset
+- [ ] Sends are limited to one a day, time out after 5 seconds, never retry in a loop and never affect request handling or startup
+- [ ] The installer asks once with default "No" and never changes an earlier choice on re-run
+- [ ] Enabling, disabling and resetting are written to the audit log
+- [ ] Only admins can read or change the setting; unauthenticated calls return 401 and non-admins 403
+- [ ] The schema, the privacy page and the collector's retention rules are documented before the feature is released
+- [ ] A reference collector exists and publishes aggregate numbers only
+
+**Test Plan:**
+1. Fresh install, never touching the setting, wait past the schedule → no outbound request to the collector
+2. Enable in Settings → the payload preview matches what the collector receives, field for field
+3. Add users, projects and domains containing recognisable strings (an email, a hostname) → none of those strings appear in the sent payload, only buckets
+4. Set `VEXLYX_TELEMETRY=off` → the switch is disabled with an explanation and nothing is sent; same with `DO_NOT_TRACK=1`
+5. Point `TELEMETRY_URL` at an unreachable address → the panel keeps working, `lastStatus` shows the failure and no retry storm occurs
+6. Reset the install id → the next ping carries a new id
+7. Disable → no further sends, and the stored id is removed
+8. As a non-admin and signed out, call the endpoints → 403 and 401
+9. Run the installer non-interactively with no variable → statistics stay off; interactively answering "y" → on, and a re-run does not ask again or flip it
+10. Run in `NODE_ENV=development` with statistics enabled → nothing is sent
+
+**Developer Docs:**
+- **Location:** `docs/dev/telemetry.md`
+- **Contents:** principles, schema v1 and how to change it, consent flow, scheduler and failure behaviour, operator controls, collector specification and retention, privacy notice, how to test
+
+**Files to Create:**
+- `apps/api/src/modules/telemetry/{routes,service,schema,scheduler,payload}.ts` (and `payload.test.ts`)
+- `packages/shared/src/schemas/telemetry.ts`
+- `apps/api/prisma/migrations/<timestamp>_add_telemetry_settings/migration.sql`
+- `apps/dashboard/src/components/settings/TelemetryCard.tsx`, `src/hooks/useTelemetry.ts`
+- `docs/dev/telemetry.md` and a public privacy page
+
+---
+
 ## Phase 6: Ecosystem & Launch
 
 ### F6.1 — Complete Documentation
-**Status:** 🔴 NOT STARTED
+**Status:** 🟢 COMPLETED
 
 **Description:**
 VitePress documentation site covering installation, development, and API reference.
 
 **Acceptance Criteria:**
-- [ ] Installation guide (bare metal, Docker)
-- [ ] Developer guide (local setup, contributing)
-- [ ] API reference (auto-generated from OpenAPI)
-- [ ] Feature documentation (all 48 features)
-- [ ] Troubleshooting guide
-- [ ] Changelog
-- [ ] Hosted at `docs.vexlyx.com` I know that the car is a bit of an oddity, but I want to be honest. I don't know what the car is. I mean, I The first one is the one that was used in And then, the next I I I I I Took the picture and put it on the table, and then he was like, well, I I I I I I Hello?
-Haan ji. the second day was about, you know, we got to go back together, and you know that you can come back together and reunite.
+- [x] Installation guide (bare metal, Docker)
+- [x] Developer guide (local setup, contributing)
+- [x] API reference (auto-generated from OpenAPI)
+- [x] Feature documentation for every released feature
+- [x] Troubleshooting guide
+- [x] Changelog
+- [x] Hosted at `docs.vexlyx.atlantiqs.org`
 
 **Test Plan:**
 1. New developer reads guide → sets up local env successfully
@@ -2365,19 +2743,19 @@ Haan ji. the second day was about, you know, we got to go back together, and you
 ---
 
 ### F6.2 — CI/CD Pipeline
-**Status:** 🔴 NOT STARTED
+**Status:** 🟢 COMPLETED
 
 **Description:**
 GitHub Actions for testing, building, and releasing Vexlyx.
 
 **Acceptance Criteria:**
-- [ ] Lint check on PR
-- [ ] Type check on PR
-- [ ] Unit tests on PR
-- [ ] Build check on PR
-- [ ] Auto-release on tag push
-- [ ] Docker image build and push
-- [ ] Changelog generation
+- [x] Lint check on PR
+- [x] Type check on PR
+- [x] Unit tests on PR
+- [x] Build check on PR
+- [x] Auto-release on tag push
+- [x] Docker image build and push
+- [x] Changelog generation
 
 **Test Plan:**
 1. Open PR → all checks pass

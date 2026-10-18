@@ -1,0 +1,330 @@
+diff --git a/.superpowers/sdd/2026-09-25-2fa/final-fix-report.md b/.superpowers/sdd/2026-09-25-2fa/final-fix-report.md
+new file mode 100644
+index 0000000..6bcb99a
+--- /dev/null
++++ b/.superpowers/sdd/2026-09-25-2fa/final-fix-report.md
+@@ -0,0 +1,60 @@
++# Final Fix Wave Report — F5.17 2FA (2026-09-26)
++
++One pass, 5 items from final review.
++
++## 1. Prisma migration — BLOCKED (no live DB)
++
++Offline generation is not possible here. Prisma requires a reachable
++shadow database even for a pure diff:
++
++- `prisma migrate diff --from-migrations ... --to-schema-datamodel ... --script`
++  without `--shadow-database-url` → `Error: You must pass the
++  --shadow-database-url if you want to diff a migrations directory.`
++- With `--shadow-database-url "postgresql://user:pass@localhost:5432/vexlyx_shadow"` →
++  `Error: P1001 — Can't reach database server at localhost:5432.`
++
++No SQL was fabricated. **Follow-up (needs a live DB):** run
++`pnpm db:migrate dev --name add_2fa` (or the offline `migrate diff` with a
++shadow DB) so `totpSecretEncrypted`/`totpEnabled`/`totpVerifiedAt` on
++`users` + the `recovery_codes` table get a migration dir
++`apps/api/prisma/migrations/<timestamp>_add_2fa/`. Schema (`schema.prisma`)
++already declares both models — the DB is the only missing piece.
++
++## 2. Challenge retry-after-typo — DONE
++
++- `TwoFactorService`: added `peekChallenge(token)` (read without delete)
++  and `deleteChallenge(token)`; `consumeChallenge` kept as
++  peek-then-delete for existing callers.
++- `POST /2fa/challenge` now: peek → verify → on success delete + session;
++  on wrong code returns 401 **without** deleting (5/15min rate limit
++  bounds guessing; token requires password to obtain). Expired/missing →
++  401 as before.
++- Test: `two-factor-routes.test.ts` "survives a typo" (wrong code → 401,
++  same token + right TOTP → 200 + user) plus service-level
++  peek-twice/delete semantics in `two-factor-service.test.ts`.
++
++## 3. createSetup guard — DONE
++
++`createSetup` throws `AuthError("Two-factor already enabled — disable
++first", "2FA_ALREADY_ENABLED", 409)` when `user.totpEnabled` is already
++true, before any write (no more clobbering a live secret + recovery
++codes). Route's existing `AuthError` catch maps it. Service test asserts
++409 and that `prisma.user.update` was never called.
++
++## 4. TOTP window — DONE
++
++`authenticator.options = { window: 1 }` set once in
++`two-factor-service.ts` with comment (±1 step for authenticator clock
++skew, spec §3).
++
++## 5. Doc one-liner — DONE
++
++`docs/dev/two-factor-auth.md` no longer claims `PUBLIC_USER_SELECT` is
++unchanged; now notes it exposes only `totpEnabled` (added in c091380).
++
++## Verification
++
++- `pnpm --filter @vexlyx/api test` (full suite): **64/64 pass**
++  (one transient `plugins/auth.test.ts` timeout on first run — untouched
++  by this wave, green on re-run).
++- `pnpm --filter @vexlyx/api typecheck`: clean.
+diff --git a/apps/api/src/modules/auth/routes.ts b/apps/api/src/modules/auth/routes.ts
+index 5733323..1811670 100644
+--- a/apps/api/src/modules/auth/routes.ts
++++ b/apps/api/src/modules/auth/routes.ts
+@@ -145,23 +145,24 @@ export async function authRoutes(app: FastifyInstance) {
+ 
+   // GET /api/auth/config — public, lets the dashboard know whether to show
+   // the self-registration form/link (F5.8).
+   app.get("/config", async () => {
+     return { allowRegistration: env.ALLOW_REGISTRATION, requireAdmin2FA: env.REQUIRE_ADMIN_2FA };
+   });
+ 
+   app.post("/2fa/challenge", { config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } }, async (request, reply) => {
+     try {
+       const data = TwoFactorChallengeSchema.parse(request.body);
+-      const userId = await twoFactor.consumeChallenge(data.challengeToken);
++      const userId = await twoFactor.peekChallenge(data.challengeToken);
+       if (!userId) return reply.status(401).send({ error: "Invalid or expired code", code: "2FA_INVALID_CODE", details: {} });
+       if (!(await twoFactor.verifyLoginCode(userId, data.code))) return reply.status(401).send({ error: "Invalid or expired code", code: "2FA_INVALID_CODE", details: {} });
++      await twoFactor.deleteChallenge(data.challengeToken);
+       const user = await service.getCurrentUser(userId);
+       await createSession(app, reply, userId);
+       return { user };
+     } catch (err) {
+       if (err instanceof AuthError) {
+         reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
+         return;
+       }
+       throw err;
+     }
+diff --git a/apps/api/src/modules/auth/two-factor-routes.test.ts b/apps/api/src/modules/auth/two-factor-routes.test.ts
+index ba8ded0..b28e23c 100644
+--- a/apps/api/src/modules/auth/two-factor-routes.test.ts
++++ b/apps/api/src/modules/auth/two-factor-routes.test.ts
+@@ -1,19 +1,53 @@
+ import { describe, it, expect, vi } from "vitest";
+ import Fastify from "fastify";
++import cookie from "@fastify/cookie";
++import { authenticator } from "otplib";
+ 
+ process.env.DATABASE_URL ??= "postgresql://user:pass@localhost:5432/vexlyx_test";
+ process.env.SESSION_SECRET ??= "test-session-secret-at-least-32-characters-long";
+ 
+ describe("POST /api/auth/2fa/challenge rate limit + shape", () => {
+   it("rejects unknown challenge with 401 2FA_INVALID_CODE", async () => {
+     const { authRoutes } = await import("./routes.js");
+     const app = Fastify();
+     app.decorate("prisma", { user: { findUnique: vi.fn() } } as unknown as import("fastify").FastifyInstance["prisma"]);
+     app.decorate("redis", { get: vi.fn(async () => null), set: vi.fn(), del: vi.fn() } as unknown as import("fastify").FastifyInstance["redis"]);
+     app.decorate("requireAuth", vi.fn() as unknown as import("fastify").FastifyInstance["requireAuth"]);
+     await app.register(authRoutes, { prefix: "/api/auth" });
+     const res = await app.inject({ method: "POST", url: "/api/auth/2fa/challenge", payload: { challengeToken: "x".repeat(64), code: "123456" } });
+     expect(res.statusCode).toBe(401);
+     expect(res.json().code).toBe("2FA_INVALID_CODE");
+   }, 30_000);
++
++  it("survives a typo: wrong code 401, same token + right code succeeds", async () => {
++    const { authRoutes } = await import("./routes.js");
++    const { encrypt } = await import("../../utils/encryption.js");
++    const secret = authenticator.generateSecret();
++    const store = new Map<string, string>();
++    const app = Fastify();
++    await app.register(cookie);
++    app.decorate("prisma", {
++      user: { findUnique: vi.fn(async () => ({ id: "u1", email: "u1@example.com", totpEnabled: true, totpSecretEncrypted: encrypt(secret) })) },
++      session: { create: vi.fn(async () => undefined) },
++      recoveryCode: { findMany: vi.fn(async () => []) },
++    } as unknown as import("fastify").FastifyInstance["prisma"]);
++    app.decorate("redis", {
++      get: vi.fn(async (k: string) => store.get(k) ?? null),
++      set: vi.fn(async (k: string, v: string) => { store.set(k, v); return "OK"; }),
++      del: vi.fn(async (k: string) => { store.delete(k); }),
++    } as unknown as import("fastify").FastifyInstance["redis"]);
++    app.decorate("requireAuth", vi.fn() as unknown as import("fastify").FastifyInstance["requireAuth"]);
++    await app.register(authRoutes, { prefix: "/api/auth" });
++
++    const token = "t".repeat(64);
++    store.set("2fa-challenge:" + token, JSON.stringify({ userId: "u1" }));
++
++    const wrong = await app.inject({ method: "POST", url: "/api/auth/2fa/challenge", payload: { challengeToken: token, code: "000000" } });
++    expect(wrong.statusCode).toBe(401);
++    expect(wrong.json().code).toBe("2FA_INVALID_CODE");
++
++    const right = await app.inject({ method: "POST", url: "/api/auth/2fa/challenge", payload: { challengeToken: token, code: authenticator.generate(secret) } });
++    expect(right.statusCode).toBe(200);
++    expect(right.json().user.id).toBe("u1");
++  }, 30_000);
+ });
+diff --git a/apps/api/src/modules/auth/two-factor-service.test.ts b/apps/api/src/modules/auth/two-factor-service.test.ts
+index 9c22d4c..a60a0b0 100644
+--- a/apps/api/src/modules/auth/two-factor-service.test.ts
++++ b/apps/api/src/modules/auth/two-factor-service.test.ts
+@@ -2,20 +2,21 @@ import { describe, it, expect, vi } from "vitest";
+ import { authenticator } from "otplib";
+ import * as argon2 from "argon2";
+ 
+ // config/env.ts validates process.env eagerly at import time, so these must
+ // be set before two-factor-service.ts (which imports encryption.ts → env.ts)
+ // is loaded — static imports would be hoisted ahead of any assignment here.
+ process.env.DATABASE_URL ??= "postgresql://user:pass@localhost:5432/vexlyx_test";
+ process.env.SESSION_SECRET ??= "test-session-secret-at-least-32-characters-long";
+ 
+ const { TwoFactorService } = await import("./two-factor-service.js");
++const { AuthError } = await import("./service.js");
+ const { encrypt } = await import("../../utils/encryption.js");
+ 
+ function makeService() {
+   const store = new Map<string, string>();
+   const redis = {
+     set: vi.fn(async (k: string, v: string, _mode?: string, _ttl?: number) => {
+       store.set(k, v);
+       return "OK";
+     }),
+     get: vi.fn(async (k: string) => store.get(k) ?? null),
+@@ -142,19 +143,43 @@ describe("TwoFactorService.verifyLoginCode", () => {
+     const secret = authenticator.generateSecret();
+     (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+       id: "u1", totpSecretEncrypted: encrypt(secret), totpEnabled: true,
+     });
+     (prisma.recoveryCode.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+     const ok = await service.verifyLoginCode("u1", "000000");
+     expect(ok).toBe(false);
+   });
+ });
+ 
++describe("TwoFactorService.createSetup guard", () => {
++  it("rejects setup when 2fa already enabled without clobbering", async () => {
++    const { service, prisma } = makeService();
++    (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
++      id: "u1", email: "u1@example.com", totpEnabled: true, totpSecretEncrypted: "enc",
++    });
++    const err = await service.createSetup("u1").catch((e: unknown) => e);
++    expect(err).toBeInstanceOf(AuthError);
++    expect(err).toMatchObject({ code: "2FA_ALREADY_ENABLED", statusCode: 409 });
++    expect(prisma.user.update).not.toHaveBeenCalled();
++  });
++});
++
++describe("TwoFactorService challenge peek", () => {
++  it("peek does not consume; deleteChallenge removes", async () => {
++    const { service } = makeService();
++    const token = await service.storeChallenge("u1");
++    expect(await service.peekChallenge(token)).toBe("u1");
++    expect(await service.peekChallenge(token)).toBe("u1");
++    await service.deleteChallenge(token);
++    expect(await service.peekChallenge(token)).toBeNull();
++  });
++});
++
+ describe("TwoFactorService challenge store", () => {
+   it("round-trips a challenge token single-use", async () => {
+     const { service } = makeService();
+     const token = await service.storeChallenge("u1");
+     expect(token).toHaveLength(64);
+     expect(await service.consumeChallenge(token)).toBe("u1");
+     expect(await service.consumeChallenge(token)).toBeNull();
+   });
+ });
+diff --git a/apps/api/src/modules/auth/two-factor-service.ts b/apps/api/src/modules/auth/two-factor-service.ts
+index 30ba334..b9e1a37 100644
+--- a/apps/api/src/modules/auth/two-factor-service.ts
++++ b/apps/api/src/modules/auth/two-factor-service.ts
+@@ -4,36 +4,40 @@ import QRCode from "qrcode";
+ import * as argon2 from "argon2";
+ import type { PrismaClient } from "@prisma/client";
+ import { encrypt, decrypt } from "../../utils/encryption.js";
+ import type { AuditLogService } from "../audit-log/service.js";
+ import { AuthError } from "./service.js";
+ 
+ const CHALLENGE_PREFIX = "2fa-challenge:";
+ const CHALLENGE_TTL_SECONDS = 300;
+ const ISSUER = "Vexlyx";
+ 
++// ±1 step (±30s) tolerance for authenticator clock skew (spec §3).
++authenticator.options = { window: 1 };
++
+ function newRecoveryCodes(): string[] {
+   return Array.from({ length: 10 }, () =>
+     crypto.randomBytes(5).toString("hex"),
+   );
+ }
+ 
+ export class TwoFactorService {
+   constructor(
+     private prisma: PrismaClient,
+     private redis: { set(k: string, v: string, mode: string, ttl: number): Promise<unknown>; get(k: string): Promise<string | null>; del(k: string): Promise<unknown> },
+     private auditLog: AuditLogService,
+   ) {}
+ 
+   async createSetup(userId: string) {
+     const user = await this.prisma.user.findUnique({ where: { id: userId } });
+     if (!user) throw new AuthError("User not found", "USER_NOT_FOUND", 404);
++    if (user.totpEnabled) throw new AuthError("Two-factor already enabled — disable first", "2FA_ALREADY_ENABLED", 409);
+     const secret = authenticator.generateSecret();
+     await this.prisma.user.update({
+       where: { id: userId },
+       data: { totpSecretEncrypted: encrypt(secret), totpEnabled: false, totpVerifiedAt: null },
+     });
+     const otpauthUrl = authenticator.keyuri(user.email, ISSUER, secret);
+     const qrDataUrl = await QRCode.toDataURL(otpauthUrl);
+     await this.prisma.recoveryCode.deleteMany({ where: { userId } });
+     return { otpauthUrl, qrDataUrl, manualKey: secret };
+   }
+@@ -86,20 +90,31 @@ export class TwoFactorService {
+     await this.auditLog.log(actorId, "user.2fa_reset", { type: "User", id: targetUserId }, {});
+   }
+ 
+   async storeChallenge(userId: string): Promise<string> {
+     const token = crypto.randomBytes(32).toString("hex");
+     await this.redis.set(CHALLENGE_PREFIX + token, JSON.stringify({ userId }), "EX", CHALLENGE_TTL_SECONDS);
+     return token;
+   }
+ 
+   async consumeChallenge(token: string): Promise<string | null> {
++    const userId = await this.peekChallenge(token);
++    if (userId) await this.redis.del(CHALLENGE_PREFIX + token);
++    return userId;
++  }
++
++  // Read without deleting — lets a typo'd code be retried on the same token
++  // (spec §7: delete on success/expiry only). Rate limit bounds guessing.
++  async peekChallenge(token: string): Promise<string | null> {
+     const raw = await this.redis.get(CHALLENGE_PREFIX + token);
+     if (!raw) return null;
+-    await this.redis.del(CHALLENGE_PREFIX + token);
+     try {
+       return (JSON.parse(raw) as { userId: string }).userId;
+     } catch {
+       return null;
+     }
+   }
++
++  async deleteChallenge(token: string): Promise<void> {
++    await this.redis.del(CHALLENGE_PREFIX + token);
++  }
+ }
+diff --git a/docs/dev/two-factor-auth.md b/docs/dev/two-factor-auth.md
+index ad6b5de..c61dfe9 100644
+--- a/docs/dev/two-factor-auth.md
++++ b/docs/dev/two-factor-auth.md
+@@ -22,21 +22,22 @@ generates a secret (encrypted with AES-256-GCM via
+ `apps/api/src/utils/encryption.ts`, stored with `totpEnabled: false`),
+ returns `{ otpauthUrl, qrDataUrl, manualKey }`. `POST /api/auth/2fa/verify-setup`
+ with a valid 6-digit code flips `totpEnabled: true` and returns the
+ recovery codes once. Disable (`POST /api/auth/2fa/disable`) requires
+ `{ password, codeOrRecovery }` and wipes secret + codes.
+ 
+ Core logic lives in `apps/api/src/modules/auth/two-factor-service.ts`
+ (`TwoFactorService`); routes stay thin per CLAUDE.md §6. Challenge and
+ verify-setup endpoints are rate-limited at the login tier (5 per 15 min
+ per IP). Secrets, TOTP codes, and recovery codes are never logged;
+-`PUBLIC_USER_SELECT` is unchanged so `/me` leaks no secret material.
++`PUBLIC_USER_SELECT` exposes only `totpEnabled` (added in commit c091380);
++no secret material (`totpSecretEncrypted`, recovery hashes) reaches `/me`.
+ 
+ ## Env: `REQUIRE_ADMIN_2FA`
+ 
+ ```bash
+ # Require TOTP 2FA for the ADMIN role at login. "false" = optional for everyone.
+ REQUIRE_ADMIN_2FA=false
+ ```
+ 
+ Validated in `apps/api/src/config/env.ts` (boolean after transform) and
+ surfaced to the frontend via `GET /api/auth/config` as `requireAdmin2FA`.

@@ -1,0 +1,139 @@
+diff --git a/.superpowers/sdd/2026-09-25-2fa/task-4-report.md b/.superpowers/sdd/2026-09-25-2fa/task-4-report.md
+index 409b423..2ea8d33 100644
+--- a/.superpowers/sdd/2026-09-25-2fa/task-4-report.md
++++ b/.superpowers/sdd/2026-09-25-2fa/task-4-report.md
+@@ -78,10 +78,36 @@ store behind the `makeService` mock; confirm → consume one code via
+ called with `{ where: { userId: "u1", usedAt: null } }`, latest batch code
+ verifies `true`, stale unused code verifies `false`. Supporting changes:
+ mocked `argon2` (`hash`/`verify` as fast deterministic fakes — real argon2
+ over 20 hashes + verify loops blew the 5s per-test timeout) and relaxed the
+ pre-existing hash assertion from `not.toContain(codes[0])` to per-index
+ `not.toBe` (same intent: no plaintext persisted; the fake hash embeds the
+ code by construction).
+ 
+ **Verification:** `pnpm --filter @vexlyx/api test -- src/modules/auth/` →
+ 9 files, 60 tests, all pass (59 pre-existing + 1 new).
++
++---
++
++## Fix Round 2/5 — real argon2 in tests + used-row survival assertion (2026-09-26)
++
++**Findings addressed:**
++1. File-scoped `vi.mock("argon2")` hollowed the no-plaintext property test
++   (fake hash embedded plaintext; assertions passed trivially). Removed the
++   mock entirely — all tests now use real argon2. No `spyOn` fake retained
++   anywhere; not needed.
++2. Strengthened the property assertion: per-index `codeHash !== plaintext`
++   retained, plus `argon2.verify(storedHash, plaintext)` resolves `true` for
++   a stored row (proves hashing real and no plaintext persisted).
++3. Reconfirm test now asserts observed state directly: after consume +
++   reconfirm, exactly one row in the mock store has `usedAt !== null`, and
++   its hash verifies against the consumed first-batch code — alongside the
++   existing behavioral checks (latest batch verifies `true`, stale unused
++   code verifies `false`).
++
++**Timeouts:** per-test `{ timeout: ... }` only — 30s on the single-confirm
++test (10 hashes + 1 verify), 60s on the reconfirm test (20 hashes + ~12
++verifies across login-code loops). No global skips.
++
++**Verification:** `pnpm --filter @vexlyx/api test --
++src/modules/auth/two-factor-service.test.ts` → 9 files, 60 tests, all pass,
++Duration 16.43s.
+diff --git a/apps/api/src/modules/auth/two-factor-service.test.ts b/apps/api/src/modules/auth/two-factor-service.test.ts
+index cdde631..12d9ee6 100644
+--- a/apps/api/src/modules/auth/two-factor-service.test.ts
++++ b/apps/api/src/modules/auth/two-factor-service.test.ts
+@@ -1,19 +1,13 @@
+ import { describe, it, expect, vi } from "vitest";
+ import { authenticator } from "otplib";
+-
+-// Fast deterministic stand-in: real argon2 hashing (~20 hashes + verify
+-// loops over rows) blows the 5s per-test timeout on this reconfirm test.
+-vi.mock("argon2", () => ({
+-  hash: vi.fn(async (code: string) => `argon2$${code}`),
+-  verify: vi.fn(async (hash: string, code: string) => hash === `argon2$${code}`),
+-}));
++import * as argon2 from "argon2";
+ 
+ // config/env.ts validates process.env eagerly at import time, so these must
+ // be set before two-factor-service.ts (which imports encryption.ts → env.ts)
+ // is loaded — static imports would be hoisted ahead of any assignment here.
+ process.env.DATABASE_URL ??= "postgresql://user:pass@localhost:5432/vexlyx_test";
+ process.env.SESSION_SECRET ??= "test-session-secret-at-least-32-characters-long";
+ 
+ const { TwoFactorService } = await import("./two-factor-service.js");
+ const { encrypt } = await import("../../utils/encryption.js");
+ 
+@@ -32,42 +26,44 @@ function makeService() {
+   const prisma = {
+     user: { findUnique: vi.fn(), update: vi.fn() },
+     recoveryCode: { createMany: vi.fn(), findMany: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
+   };
+   const auditLog = { log: vi.fn(async () => undefined) };
+   const service = new TwoFactorService(prisma as never, redis as never, auditLog as never);
+   return { service, prisma, redis, auditLog };
+ }
+ 
+ describe("TwoFactorService.confirmSetup", () => {
+-  it("enables 2fa on valid totp code and returns 10 recovery codes", async () => {
++  it("enables 2fa on valid totp code and returns 10 recovery codes", { timeout: 30000 }, async () => {
+     const { service, prisma } = makeService();
+     const secret = authenticator.generateSecret();
+     (prisma.user.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+       id: "u1", email: "u1@example.com", password: "hashed", totpSecretEncrypted: encrypt(secret), totpEnabled: false,
+     });
+     const code = authenticator.generate(secret);
+     const result = await service.confirmSetup("u1", code);
+     expect(result.recoveryCodes).toHaveLength(10);
+     expect(prisma.user.update).toHaveBeenCalledWith(
+       expect.objectContaining({ where: { id: "u1" } }),
+     );
+     expect(prisma.recoveryCode.createMany).toHaveBeenCalledOnce();
+     const rows = (prisma.recoveryCode.createMany as ReturnType<typeof vi.fn>).mock.calls[0]?.[0].data as { userId: string; codeHash: string }[];
+     expect(rows).toHaveLength(10);
+     for (let i = 0; i < rows.length; i++) {
+       expect(rows[i]?.userId).toBe("u1");
+       expect(rows[i]?.codeHash).not.toBe(result.recoveryCodes[i]);
+     }
++    // Real-hash proof: at least one stored hash verifies against its plaintext.
++    await expect(argon2.verify(rows[0]?.codeHash as string, result.recoveryCodes[0] as string)).resolves.toBe(true);
+   });
+ 
+-  it("clears stale unused recovery codes on reconfirm, keeping used rows", async () => {
++  it("clears stale unused recovery codes on reconfirm, keeping used rows", { timeout: 60000 }, async () => {
+     const { service, prisma } = makeService();
+     type Row = { id: string; userId: string; codeHash: string; usedAt: Date | null };
+     let rows: Row[] = [];
+     let nextId = 0;
+     (prisma.recoveryCode.createMany as ReturnType<typeof vi.fn>).mockImplementation(
+       async ({ data }: { data: { userId: string; codeHash: string }[] }) => {
+         for (const d of data) rows.push({ id: `rc${nextId++}`, userId: d.userId, codeHash: d.codeHash, usedAt: null });
+         return { count: data.length };
+       },
+     );
+@@ -107,20 +103,25 @@ describe("TwoFactorService.confirmSetup", () => {
+ 
+     const secret2 = authenticator.generateSecret();
+     findUnique.mockResolvedValue({
+       id: "u1", email: "u1@example.com", password: "hashed", totpSecretEncrypted: encrypt(secret2), totpEnabled: false,
+     });
+     const second = await service.confirmSetup("u1", authenticator.generate(secret2));
+     expect(second.recoveryCodes).toHaveLength(10);
+ 
+     expect(prisma.recoveryCode.deleteMany).toHaveBeenCalledWith({ where: { userId: "u1", usedAt: null } });
+ 
++    // The consumed first-batch row survives reconfirm in observed state.
++    const usedRows = rows.filter((r) => r.usedAt !== null);
++    expect(usedRows).toHaveLength(1);
++    await expect(argon2.verify(usedRows[0]?.codeHash as string, first.recoveryCodes[0] as string)).resolves.toBe(true);
++
+     // Enabled user for verifyLoginCode (recovery-code path: hex codes skip the TOTP branch).
+     findUnique.mockResolvedValue({
+       id: "u1", email: "u1@example.com", password: "hashed", totpSecretEncrypted: encrypt(secret2), totpEnabled: true,
+     });
+     // Latest batch verifies…
+     expect(await service.verifyLoginCode("u1", second.recoveryCodes[0])).toBe(true);
+     // …stale unused codes from the first batch do not (only the used one is gone via consumption).
+     expect(await service.verifyLoginCode("u1", first.recoveryCodes[1])).toBe(false);
+   });
+ });

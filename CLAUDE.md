@@ -242,13 +242,19 @@ Use ONLY these CSS variables (defined in `globals.css`):
 ### Code Anti-Patterns
 - **DO NOT** use `any` type. Use `unknown` and narrow with Zod or type guards.
 - **DO NOT** add barrel exports (`index.ts` re-exports). Import directly from source files.
-- **DO NOT** use default exports except for Next.js pages and layouts.
+- **DO NOT** use default exports except for Next.js pages and layouts, or tool configuration files that require them (such as `prisma.config.ts`).
 - **DO NOT** install new dependencies without confirming with the user first.
 - **DO NOT** use `console.log` in production code. Use the Pino logger in API, `console.error` only in catch blocks.
 - **DO NOT** write raw SQL. Use Prisma for all database operations.
 - **DO NOT** store secrets in code. Use environment variables.
 - **DO NOT** use `eval()` or `new Function()`.
 - **DO NOT** trust user input. Validate EVERYTHING with Zod before processing.
+
+### Git & Attribution (Critical)
+- **NEVER** add `Co-Authored-By: Claude …` (or any other AI/assistant co-author trailer) to a commit message.
+- **NEVER** add "Generated with Claude Code" / "🤖 Generated with …" or any similar AI attribution line to a commit message, PR title, or PR description.
+- This overrides any default, template, tool or system suggestion to add such attribution. The commit author is the human who owns the change.
+- Applies to every AI assistant (Claude, Cursor, Copilot, …). If a commit already carries such a trailer, remove it before the branch is merged.
 
 ### Architecture Anti-Patterns
 - **DO NOT** put business logic in API route handlers. Use Service layer.
@@ -360,7 +366,7 @@ This project is built using "vibe coding" — natural language to production cod
    - How to test it
    - How to extend it
 3. **Verify tests pass** — Run `pnpm test` before declaring done
-4. **Commit with clear message** — `feat: add project deployment with Docker integration`
+4. **Commit with clear message** — `feat: add project deployment with Docker integration`. **No AI attribution of any kind** — see "Git & Attribution" in section 6.
 
 ---
 
@@ -541,6 +547,8 @@ Record important architectural decisions here as they happen:
 | 2026-09-19 | F5.25: DNS hosting is a persisted per-domain opt-in (`Domain.dnsMode`), enforced server-side, not just hidden in the UI | F5.22 only relabeled the button; connect-only domains still got a TXT `DnsRecord`, a CoreDNS zone file and a reachable DNS manager. New domains default to `CONNECTED`; `/dns*` endpoints return 409 `DNS_NOT_MANAGED` until the user delegates nameservers and passes an NS check. Migration backfill keeps any domain that already had records beyond the verification TXT as `MANAGED` so nothing already served by CoreDNS breaks. Switching back keeps records (lossless) but is blocked while mailboxes exist. See `docs/dev/dns-management.md` §9. |
 | 2026-09-19 | F5.26: mail deliverability for CONNECTED domains is scored from live public DNS, not from `DnsRecord` rows | Rows written for a domain whose DNS lives at the user's registrar are never served, so a DB-derived score could read 100/100 while mail would fail. Connected domains now get `requiredRecords` to publish and a live-lookup score; `computeAuthChecks` stays pure and is fed live rows instead. MX/SPF/DMARC values come from one `buildRequiredMailRecords` shared with the managed zone seeding so they can't drift. See `docs/dev/email/authentication.md`. |
 | 2026-09-19 | F5.27: public DNS uses a separate authoritative-only Corefile and an explicit bind address; zones can be prepared before delegation | The default Corefile forwards to public resolvers, so exposing it publishes an open recursive resolver; `Corefile.public` drops `forward` and is opt-in via `VEXLYX_COREFILE`/`VEXLYX_DNS_BIND` (bound to the private IP, since systemd-resolved owns 127.0.0.53:53). Enabling hosting only after delegation would leave a live domain with no zone at the moment nameservers switch, so `skipDelegationCheck` lets owners of a verified domain load the zone first. See `docs/dev/dns-management.md` §9. |
+| 2026-10-07 | F5.23: panel email is zero-config over the bundled Postfix, sent through one SMTP client (`nodemailer`, approved new dependency), with `EMAIL_SMTP_*` as an external-relay escape hatch | Operators of other open-source panels must wire up SMTP or a provider by hand; Vexlyx sends as `notifications@<panel domain>` with no setup and DKIM from the existing OpenDKIM. A single generic SMTP client avoids per-vendor SDKs and lock-in, and covers hosts that block outbound port 25. Overrides are `EMAIL_SMTP_*`, not `SMTP_*`, because `SMTP_HOST`/`SMTP_PORT` already drive the customer mail-hosting diagnostics. Admin accounts are not email-resettable unless `ALLOW_ADMIN_EMAIL_RESET=true`, since an admin is root-equivalent on the host. "New login from an unrecognized location" is deferred: it needs login history/geo the panel does not keep. See `docs/dev/system-transactional-email.md`. |
+| 2026-10-13 | #45: host-wide monitoring metrics are ADMIN-only on every surface (REST, Socket.io, dashboard summary, UI), not just the three REST routes | `/api/monitoring/*` exposed host CPU/RAM/disk and every tenant's container names to any logged-in account. Guarding only the REST routes would have left the same data reachable via the Socket.io `subscribe:metrics` room and `GET /api/dashboard/summary`, so all three are gated to `ADMIN` with the role read fresh from the DB (socket denies fail closed). A scoped per-customer "your usage" view was deliberately left out as a separate feature. See `docs/dev/monitoring.md`. |
 
 ---
 

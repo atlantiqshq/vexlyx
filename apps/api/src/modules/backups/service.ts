@@ -1,3 +1,4 @@
+import { notifyAdmins } from "../system-email/notifier.js";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -7,9 +8,11 @@ import type { FastifyBaseLogger } from "fastify";
 import type { Server as SocketIOServer } from "socket.io";
 import type { BackupManifest, BackupItemType } from "@vexlyx/shared";
 import { env } from "../../config/env.js";
-import { DeployService } from "../deploy/service.js";
+import { DeployService, runDockerStopByProject } from "../deploy/service.js";
 import { DnsService } from "../domains/dns-service.js";
 import type { AuditLogService } from "../audit-log/service.js";
+import { getPythonBin } from "../../utils/pythonBin.js";
+import { PYTHON_SCRIPT_TIMEOUT_MS, watchChildTimeout } from "../../utils/processWatchdog.js";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -54,7 +57,7 @@ function getBackupScriptPath(): string {
 
 export function checkBackupScriptHealth(): Promise<{ ok: true } | { ok: false; error: string }> {
   const scriptPath = getBackupScriptPath();
-  const pythonBin = env.PYTHON_BIN ?? (process.platform === "win32" ? "python" : "python3");
+  const pythonBin = getPythonBin();
 
   if (!existsSync(scriptPath)) {
     return Promise.resolve({
@@ -99,9 +102,18 @@ function runBackupCommand<T>(
     const scriptPath = getBackupScriptPath();
     const body = JSON.stringify(payload);
 
-    const pythonBin = env.PYTHON_BIN ?? (process.platform === "win32" ? "python" : "python3");
+    const pythonBin = getPythonBin();
 
     const child = spawn(pythonBin, [scriptPath], { stdio: ["pipe", "pipe", "pipe"] });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.backup, (ms) =>
+      reject(
+        new BackupError(
+          `Backup script timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";
@@ -248,7 +260,7 @@ export class BackupService {
     private auditLog: AuditLogService,
   ) {
     this.deployService = new DeployService(prisma);
-    this.dnsService = new DnsService(prisma);
+    this.dnsService = new DnsService(prisma, logger);
   }
 
   async list() {
@@ -396,6 +408,7 @@ export class BackupService {
         data: { status: "FAILED", error: message, completedAt: new Date() },
       });
       io.to("backups").emit("backup:completed", { snapshotId, status: "FAILED", error: message });
+      notifyAdmins("backup_failed", { error: message.slice(0, 500), snapshotId });
     }
   }
 
@@ -524,8 +537,28 @@ export class BackupService {
       });
     }
 
+    // A soft-deleted project has had its workspace removed (its containerId is
+    // kept), so the compose file containerAction needs is gone. That must not
+    // make the project unrecoverable, but a missing workspace does not prove
+    // its containers are gone either (teardown tolerates a failed removal), so
+    // in that case they are stopped and verified by project identity instead.
+    const workspaceExists = existsSync(resolve(env.PROJECTS_DIR, projectId));
+
     if (project.containerId) {
-      await this.deployService.containerAction(project.userId, project.id, "stop").catch(() => undefined);
+      try {
+        if (workspaceExists) {
+          await this.deployService.containerAction(project.userId, project.id, "stop");
+        } else {
+          await runDockerStopByProject(project.id);
+        }
+      } catch (err) {
+        this.logger.error({ err, projectId }, "Container stop failed before project restore");
+        throw new BackupError(
+          "Project restore aborted: containers could not be confirmed stopped. Resolve the container error and retry.",
+          "RESTORE_STOP_FAILED",
+          500,
+        );
+      }
     }
 
     await runBackupCommand(

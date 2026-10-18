@@ -1,8 +1,9 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import fp from "fastify-plugin";
 import crypto from "node:crypto";
-import type { Role, Permission } from "@prisma/client";
+import type { Role, Permission, PrismaClient } from "@prisma/client";
 import { env } from "../config/env.js";
+import { disconnectSessionSockets } from "./socket.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -29,7 +30,7 @@ interface SessionData {
   expiresAt: number;
 }
 
-const SESSION_COOKIE = "vexlyx_session";
+export const SESSION_COOKIE = "vexlyx_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24; // 24 hours
 
 function sessionKey(id: string) {
@@ -201,6 +202,10 @@ export async function destroySession(
 
   await app.redis.del(sessionKey(sessionId));
 
+  // End the live streams opened with this session now, instead of leaving
+  // them attached to a logged-out identity until the page is reloaded (#64).
+  disconnectSessionSockets(sessionId);
+
   // Remove from PostgreSQL as well
   await app.prisma.session.delete({ where: { id: sessionId } }).catch(() => {
     // Session may already have been cleaned up
@@ -213,4 +218,26 @@ export async function destroySession(
     path: "/",
     ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
   });
+}
+
+/**
+ * Ends every session of one user (Redis entry + Postgres row), optionally
+ * sparing the caller's current session. Used after a password change or
+ * reset so a stolen or forgotten login can't outlive the old password.
+ */
+export async function destroyUserSessions(
+  prisma: PrismaClient,
+  redis: { del(...keys: string[]): Promise<unknown> },
+  userId: string,
+  exceptSessionId?: string,
+): Promise<void> {
+  const sessions = await prisma.session.findMany({
+    where: { userId, ...(exceptSessionId ? { id: { not: exceptSessionId } } : {}) },
+    select: { id: true },
+  });
+  if (sessions.length === 0) return;
+
+  await redis.del(...sessions.map((session) => sessionKey(session.id)));
+  for (const session of sessions) disconnectSessionSockets(session.id);
+  await prisma.session.deleteMany({ where: { id: { in: sessions.map((session) => session.id) } } });
 }

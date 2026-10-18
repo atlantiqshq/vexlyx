@@ -1,0 +1,119 @@
+diff --git a/.superpowers/sdd/2026-09-25-2fa/task-3-report.md b/.superpowers/sdd/2026-09-25-2fa/task-3-report.md
+new file mode 100644
+index 0000000..2009b1c
+--- /dev/null
++++ b/.superpowers/sdd/2026-09-25-2fa/task-3-report.md
+@@ -0,0 +1,25 @@
++# Task 3 Report — Shared 2FA Zod schemas + audit actions
++
++## Status
++COMPLETED — all 5 plan steps done (schemas appended, audit actions added, re-exports wired, typecheck PASS, committed).
++
++## Commits
++- `feat(2fa): add shared 2fa schemas and audit actions` (pending at report time; files staged per plan Step 5)
++
++## Changes
++- `packages/shared/src/schemas/auth.ts`: appended `TwoFactorChallengeSchema` (+ `TwoFactorChallengeInput`), `VerifyTotpSetupSchema` (+ `VerifyTotpSetupInput`), `DisableTwoFactorSchema` (+ `DisableTwoFactorInput`) verbatim from plan.
++- `packages/shared/src/schemas/audit-log.ts`: added `"user.2fa_enabled"`, `"user.2fa_disabled"`, `"user.2fa_reset"` to `AUDIT_ACTIONS`.
++- `packages/shared/src/index.ts`: re-exported the three schemas (value block) and three `*Input` types (type block), matching existing export style.
++
++## Test command
++`pnpm --filter @vexlyx/shared typecheck`
++
++Output:
++```
++$ tsc --noEmit
++```
++(no errors — PASS)
++
++## Concerns
++- Plan's Task 3 "Produces" line also names `LoginNeeds2FAResponse`, but no definition is given in Steps 1–3 — deliberately not invented; Task 5 / frontend can add it if needed.
++- No `any` introduced; no `.env` files touched.
+diff --git a/packages/shared/src/index.ts b/packages/shared/src/index.ts
+index 64f2839..e440f18 100644
+--- a/packages/shared/src/index.ts
++++ b/packages/shared/src/index.ts
+@@ -1,18 +1,18 @@
+ /** Current version of the Vexlyx platform */
+ export const VEXLYX_VERSION = "0.0.1";
+ 
+ /** Application name constant used across both frontend and backend */
+ export const APP_NAME = "Vexlyx";
+ 
+-export { RegisterSchema, LoginSchema, ChangePasswordSchema } from "./schemas/auth.js";
+-export type { RegisterInput, LoginInput, ChangePasswordInput } from "./schemas/auth.js";
++export { RegisterSchema, LoginSchema, ChangePasswordSchema, TwoFactorChallengeSchema, VerifyTotpSetupSchema, DisableTwoFactorSchema } from "./schemas/auth.js";
++export type { RegisterInput, LoginInput, ChangePasswordInput, TwoFactorChallengeInput, VerifyTotpSetupInput, DisableTwoFactorInput } from "./schemas/auth.js";
+ 
+ export {
+   ProjectTypeSchema,
+   ProjectStatusSchema,
+   CreateProjectSchema,
+   UpdateProjectSchema,
+   ProjectListQuerySchema,
+   ConnectRepoSchema,
+   TriggerBuildSchema,
+   DeploymentStatusSchema,
+diff --git a/packages/shared/src/schemas/audit-log.ts b/packages/shared/src/schemas/audit-log.ts
+index cf377ac..ba10a1f 100644
+--- a/packages/shared/src/schemas/audit-log.ts
++++ b/packages/shared/src/schemas/audit-log.ts
+@@ -20,20 +20,23 @@ export const AUDIT_ACTIONS = [
+   "backup.deleted",
+   "project.created",
+   "project.deleted",
+   "domain.created",
+   "domain.deleted",
+   "domain.dns_mode_changed",
+   "database.created",
+   "database.deleted",
+   "mailbox.created",
+   "mailbox.deleted",
++  "user.2fa_enabled",
++  "user.2fa_disabled",
++  "user.2fa_reset",
+ ] as const;
+ export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+ 
+ // ---------------------------------------------------------------------------
+ // Response shape
+ // ---------------------------------------------------------------------------
+ 
+ export const AuditLogEntrySchema = z.object({
+   id: z.string(),
+   actorId: z.string().nullable(),
+diff --git a/packages/shared/src/schemas/auth.ts b/packages/shared/src/schemas/auth.ts
+index 72cfd78..8d4fd00 100644
+--- a/packages/shared/src/schemas/auth.ts
++++ b/packages/shared/src/schemas/auth.ts
+@@ -32,10 +32,30 @@ export const ChangePasswordSchema = z
+     currentPassword: z.string().min(1, "Current password is required"),
+     newPassword: passwordSchema,
+     confirmNewPassword: z.string(),
+   })
+   .refine((data) => data.newPassword === data.confirmNewPassword, {
+     message: "Passwords do not match",
+     path: ["confirmNewPassword"],
+   });
+ 
+ export type ChangePasswordInput = z.infer<typeof ChangePasswordSchema>;
++
++export const TwoFactorChallengeSchema = z.object({
++  challengeToken: z.string().min(32),
++  code: z.string().regex(/^[0-9a-zA-Z-]{6,12}$/, "Invalid code"),
++});
++
++export type TwoFactorChallengeInput = z.infer<typeof TwoFactorChallengeSchema>;
++
++export const VerifyTotpSetupSchema = z.object({
++  code: z.string().regex(/^\d{6}$/, "Code must be 6 digits"),
++});
++
++export type VerifyTotpSetupInput = z.infer<typeof VerifyTotpSetupSchema>;
++
++export const DisableTwoFactorSchema = z.object({
++  password: z.string().min(1, "Password is required"),
++  codeOrRecovery: z.string().min(6),
++});
++
++export type DisableTwoFactorInput = z.infer<typeof DisableTwoFactorSchema>;

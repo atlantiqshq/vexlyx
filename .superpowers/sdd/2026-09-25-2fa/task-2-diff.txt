@@ -1,0 +1,67 @@
+diff --git a/apps/api/prisma/schema.prisma b/apps/api/prisma/schema.prisma
+index 4a47ec7..44fba1f 100644
+--- a/apps/api/prisma/schema.prisma
++++ b/apps/api/prisma/schema.prisma
+@@ -175,24 +175,28 @@ model User {
+   maxSubAccounts Int?     @map("max_sub_accounts")
+   /// Named capabilities granted on top of the role (F5.19). Additive only —
+   /// never removes what the role itself already grants.
+   permissions Permission[] @default([])
+   /// Reseller-only (F5.20): when true, this reseller's sub-account quotas may
+   /// nominally sum above the reseller's own limit. Enforcement switches from
+   /// nominal-sum (checked when a reseller sets sub-account quotas) to real
+   /// aggregate usage across the reseller + all sub-accounts (checked at
+   /// resource-creation time). ADMIN-only to toggle.
+   oversellingEnabled Boolean @default(false) @map("overselling_enabled")
++  totpSecretEncrypted String? @map("totp_secret_encrypted")
++  totpEnabled         Boolean  @default(false) @map("totp_enabled")
++  totpVerifiedAt      DateTime? @map("totp_verified_at")
+   createdAt DateTime @default(now()) @map("created_at")
+   updatedAt DateTime @updatedAt @map("updated_at")
+ 
+   sessions       Session[]
++  recoveryCodes RecoveryCode[]
+   projects       Project[]
+   domains        Domain[]
+   databases      Database[]
+   mailboxes      Mailbox[]
+   virtualAliases VirtualAlias[]
+   dkimKeys       DkimKey[]
+   sftpUser       SftpUser?
+   reseller       User?          @relation("ResellerAccounts", fields: [resellerId], references: [id], onDelete: SetNull)
+   subAccounts    User[]         @relation("ResellerAccounts")
+ 
+@@ -207,20 +211,33 @@ model Session {
+   userId    String   @map("user_id")
+   expiresAt DateTime @map("expires_at")
+   createdAt DateTime @default(now()) @map("created_at")
+ 
+   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+ 
+   @@index([userId])
+   @@map("sessions")
+ }
+ 
++model RecoveryCode {
++  id        String    @id @default(cuid())
++  userId    String    @map("user_id")
++  codeHash  String    @map("code_hash")
++  usedAt    DateTime? @map("used_at")
++  createdAt DateTime  @default(now()) @map("created_at")
++
++  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
++
++  @@index([userId])
++  @@map("recovery_codes")
++}
++
+ /// A hosted application or website managed by the panel.
+ /// Project names are unique per user.
+ model Project {
+   id                String        @id @default(cuid())
+   name              String
+   type              ProjectType
+   status            ProjectStatus @default(CREATING)
+   gitUrl            String?       @map("git_url")
+   branch            String        @default("main")
+   buildCmd          String?       @map("build_cmd")

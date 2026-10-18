@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/hooks/useAuth";
+import { useTwoFactor } from "@/hooks/useTwoFactor";
 import { useUsers } from "@/hooks/useUsers";
 import { useUsage } from "@/hooks/useUsage";
 import { QuotaBadge, isQuotaAtLimit } from "@/components/quota/QuotaBadge";
@@ -32,6 +33,7 @@ export function UsersPage() {
     isCreating,
   } = useUsers();
   const { usage, isLoading: isUsageLoading } = useUsage();
+  const { adminReset } = useTwoFactor();
   const [editTarget, setEditTarget] = useState<UserResponse | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserResponse | null>(null);
 
@@ -123,6 +125,7 @@ export function UsersPage() {
         user={editTarget}
         canEditRole={isAdmin && editTarget?.id !== user.id}
         isSelf={editTarget?.id === user.id}
+        canReset2FA={isAdmin && editTarget?.id !== user.id}
         onOpenChange={(open) => !open && setEditTarget(null)}
         isSaving={isSavingQuotas}
         onSave={async (id, data) => {
@@ -131,6 +134,7 @@ export function UsersPage() {
           if (data.permissions) await updatePermissions(id, { permissions: data.permissions });
           setEditTarget(null);
         }}
+        onReset2FA={(id) => adminReset(id).then(() => undefined)}
       />
 
       <DeleteUserConfirmDialog

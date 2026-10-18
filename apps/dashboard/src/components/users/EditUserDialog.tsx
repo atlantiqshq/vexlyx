@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { Loader2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { ApiRequestError } from "@/lib/api";
 import type { Role, Permission, UserResponse, UpdateUserQuotasInput } from "@vexlyx/shared";
 
 interface EditUserDialogProps {
@@ -28,8 +30,14 @@ interface EditUserDialogProps {
   canEditRole: boolean;
   /** True when the signed-in user is editing their own account. An ADMIN can never change their own role — it could lock them (and everyone) out — so the role/permissions fields are hidden and this drives the explanatory copy instead. */
   isSelf: boolean;
+  /**
+   * ADMIN-only 2FA reset (F5.17). Never shown for self — an ADMIN who lost
+   * their own authenticator must be reset by another ADMIN directly.
+   */
+  canReset2FA: boolean;
   onOpenChange: (open: boolean) => void;
   onSave: (id: string, data: { role?: Role; quotas: UpdateUserQuotasInput; permissions?: Permission[] }) => Promise<void>;
+  onReset2FA: (id: string) => Promise<void>;
 }
 
 type QuotaField = "maxProjects" | "maxDomains" | "maxDatabases" | "maxMailboxes" | "maxSubAccounts";
@@ -57,7 +65,7 @@ function fromFormValue(v: string): number | null {
   return v.trim() === "" ? null : Number(v);
 }
 
-export function EditUserDialog({ user, isSaving, canEditRole, isSelf, onOpenChange, onSave }: EditUserDialogProps) {
+export function EditUserDialog({ user, isSaving, canEditRole, isSelf, canReset2FA, onOpenChange, onSave, onReset2FA }: EditUserDialogProps) {
   const [role, setRole] = useState<Role>("USER");
   const [quotas, setQuotas] = useState<Record<QuotaField, string>>({
     maxProjects: "",
@@ -68,6 +76,8 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, onOpenChan
   });
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [oversellingEnabled, setOversellingEnabled] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -107,7 +117,22 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, onOpenChan
     });
   };
 
+  const handleReset2FA = async () => {
+    if (!user) return;
+    setIsResetting(true);
+    try {
+      await onReset2FA(user.id);
+      toast.success("Two-factor authentication reset");
+      setShowResetConfirm(false);
+    } catch (err) {
+      toast.error(err instanceof ApiRequestError ? err.message : "Failed to reset 2FA");
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   return (
+    <>
     <Dialog open={!!user} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-lg">
         <DialogHeader>
@@ -194,6 +219,30 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, onOpenChan
               </div>
             ))}
           </div>
+
+          {canReset2FA && (
+            <div className="space-y-1.5">
+              <Label>Two-factor authentication</Label>
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">Reset 2FA</p>
+                  <p className="text-xs text-muted-foreground">
+                    Clears this account&apos;s authenticator and recovery codes. Use when
+                    they are locked out.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => setShowResetConfirm(true)}
+                  disabled={isResetting}
+                >
+                  Reset 2FA
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -207,5 +256,30 @@ export function EditUserDialog({ user, isSaving, canEditRole, isSelf, onOpenChan
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <Dialog open={showResetConfirm} onOpenChange={(open) => !isResetting && setShowResetConfirm(open)}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4 text-destructive" />
+            Reset 2FA for {user?.name}?
+          </DialogTitle>
+          <DialogDescription>
+            This will permanently clear their authenticator secret and all recovery
+            codes. They will sign in with password alone until they set 2FA up again.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => setShowResetConfirm(false)} disabled={isResetting}>
+            Cancel
+          </Button>
+          <Button variant="destructive" size="sm" onClick={() => void handleReset2FA()} disabled={isResetting}>
+            {isResetting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            Reset 2FA
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

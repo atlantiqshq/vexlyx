@@ -25,7 +25,13 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
@@ -50,8 +56,17 @@ import { QuotaBadge, isQuotaAtLimit } from "@/components/quota/QuotaBadge";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/datetime";
 import { useTimezone } from "@/hooks/useSystemSettings";
-import { useRefreshAnimation, refreshIconClassName } from "@/hooks/useRefreshAnimation";
-import type { DatabaseDetail, DatabaseType, Project } from "@vexlyx/shared";
+import {
+  useRefreshAnimation,
+  refreshIconClassName,
+} from "@/hooks/useRefreshAnimation";
+import type {
+  AdminerAvailability,
+  DatabaseDetail,
+  DatabaseListResponse,
+  DatabaseType,
+  Project,
+} from "@vexlyx/shared";
 
 // ---------------------------------------------------------------------------
 // Helpers & Types
@@ -97,6 +112,9 @@ function DatabaseListSkeleton() {
 
 export default function DatabasesPage() {
   const [databases, setDatabases] = useState<DatabaseDetail[]>([]);
+  const [adminer, setAdminer] = useState<AdminerAvailability>({
+    enabled: false,
+  });
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { isRefreshing, refresh } = useRefreshAnimation();
@@ -142,16 +160,21 @@ export default function DatabasesPage() {
 
     try {
       const [dbRes, projRes] = await Promise.all([
-        fetchAPI<{ databases: DatabaseDetail[] }>("/api/databases"),
-        fetchAPI<{ projects: Project[] }>("/api/projects?limit=100").catch(() => ({
-          projects: [],
-        })),
+        fetchAPI<DatabaseListResponse>("/api/databases"),
+        fetchAPI<{ projects: Project[] }>("/api/projects?limit=100").catch(
+          () => ({
+            projects: [],
+          }),
+        ),
       ]);
       setDatabases(dbRes.databases ?? []);
+      setAdminer(dbRes.adminer);
       setProjects(projRes.projects ?? []);
     } catch (err) {
       toast.error(
-        err instanceof ApiRequestError ? err.message : "Failed to load databases",
+        err instanceof ApiRequestError
+          ? err.message
+          : "Failed to load databases",
       );
     } finally {
       setIsLoading(false);
@@ -215,7 +238,9 @@ export default function DatabasesPage() {
       setCredentialsModalOpen(true);
     } catch (err) {
       toast.error(
-        err instanceof ApiRequestError ? err.message : "Failed to provision database",
+        err instanceof ApiRequestError
+          ? err.message
+          : "Failed to provision database",
       );
     } finally {
       setIsCreating(false);
@@ -252,7 +277,8 @@ export default function DatabasesPage() {
         toast.error(`Connection failed: ${res.error ?? "Unknown error"}`);
       }
     } catch (err) {
-      const msg = err instanceof ApiRequestError ? err.message : "Connection test failed";
+      const msg =
+        err instanceof ApiRequestError ? err.message : "Connection test failed";
       setTestResult({
         id: db.id,
         connected: false,
@@ -281,7 +307,9 @@ export default function DatabasesPage() {
       void fetchData(true);
     } catch (err) {
       toast.error(
-        err instanceof ApiRequestError ? err.message : "Failed to delete database",
+        err instanceof ApiRequestError
+          ? err.message
+          : "Failed to delete database",
       );
     } finally {
       setIsDeleting(false);
@@ -296,7 +324,8 @@ export default function DatabasesPage() {
     const matchesSearch =
       db.name.toLowerCase().includes(search.toLowerCase()) ||
       db.dbUser.toLowerCase().includes(search.toLowerCase()) ||
-      (db.project?.name && db.project.name.toLowerCase().includes(search.toLowerCase()));
+      (db.project?.name &&
+        db.project.name.toLowerCase().includes(search.toLowerCase()));
 
     const matchesEngine = engineFilter === "ALL" || db.type === engineFilter;
 
@@ -317,23 +346,38 @@ export default function DatabasesPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          <QuotaBadge label="Databases" usage={usage?.database} isLoading={isUsageLoading} />
-          <Button
-            asChild
-            variant="outline"
-            size="sm"
-            className="border-border text-foreground hover:bg-muted"
-          >
-            <a
-              href="http://localhost:8088"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2"
+          <QuotaBadge
+            label="Databases"
+            usage={usage?.database}
+            isLoading={isUsageLoading}
+          />
+          {adminer.enabled && adminer.url ? (
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="border-border text-foreground hover:bg-muted"
             >
-              <ExternalLink className="h-4 w-4" />
-              Open Adminer
-            </a>
-          </Button>
+              <a
+                href={adminer.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Open Adminer
+              </a>
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled
+              title={adminer.disabledReason}
+            >
+              Adminer unavailable
+            </Button>
+          )}
 
           <Button
             id="create-database-btn"
@@ -341,7 +385,11 @@ export default function DatabasesPage() {
             size="sm"
             className="flex items-center gap-2"
             disabled={isQuotaAtLimit(usage?.database)}
-            title={isQuotaAtLimit(usage?.database) ? "You've reached your database limit" : undefined}
+            title={
+              isQuotaAtLimit(usage?.database)
+                ? "You've reached your database limit"
+                : undefined
+            }
           >
             <Plus className="h-4 w-4" />
             New Database
@@ -412,7 +460,9 @@ export default function DatabasesPage() {
             aria-label="Refresh database list"
             className="border-border text-muted-foreground hover:text-foreground"
           >
-            <RefreshCw className={refreshIconClassName(isRefreshing, "h-4 w-4")} />
+            <RefreshCw
+              className={refreshIconClassName(isRefreshing, "h-4 w-4")}
+            />
           </Button>
         </div>
       </div>
@@ -502,7 +552,9 @@ export default function DatabasesPage() {
 
                   <CardDescription className="text-xs text-muted-foreground flex items-center gap-2">
                     <Server className="h-3 w-3 shrink-0" />
-                    <span>{db.internalHost}:{db.port}</span>
+                    <span>
+                      {db.internalHost}:{db.port}
+                    </span>
                   </CardDescription>
                 </CardHeader>
 
@@ -526,7 +578,9 @@ export default function DatabasesPage() {
                           <span className="truncate">{db.project.name}</span>
                         </Link>
                       ) : (
-                        <span className="text-muted-foreground italic">Standalone</span>
+                        <span className="text-muted-foreground italic">
+                          Standalone
+                        </span>
                       )}
                     </div>
 
@@ -567,17 +621,23 @@ export default function DatabasesPage() {
                       )}
                     </Button>
 
-                    <Button
-                      asChild
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 border-border hover:bg-muted"
-                      title="Open in Adminer Web UI"
-                    >
-                      <a href={db.adminerUrl} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
-                      </a>
-                    </Button>
+                    {db.adminerUrl && (
+                      <Button
+                        asChild
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 border-border hover:bg-muted"
+                        title="Open in Adminer Web UI"
+                      >
+                        <a
+                          href={db.adminerUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
+                        </a>
+                      </Button>
+                    )}
 
                     <Button
                       variant="outline"
@@ -606,7 +666,8 @@ export default function DatabasesPage() {
                 Provision New Database
               </DialogTitle>
               <DialogDescription>
-                Creates an isolated database instance and secure credentials with tailored privileges.
+                Creates an isolated database instance and secure credentials
+                with tailored privileges.
               </DialogDescription>
             </DialogHeader>
 
@@ -626,8 +687,12 @@ export default function DatabasesPage() {
                         : "border-border bg-card hover:bg-muted/50 text-muted-foreground",
                     )}
                   >
-                    <div className="font-semibold text-sm text-foreground">PostgreSQL 16</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">Port 5432 • ACID</div>
+                    <div className="font-semibold text-sm text-foreground">
+                      PostgreSQL 16
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      Port 5432 • ACID
+                    </div>
                   </div>
 
                   <div
@@ -639,15 +704,22 @@ export default function DatabasesPage() {
                         : "border-border bg-card hover:bg-muted/50 text-muted-foreground",
                     )}
                   >
-                    <div className="font-semibold text-sm text-foreground">MySQL 8.0</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">Port 3306 • UTF8MB4</div>
+                    <div className="font-semibold text-sm text-foreground">
+                      MySQL 8.0
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      Port 3306 • UTF8MB4
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* Database Name */}
               <div className="space-y-1.5">
-                <Label htmlFor="create-db-name" className="text-xs font-medium text-foreground">
+                <Label
+                  htmlFor="create-db-name"
+                  className="text-xs font-medium text-foreground"
+                >
                   Database Name
                 </Label>
                 <Input
@@ -665,18 +737,26 @@ export default function DatabasesPage() {
 
               {/* Attach to project */}
               <div className="space-y-1.5">
-                <Label htmlFor="create-db-project" className="text-xs font-medium text-foreground">
+                <Label
+                  htmlFor="create-db-project"
+                  className="text-xs font-medium text-foreground"
+                >
                   Attach to Project (Optional)
                 </Label>
                 <Select
                   value={createProjectId}
                   onValueChange={(val) => setCreateProjectId(val)}
                 >
-                  <SelectTrigger id="create-db-project" className="bg-card border-border">
+                  <SelectTrigger
+                    id="create-db-project"
+                    className="bg-card border-border"
+                  >
                     <SelectValue placeholder="Select a project" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">No project (Standalone)</SelectItem>
+                    <SelectItem value="none">
+                      No project (Standalone)
+                    </SelectItem>
                     {projects.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {p.name} ({p.type})
@@ -696,9 +776,18 @@ export default function DatabasesPage() {
                     onChange={(e) => setCreateAutoInject(e.target.checked)}
                     className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
                   />
-                  <Label htmlFor="auto-inject-env" className="text-xs leading-relaxed text-foreground cursor-pointer">
-                    <span className="font-semibold block">Auto-inject environment variables</span>
-                    Automatically set <code className="text-primary font-mono text-[11px]">DATABASE_URL</code> and granular credentials in the selected project.
+                  <Label
+                    htmlFor="auto-inject-env"
+                    className="text-xs leading-relaxed text-foreground cursor-pointer"
+                  >
+                    <span className="font-semibold block">
+                      Auto-inject environment variables
+                    </span>
+                    Automatically set{" "}
+                    <code className="text-primary font-mono text-[11px]">
+                      DATABASE_URL
+                    </code>{" "}
+                    and granular credentials in the selected project.
                   </Label>
                 </div>
               )}
@@ -714,7 +803,9 @@ export default function DatabasesPage() {
                 Cancel
               </Button>
               <Button type="submit" disabled={isCreating}>
-                {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isCreating && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
                 Provision Database
               </Button>
             </DialogFooter>
@@ -723,7 +814,10 @@ export default function DatabasesPage() {
       </Dialog>
 
       {/* ── Credentials & Connection Details Dialog ──────────────────────── */}
-      <Dialog open={credentialsModalOpen} onOpenChange={setCredentialsModalOpen}>
+      <Dialog
+        open={credentialsModalOpen}
+        onOpenChange={setCredentialsModalOpen}
+      >
         <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
           {selectedDb && (
             <>
@@ -746,7 +840,8 @@ export default function DatabasesPage() {
                   </Badge>
                 </div>
                 <DialogDescription>
-                  Connection strings and credentials for your application and desktop tools.
+                  Connection strings and credentials for your application and
+                  desktop tools.
                 </DialogDescription>
               </DialogHeader>
 
@@ -758,7 +853,12 @@ export default function DatabasesPage() {
                       Internal Docker URI (For Hosted Apps)
                     </Label>
                     <button
-                      onClick={() => handleCopy(selectedDb.internalConnectionString, "internal_uri")}
+                      onClick={() =>
+                        handleCopy(
+                          selectedDb.internalConnectionString,
+                          "internal_uri",
+                        )
+                      }
                       className="flex items-center gap-1 text-xs text-primary hover:underline"
                     >
                       {copiedField === "internal_uri" ? (
@@ -773,7 +873,8 @@ export default function DatabasesPage() {
                     {selectedDb.internalConnectionString}
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    Use this connection string inside your Vexlyx project containers.
+                    Use this connection string inside your Vexlyx project
+                    containers.
                   </p>
                 </div>
 
@@ -784,7 +885,9 @@ export default function DatabasesPage() {
                       Host URI (For External / Local GUI Tools)
                     </Label>
                     <button
-                      onClick={() => handleCopy(selectedDb.connectionString, "host_uri")}
+                      onClick={() =>
+                        handleCopy(selectedDb.connectionString, "host_uri")
+                      }
                       className="flex items-center gap-1 text-xs text-primary hover:underline"
                     >
                       {copiedField === "host_uri" ? (
@@ -813,13 +916,19 @@ export default function DatabasesPage() {
                     <div className="flex items-center justify-between p-2.5 text-xs">
                       <span className="text-muted-foreground">Host</span>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-foreground font-medium">{selectedDb.host}</span>
+                        <span className="font-mono text-foreground font-medium">
+                          {selectedDb.host}
+                        </span>
                         <button
                           onClick={() => handleCopy(selectedDb.host, "host")}
                           className="text-muted-foreground hover:text-foreground"
                           title="Copy host"
                         >
-                          {copiedField === "host" ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                          {copiedField === "host" ? (
+                            <Check className="h-3.5 w-3.5 text-emerald-500" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
                         </button>
                       </div>
                     </div>
@@ -828,28 +937,44 @@ export default function DatabasesPage() {
                     <div className="flex items-center justify-between p-2.5 text-xs">
                       <span className="text-muted-foreground">Port</span>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-foreground font-medium">{selectedDb.port}</span>
+                        <span className="font-mono text-foreground font-medium">
+                          {selectedDb.port}
+                        </span>
                         <button
-                          onClick={() => handleCopy(String(selectedDb.port), "port")}
+                          onClick={() =>
+                            handleCopy(String(selectedDb.port), "port")
+                          }
                           className="text-muted-foreground hover:text-foreground"
                           title="Copy port"
                         >
-                          {copiedField === "port" ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                          {copiedField === "port" ? (
+                            <Check className="h-3.5 w-3.5 text-emerald-500" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
                         </button>
                       </div>
                     </div>
 
                     {/* Database */}
                     <div className="flex items-center justify-between p-2.5 text-xs">
-                      <span className="text-muted-foreground">Database Name</span>
+                      <span className="text-muted-foreground">
+                        Database Name
+                      </span>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-foreground font-medium">{selectedDb.name}</span>
+                        <span className="font-mono text-foreground font-medium">
+                          {selectedDb.name}
+                        </span>
                         <button
                           onClick={() => handleCopy(selectedDb.name, "dbname")}
                           className="text-muted-foreground hover:text-foreground"
                           title="Copy db name"
                         >
-                          {copiedField === "dbname" ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                          {copiedField === "dbname" ? (
+                            <Check className="h-3.5 w-3.5 text-emerald-500" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
                         </button>
                       </div>
                     </div>
@@ -858,13 +983,19 @@ export default function DatabasesPage() {
                     <div className="flex items-center justify-between p-2.5 text-xs">
                       <span className="text-muted-foreground">Username</span>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-foreground font-medium">{selectedDb.dbUser}</span>
+                        <span className="font-mono text-foreground font-medium">
+                          {selectedDb.dbUser}
+                        </span>
                         <button
                           onClick={() => handleCopy(selectedDb.dbUser, "user")}
                           className="text-muted-foreground hover:text-foreground"
                           title="Copy username"
                         >
-                          {copiedField === "user" ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                          {copiedField === "user" ? (
+                            <Check className="h-3.5 w-3.5 text-emerald-500" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
                         </button>
                       </div>
                     </div>
@@ -874,22 +1005,36 @@ export default function DatabasesPage() {
                       <span className="text-muted-foreground">Password</span>
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-foreground font-medium">
-                          {showPassword ? (selectedDb.dbPassword ?? "••••••••") : "••••••••••••••••••••••••"}
+                          {showPassword
+                            ? (selectedDb.dbPassword ?? "••••••••")
+                            : "••••••••••••••••••••••••"}
                         </span>
                         <button
                           onClick={() => setShowPassword(!showPassword)}
                           className="text-muted-foreground hover:text-foreground mr-1"
-                          title={showPassword ? "Hide password" : "Show password"}
+                          title={
+                            showPassword ? "Hide password" : "Show password"
+                          }
                         >
-                          {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          {showPassword ? (
+                            <EyeOff className="h-3.5 w-3.5" />
+                          ) : (
+                            <Eye className="h-3.5 w-3.5" />
+                          )}
                         </button>
                         {selectedDb.dbPassword && (
                           <button
-                            onClick={() => handleCopy(selectedDb.dbPassword!, "password")}
+                            onClick={() =>
+                              handleCopy(selectedDb.dbPassword!, "password")
+                            }
                             className="text-muted-foreground hover:text-foreground"
                             title="Copy password"
                           >
-                            {copiedField === "password" ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                            {copiedField === "password" ? (
+                              <Check className="h-3.5 w-3.5 text-emerald-500" />
+                            ) : (
+                              <Copy className="h-3.5 w-3.5" />
+                            )}
                           </button>
                         )}
                       </div>
@@ -899,19 +1044,28 @@ export default function DatabasesPage() {
               </div>
 
               <DialogFooter className="flex sm:justify-between items-center gap-2">
-                <Button
-                  asChild
-                  variant="outline"
-                  size="sm"
-                  className="border-border text-foreground hover:bg-muted"
-                >
-                  <a href={selectedDb.adminerUrl} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
-                    Open in Adminer
-                  </a>
-                </Button>
+                {selectedDb.adminerUrl && (
+                  <Button
+                    asChild
+                    variant="outline"
+                    size="sm"
+                    className="border-border text-foreground hover:bg-muted"
+                  >
+                    <a
+                      href={selectedDb.adminerUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                      Open in Adminer
+                    </a>
+                  </Button>
+                )}
 
-                <Button size="sm" onClick={() => setCredentialsModalOpen(false)}>
+                <Button
+                  size="sm"
+                  onClick={() => setCredentialsModalOpen(false)}
+                >
                   Done
                 </Button>
               </DialogFooter>
@@ -921,7 +1075,10 @@ export default function DatabasesPage() {
       </Dialog>
 
       {/* ── Delete Confirmation Dialog ──────────────────────────────────── */}
-      <Dialog open={!!deleteDb} onOpenChange={(open) => !open && setDeleteDb(null)}>
+      <Dialog
+        open={!!deleteDb}
+        onOpenChange={(open) => !open && setDeleteDb(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="text-destructive flex items-center gap-2">
@@ -929,7 +1086,13 @@ export default function DatabasesPage() {
               Delete Database &ldquo;{deleteDb?.name}&rdquo;?
             </DialogTitle>
             <DialogDescription>
-              This will drop the database, terminate all active connections, and delete the user <code className="font-mono text-foreground">{deleteDb?.dbUser}</code> from the {deleteDb?.type} engine. All stored data will be permanently erased.
+              This will drop the database, terminate all active connections, and
+              delete the user{" "}
+              <code className="font-mono text-foreground">
+                {deleteDb?.dbUser}
+              </code>{" "}
+              from the {deleteDb?.type} engine. All stored data will be
+              permanently erased.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

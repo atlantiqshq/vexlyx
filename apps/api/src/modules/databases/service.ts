@@ -6,9 +6,11 @@ import { fileURLToPath } from "node:url";
 import type { PrismaClient, DatabaseType } from "@prisma/client";
 import { env } from "../../config/env.js";
 import { encrypt, decrypt } from "../../utils/encryption.js";
-import { assertUnderQuota } from "../../utils/quota.js";
+import { assertUnderQuota, notifyQuotaThreshold } from "../../utils/quota.js";
 import { EnvService } from "../env/service.js";
 import type { AuditLogService } from "../audit-log/service.js";
+import { getPythonBin } from "../../utils/pythonBin.js";
+import { PYTHON_SCRIPT_TIMEOUT_MS, watchChildTimeout } from "../../utils/processWatchdog.js";
 import type {
   CreateDatabaseInput,
   DatabaseListQuery,
@@ -48,15 +50,26 @@ function getDatabaseManagerScriptPath(): string {
     if (existsSync(candidate)) return candidate;
   }
 
-  return candidates[0] ?? resolve(process.cwd(), "system/python/database_manager.py");
+  return (
+    candidates[0] ?? resolve(process.cwd(), "system/python/database_manager.py")
+  );
 }
 
 function runPythonCommand<T>(payload: Record<string, unknown>): Promise<T> {
   return new Promise((resolveP, rejectP) => {
     const scriptPath = getDatabaseManagerScriptPath();
-    const child = spawn("python", [scriptPath], {
+    const child = spawn(getPythonBin(), [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.database, (ms) =>
+      rejectP(
+        new DatabaseError(
+          `Database manager timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";
@@ -129,7 +142,8 @@ function runPythonCommand<T>(payload: Record<string, unknown>): Promise<T> {
 // ---------------------------------------------------------------------------
 
 function generateSecurePassword(length = 24): string {
-  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const chars =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   const bytes = randomBytes(length);
   let result = "";
   for (let i = 0; i < length; i++) {
@@ -139,7 +153,10 @@ function generateSecurePassword(length = 24): string {
 }
 
 function generateDbUsername(dbName: string): string {
-  const cleanName = dbName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 10);
+  const cleanName = dbName
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 10);
   const rand = randomBytes(4).toString("hex");
   return `u_${cleanName}_${rand}`;
 }
@@ -164,12 +181,16 @@ export class DatabaseService {
   /**
    * Provision a new isolated database and user on the selected engine.
    */
-  async create(userId: string, input: CreateDatabaseInput): Promise<DatabaseDetail> {
+  async create(
+    userId: string,
+    input: CreateDatabaseInput,
+  ): Promise<DatabaseDetail> {
     await assertUnderQuota(
       this.prisma,
       userId,
       "database",
-      (message, code, statusCode) => new DatabaseError(message, code, statusCode),
+      (message, code, statusCode) =>
+        new DatabaseError(message, code, statusCode),
     );
 
     // 1. Check for name collision under this user
@@ -197,7 +218,11 @@ export class DatabaseService {
         select: { id: true, userId: true, deletedAt: true },
       });
       if (!project || project.deletedAt !== null || project.userId !== userId) {
-        throw new DatabaseError("Attached project not found", "PROJECT_NOT_FOUND", 404);
+        throw new DatabaseError(
+          "Attached project not found",
+          "PROJECT_NOT_FOUND",
+          404,
+        );
       }
     }
 
@@ -209,9 +234,13 @@ export class DatabaseService {
     const isPostgres = input.type === "POSTGRESQL";
     const host = isPostgres ? env.POSTGRES_HOST : env.MYSQL_HOST;
     const port = isPostgres ? env.POSTGRES_PORT : env.MYSQL_PORT;
-    const containerName = isPostgres ? env.POSTGRES_CONTAINER_NAME : env.MYSQL_CONTAINER_NAME;
+    const containerName = isPostgres
+      ? env.POSTGRES_CONTAINER_NAME
+      : env.MYSQL_CONTAINER_NAME;
     const rootUser = isPostgres ? env.POSTGRES_USER : env.MYSQL_ROOT_USER;
-    const rootPassword = isPostgres ? env.POSTGRES_PASSWORD : env.MYSQL_ROOT_PASSWORD;
+    const rootPassword = isPostgres
+      ? env.POSTGRES_PASSWORD
+      : env.MYSQL_ROOT_PASSWORD;
 
     // 4. Execute system provisioning via database_manager.py
     await runPythonCommand({
@@ -243,6 +272,7 @@ export class DatabaseService {
         },
       },
     });
+    void notifyQuotaThreshold(this.prisma, userId, "database");
 
     // 6. Optionally auto-inject connection env vars into project
     if (input.projectId && input.autoInjectEnv !== false) {
@@ -268,9 +298,14 @@ export class DatabaseService {
       await this.envService.bulkUpsert(userId, input.projectId, envVars);
     }
 
-    await this.auditLog?.log(userId, "database.created", { type: "Database", id: dbRecord.id }, {
-      after: { name: dbRecord.name, engine: dbRecord.type },
-    });
+    await this.auditLog?.log(
+      userId,
+      "database.created",
+      { type: "Database", id: dbRecord.id },
+      {
+        after: { name: dbRecord.name, engine: dbRecord.type },
+      },
+    );
 
     return this.formatDatabaseDetail(dbRecord, plainPassword);
   }
@@ -320,6 +355,7 @@ export class DatabaseService {
 
     return {
       databases,
+      adminer: this.getAdminerAvailability(),
       pagination: {
         page,
         limit,
@@ -350,7 +386,11 @@ export class DatabaseService {
     try {
       plainPw = decrypt(record.dbPassword);
     } catch {
-      throw new DatabaseError("Failed to decrypt database password", "DECRYPTION_ERROR", 500);
+      throw new DatabaseError(
+        "Failed to decrypt database password",
+        "DECRYPTION_ERROR",
+        500,
+      );
     }
 
     return this.formatDatabaseDetail(record, plainPw);
@@ -359,7 +399,10 @@ export class DatabaseService {
   /**
    * Test live connection to the database.
    */
-  async testConnection(userId: string, id: string): Promise<DatabaseConnectionTestResult> {
+  async testConnection(
+    userId: string,
+    id: string,
+  ): Promise<DatabaseConnectionTestResult> {
     const record = await this.prisma.database.findUnique({
       where: { id },
     });
@@ -372,11 +415,17 @@ export class DatabaseService {
     try {
       plainPw = decrypt(record.dbPassword);
     } catch {
-      throw new DatabaseError("Failed to decrypt database password", "DECRYPTION_ERROR", 500);
+      throw new DatabaseError(
+        "Failed to decrypt database password",
+        "DECRYPTION_ERROR",
+        500,
+      );
     }
 
     const isPostgres = record.type === "POSTGRESQL";
-    const containerName = isPostgres ? env.POSTGRES_CONTAINER_NAME : env.MYSQL_CONTAINER_NAME;
+    const containerName = isPostgres
+      ? env.POSTGRES_CONTAINER_NAME
+      : env.MYSQL_CONTAINER_NAME;
 
     return await runPythonCommand<DatabaseConnectionTestResult>({
       command: "test_connection",
@@ -391,7 +440,10 @@ export class DatabaseService {
   /**
    * Delete database and associated user.
    */
-  async delete(userId: string, id: string): Promise<{ success: boolean; id: string }> {
+  async delete(
+    userId: string,
+    id: string,
+  ): Promise<{ success: boolean; id: string }> {
     const record = await this.prisma.database.findUnique({
       where: { id },
     });
@@ -401,9 +453,13 @@ export class DatabaseService {
     }
 
     const isPostgres = record.type === "POSTGRESQL";
-    const containerName = isPostgres ? env.POSTGRES_CONTAINER_NAME : env.MYSQL_CONTAINER_NAME;
+    const containerName = isPostgres
+      ? env.POSTGRES_CONTAINER_NAME
+      : env.MYSQL_CONTAINER_NAME;
     const rootUser = isPostgres ? env.POSTGRES_USER : env.MYSQL_ROOT_USER;
-    const rootPassword = isPostgres ? env.POSTGRES_PASSWORD : env.MYSQL_ROOT_PASSWORD;
+    const rootPassword = isPostgres
+      ? env.POSTGRES_PASSWORD
+      : env.MYSQL_ROOT_PASSWORD;
 
     // Drop from container engine
     try {
@@ -416,18 +472,34 @@ export class DatabaseService {
         rootUser,
         rootPassword,
       });
-    } catch {
-      // If container is down or already dropped, proceed with Prisma deletion to avoid stuck records
+    } catch (err) {
+      // The drop statements are idempotent (DROP ... IF EXISTS), so an
+      // already-dropped database is a success, not an error. Anything that
+      // reaches here is a real failure (engine down, bad root credentials,
+      // SQL error). Keep the record and report it: deleting the row anyway
+      // would orphan a live database with data in it, and the audit trail
+      // would claim a deletion that never happened.
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new DatabaseError(
+        `Could not drop database "${record.name}": ${reason}. The record was kept — resolve the problem and try again.`,
+        "DATABASE_DROP_FAILED",
+        502,
+      );
     }
 
-    // Delete from Prisma
+    // Only reached once the engine confirmed the drop. Delete from Prisma
     await this.prisma.database.delete({
       where: { id },
     });
 
-    await this.auditLog?.log(userId, "database.deleted", { type: "Database", id }, {
-      before: { name: record.name, engine: record.type },
-    });
+    await this.auditLog?.log(
+      userId,
+      "database.deleted",
+      { type: "Database", id },
+      {
+        before: { name: record.name, engine: record.type },
+      },
+    );
 
     return { success: true, id };
   }
@@ -457,12 +529,26 @@ export class DatabaseService {
     containerHost: string,
     user: string,
     dbName: string,
-  ): string {
+  ): string | undefined {
+    if (!env.ADMINER_URL) return undefined;
+
     const baseUrl = env.ADMINER_URL.replace(/\/$/, "");
     if (type === "POSTGRESQL") {
       return `${baseUrl}/?pgsql=${encodeURIComponent(containerHost)}&username=${encodeURIComponent(user)}&db=${encodeURIComponent(dbName)}`;
     }
     return `${baseUrl}/?server=${encodeURIComponent(containerHost)}&username=${encodeURIComponent(user)}&db=${encodeURIComponent(dbName)}`;
+  }
+
+  private getAdminerAvailability() {
+    if (!env.ADMINER_URL) {
+      return {
+        enabled: false,
+        disabledReason:
+          "Adminer is disabled. An administrator must configure secure access.",
+      };
+    }
+
+    return { enabled: true, url: env.ADMINER_URL };
   }
 
   private formatDatabaseDetail(
@@ -482,7 +568,9 @@ export class DatabaseService {
     plainPassword?: string,
   ): DatabaseDetail {
     const isPostgres = rec.type === "POSTGRESQL";
-    const internalHost = isPostgres ? env.POSTGRES_CONTAINER_NAME : env.MYSQL_CONTAINER_NAME;
+    const internalHost = isPostgres
+      ? env.POSTGRES_CONTAINER_NAME
+      : env.MYSQL_CONTAINER_NAME;
     const effectivePw = plainPassword ?? "********";
 
     const connectionString = this.buildConnectionString(
@@ -503,7 +591,12 @@ export class DatabaseService {
       rec.name,
     );
 
-    const adminerUrl = this.buildAdminerUrl(rec.type, internalHost, rec.dbUser, rec.name);
+    const adminerUrl = this.buildAdminerUrl(
+      rec.type,
+      internalHost,
+      rec.dbUser,
+      rec.name,
+    );
 
     return {
       id: rec.id,

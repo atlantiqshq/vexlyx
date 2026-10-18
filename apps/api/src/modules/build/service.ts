@@ -8,10 +8,14 @@ import type { Deployment, ProjectType } from "@vexlyx/shared";
 import { env } from "../../config/env.js";
 import { runDockerDeploy, runDockerStatus } from "../deploy/service.js";
 import { runGitManager } from "../git/service.js";
+import { isFatalGitSyncError } from "./gitSyncPolicy.js";
 import { EnvService } from "../env/service.js";
+import { getGitHubInstallationToken } from "../github/service.js";
 import { CleanupService } from "../cleanup/service.js";
 import { getIO } from "../../plugins/socket.js";
 import type { BuildJobData, DeploymentListQuery, TriggerBuildBody } from "./schema.js";
+import { getPythonBin } from "../../utils/pythonBin.js";
+import { PYTHON_SCRIPT_TIMEOUT_MS, watchChildTimeout } from "../../utils/processWatchdog.js";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -84,9 +88,18 @@ function runBuildPlan(
     const scriptPath = getBuildManagerScriptPath();
     const payload = JSON.stringify({ command: "plan", projectDir, envVars });
 
-    const child = spawn("python", [scriptPath], {
+    const child = spawn(getPythonBin(), [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.quick, (ms) =>
+      rejectP(
+        new BuildError(
+          `Framework detection timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";
@@ -165,9 +178,18 @@ function runBuildImage(
       envVars: options.envVars,
     });
 
-    const child = spawn("python", [scriptPath], {
+    const child = spawn(getPythonBin(), [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.build, (ms) =>
+      rejectP(
+        new BuildError(
+          `Image build timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let buffer = "";
     let stderrBuffer = "";
@@ -255,9 +277,18 @@ function runExtractStaticOutput(
       imageName: options.imageName,
     });
 
-    const child = spawn("python", [scriptPath], {
+    const child = spawn(getPythonBin(), [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.staticExtract, (ms) =>
+      rejectP(
+        new BuildError(
+          `Static output extraction timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let buffer = "";
     let stderrBuffer = "";
@@ -406,6 +437,8 @@ export function createBuildProcessor(
           gitUrl: true,
           branch: true,
           sshPrivateKeyPath: true,
+          githubConnectionStatus: true,
+          githubInstallation: { select: { installationId: true, status: true } },
         },
       });
 
@@ -417,6 +450,15 @@ export function createBuildProcessor(
       if (project.gitUrl) {
         await appendLog(`[vexlyx] Syncing latest git commits (${project.branch})…`);
         try {
+          if (
+            project.githubInstallation &&
+            (project.githubConnectionStatus !== "CONNECTED" || project.githubInstallation.status !== "CONNECTED")
+          ) {
+            throw new Error("The GitHub connection is inactive. Reconnect it before deploying.");
+          }
+          const accessToken = project.githubInstallation
+            ? await getGitHubInstallationToken(prisma, project.githubInstallation.installationId)
+            : undefined;
           await runGitManager({
             command: "clone",
             projectId,
@@ -424,11 +466,13 @@ export function createBuildProcessor(
             branch: project.branch,
             projectsDir: resolve(env.PROJECTS_DIR),
             sshPrivateKeyPath: project.sshPrivateKeyPath ?? undefined,
+            accessToken,
           });
           await appendLog("[vexlyx] Git workspace up-to-date ✓");
         } catch (gitErr) {
           const msg = gitErr instanceof Error ? gitErr.message : String(gitErr);
           await appendLog(`[vexlyx:warn] Git sync notice: ${msg}`);
+          if (isFatalGitSyncError(gitErr, Boolean(project.githubInstallation))) throw gitErr;
         }
       }
 

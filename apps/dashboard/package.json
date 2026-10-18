@@ -1,6 +1,6 @@
 {
   "name": "@vexlyx/dashboard",
-  "version": "0.0.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Vexlyx Dashboard — Next.js 15 frontend",
   "scripts": {
@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "clean": "rimraf .next .turbo node_modules/.cache"
   },
   "dependencies": {
@@ -40,10 +41,11 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.8",
-    "@types/node": "20.17.6",
+    "@types/node": "^22.0.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "postcss": "^8.5.4",
-    "tailwindcss": "^4.1.8"
+    "tailwindcss": "^4.1.8",
+    "vitest": "^5.0.0"
   }
 }

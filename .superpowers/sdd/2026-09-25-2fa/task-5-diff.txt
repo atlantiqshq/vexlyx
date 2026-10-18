@@ -1,0 +1,302 @@
+diff --git a/.superpowers/sdd/2026-09-25-2fa/task-5-report.md b/.superpowers/sdd/2026-09-25-2fa/task-5-report.md
+new file mode 100644
+index 0000000..befad1b
+--- /dev/null
++++ b/.superpowers/sdd/2026-09-25-2fa/task-5-report.md
+@@ -0,0 +1,62 @@
++# Task 5 Report — Auth routes: login split, 2FA endpoints, admin reset, config
++
++**Status:** DONE
++
++## What was implemented
++
++- `apps/api/src/modules/auth/schema.ts` — re-exported `TwoFactorChallengeSchema`,
++  `VerifyTotpSetupSchema`, `DisableTwoFactorSchema` + `*Input` types from
++  `@vexlyx/shared` so `routes.ts` imports resolve (was 2 lines, now 2 lines).
++- `apps/api/src/modules/auth/routes.ts`
++  - Login now returns `202 { requires2FA: true, challengeToken }` when
++    `totpEnabled`, `403 { code: "ADMIN_2FA_REQUIRED" }` when
++    `REQUIRE_ADMIN_2FA` and an ADMIN has no 2FA, else creates a session as before.
++  - New: `POST /2fa/challenge` (rate-limited 5/15min, 401 `2FA_INVALID_CODE` on
++    bad/expired challenge or code, else session + `{ user }`),
++    `POST /2fa/setup` (auth), `POST /2fa/verify-setup` (auth, rate-limited
++    5/15min, returns `{ recoveryCodes }`), `POST /2fa/disable` (auth, returns
++    `{ message }`).
++  - `/config` now returns `{ allowRegistration, requireAdmin2FA }`.
++  - Deviation from plan verbatim: new handlers wrap service calls in
++    try/catch mapping `AuthError` → `{ error, code, details }` (same shape as
++    existing handlers). Plan code would have leaked `AuthError` as 500s,
++    violating the global error-shape constraint.
++- `apps/api/src/modules/users/routes.ts` — `POST /:id/2fa/reset` (ADMIN-only,
++  next to role-change route) via `twoFactorAdminReset` helper constructing
++  `TwoFactorService` per-request (same pattern as existing `UserService`).
++- `apps/api/src/modules/auth/two-factor-routes.test.ts` — plan's route test
++  (unknown challenge → 401 `2FA_INVALID_CODE`).
++  - Deviation 1: `it(..., 30_000)` — cold import chain (argon2 native + qrcode +
++    Fastify) takes ~4.5–6s on this dev machine vs the 5s default timeout; the
++    test is correct, the box is slow. No contract change.
++  - Deviation 2: `app.decorate` mocks cast via `as unknown as
++    import("fastify").FastifyInstance["prisma"|"redis"|"requireAuth"]` (same
++    pattern as `src/plugins/auth.test.ts`) — plan verbatim fails `tsc --noEmit`.
++
++## Commits
++
++- `feat(2fa): split login with challenge and 2fa endpoints` (files: auth
++  `routes.ts`, `schema.ts`, users `routes.ts`, `two-factor-routes.test.ts`)
++
++## Test command + output
++
++`pnpm --filter @vexlyx/api test -- src/modules/auth/`
++(note: the filter arg does not narrow — full API suite runs)
++Result: **PASS — Test Files 10 passed (10), Tests 61 passed (61).**
++
++`pnpm --filter @vexlyx/api typecheck` → my files clean; 3 remaining errors are
++pre-existing in Task 4's `two-factor-service.test.ts` (lines 102/123/125,
++`string | undefined` indexing) — file untouched by this task.
++
++## Concerns
++
++1. Suite is timing-flaky on this machine: before the `30_000` timeout, the new
++   test (and once, `plugins/auth.test.ts`) hit the 5s default under parallel
++   workers. CI/faster hardware should be unaffected.
++2. Task 8's `pnpm typecheck` gate will fail on the pre-existing Task 4 test
++   errors noted above — needs a `non-null`/`!` fix in `two-factor-service.test.ts`.
++3. Unused `beforeEach` import in the new test file comes from the plan verbatim;
++   left as-is (vitest passes; lint may flag — Task 8's problem).
++4. Contracts for Tasks 6–7 are live: `202 { requires2FA, challengeToken }`,
++   `403 ADMIN_2FA_REQUIRED`, challenge/setup/verify-setup/disable/reset shapes
++   and `requireAdmin2FA` in `/config` exactly per plan §Task 5 interfaces.
+diff --git a/apps/api/src/modules/auth/routes.ts b/apps/api/src/modules/auth/routes.ts
+index 1b5d6b4..5733323 100644
+--- a/apps/api/src/modules/auth/routes.ts
++++ b/apps/api/src/modules/auth/routes.ts
+@@ -1,20 +1,23 @@
+ import type { FastifyInstance } from "fastify";
+ import rateLimit from "@fastify/rate-limit";
+-import { RegisterSchema, LoginSchema, ChangePasswordSchema } from "./schema.js";
++import { RegisterSchema, LoginSchema, ChangePasswordSchema, TwoFactorChallengeSchema, VerifyTotpSetupSchema, DisableTwoFactorSchema } from "./schema.js";
+ import { AuthService, AuthError } from "./service.js";
++import { TwoFactorService } from "./two-factor-service.js";
++import { AuditLogService } from "../audit-log/service.js";
+ import { createSession, destroySession } from "../../plugins/auth.js";
+ import { env } from "../../config/env.js";
+ 
+ 
+ export async function authRoutes(app: FastifyInstance) {
+   const service = new AuthService(app.prisma);
++  const twoFactor = new TwoFactorService(app.prisma, app.redis, new AuditLogService(app.prisma, app.log));
+ 
+   // Register rate limiting plugin for this scope
+   await app.register(rateLimit, {
+     max: 1000,
+     timeWindow: "1 minute",
+     keyGenerator: (request) => request.ip,
+   });
+ 
+   // POST /api/auth/register
+   app.post("/register", {
+@@ -61,20 +64,30 @@ export async function authRoutes(app: FastifyInstance) {
+       rateLimit: {
+         max: 5,
+         timeWindow: "15 minutes",
+       },
+     },
+     handler: async (request, reply) => {
+       try {
+         const data = LoginSchema.parse(request.body);
+         const user = await service.login(data);
+ 
++        const full = await app.prisma.user.findUnique({ where: { id: user.id } });
++        if (full?.totpEnabled) {
++          const challengeToken = await twoFactor.storeChallenge(user.id);
++          reply.status(202).send({ requires2FA: true, challengeToken });
++          return;
++        }
++        if (env.REQUIRE_ADMIN_2FA && user.role === "ADMIN" && !full?.totpEnabled) {
++          reply.status(403).send({ error: "Admins must enable two-factor authentication", code: "ADMIN_2FA_REQUIRED", details: {} });
++          return;
++        }
+         await createSession(app, reply, user.id);
+ 
+         return { user };
+       } catch (err) {
+         if (err instanceof AuthError) {
+           reply.status(err.statusCode).send({
+             error: err.message,
+             code: err.code,
+             details: {},
+           });
+@@ -126,13 +139,70 @@ export async function authRoutes(app: FastifyInstance) {
+           return;
+         }
+         throw err;
+       }
+     },
+   });
+ 
+   // GET /api/auth/config — public, lets the dashboard know whether to show
+   // the self-registration form/link (F5.8).
+   app.get("/config", async () => {
+-    return { allowRegistration: env.ALLOW_REGISTRATION };
++    return { allowRegistration: env.ALLOW_REGISTRATION, requireAdmin2FA: env.REQUIRE_ADMIN_2FA };
++  });
++
++  app.post("/2fa/challenge", { config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } }, async (request, reply) => {
++    try {
++      const data = TwoFactorChallengeSchema.parse(request.body);
++      const userId = await twoFactor.consumeChallenge(data.challengeToken);
++      if (!userId) return reply.status(401).send({ error: "Invalid or expired code", code: "2FA_INVALID_CODE", details: {} });
++      if (!(await twoFactor.verifyLoginCode(userId, data.code))) return reply.status(401).send({ error: "Invalid or expired code", code: "2FA_INVALID_CODE", details: {} });
++      const user = await service.getCurrentUser(userId);
++      await createSession(app, reply, userId);
++      return { user };
++    } catch (err) {
++      if (err instanceof AuthError) {
++        reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
++        return;
++      }
++      throw err;
++    }
++  });
++
++  app.post("/2fa/setup", { preHandler: [app.requireAuth] }, async (request, reply) => {
++    try {
++      return twoFactor.createSetup(request.userId!);
++    } catch (err) {
++      if (err instanceof AuthError) {
++        reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
++        return;
++      }
++      throw err;
++    }
++  });
++
++  app.post("/2fa/verify-setup", { preHandler: [app.requireAuth], config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } }, async (request, reply) => {
++    try {
++      const data = VerifyTotpSetupSchema.parse(request.body);
++      return twoFactor.confirmSetup(request.userId!, data.code);
++    } catch (err) {
++      if (err instanceof AuthError) {
++        reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
++        return;
++      }
++      throw err;
++    }
++  });
++
++  app.post("/2fa/disable", { preHandler: [app.requireAuth] }, async (request, reply) => {
++    try {
++      const data = DisableTwoFactorSchema.parse(request.body);
++      await twoFactor.disable(request.userId!, data.password, data.codeOrRecovery);
++      return { message: "Two-factor authentication disabled" };
++    } catch (err) {
++      if (err instanceof AuthError) {
++        reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
++        return;
++      }
++      throw err;
++    }
+   });
+ }
+diff --git a/apps/api/src/modules/auth/schema.ts b/apps/api/src/modules/auth/schema.ts
+index 0715218..db641b0 100644
+--- a/apps/api/src/modules/auth/schema.ts
++++ b/apps/api/src/modules/auth/schema.ts
+@@ -1,2 +1,2 @@
+-export { RegisterSchema, LoginSchema, ChangePasswordSchema } from "@vexlyx/shared";
+-export type { RegisterInput, LoginInput, ChangePasswordInput } from "@vexlyx/shared";
++export { RegisterSchema, LoginSchema, ChangePasswordSchema, TwoFactorChallengeSchema, VerifyTotpSetupSchema, DisableTwoFactorSchema } from "@vexlyx/shared";
++export type { RegisterInput, LoginInput, ChangePasswordInput, TwoFactorChallengeInput, VerifyTotpSetupInput, DisableTwoFactorInput } from "@vexlyx/shared";
+diff --git a/apps/api/src/modules/auth/two-factor-routes.test.ts b/apps/api/src/modules/auth/two-factor-routes.test.ts
+new file mode 100644
+index 0000000..4225bd2
+--- /dev/null
++++ b/apps/api/src/modules/auth/two-factor-routes.test.ts
+@@ -0,0 +1,19 @@
++import { describe, it, expect, vi, beforeEach } from "vitest";
++import Fastify from "fastify";
++
++process.env.DATABASE_URL ??= "postgresql://user:pass@localhost:5432/vexlyx_test";
++process.env.SESSION_SECRET ??= "test-session-secret-at-least-32-characters-long";
++
++describe("POST /api/auth/2fa/challenge rate limit + shape", () => {
++  it("rejects unknown challenge with 401 2FA_INVALID_CODE", async () => {
++    const { authRoutes } = await import("./routes.js");
++    const app = Fastify();
++    app.decorate("prisma", { user: { findUnique: vi.fn() } } as unknown as import("fastify").FastifyInstance["prisma"]);
++    app.decorate("redis", { get: vi.fn(async () => null), set: vi.fn(), del: vi.fn() } as unknown as import("fastify").FastifyInstance["redis"]);
++    app.decorate("requireAuth", vi.fn() as unknown as import("fastify").FastifyInstance["requireAuth"]);
++    await app.register(authRoutes, { prefix: "/api/auth" });
++    const res = await app.inject({ method: "POST", url: "/api/auth/2fa/challenge", payload: { challengeToken: "x".repeat(64), code: "123456" } });
++    expect(res.statusCode).toBe(401);
++    expect(res.json().code).toBe("2FA_INVALID_CODE");
++  }, 30_000);
++});
+diff --git a/apps/api/src/modules/users/routes.ts b/apps/api/src/modules/users/routes.ts
+index a68e161..fff4e6f 100644
+--- a/apps/api/src/modules/users/routes.ts
++++ b/apps/api/src/modules/users/routes.ts
+@@ -1,29 +1,35 @@
+ import type { FastifyInstance, FastifyReply } from "fastify";
+ import { UserService, UserError } from "./service.js";
+ import { AuditLogService } from "../audit-log/service.js";
++import { TwoFactorService } from "../auth/two-factor-service.js";
+ import {
+   CreateSubAccountSchema,
+   UpdateUserRoleSchema,
+   UpdateUserQuotasSchema,
+   UpdateUserPermissionsSchema,
+   UserIdParamSchema,
+ } from "./schema.js";
+ 
+ function handleUserError(err: unknown, reply: FastifyReply): void {
+   if (err instanceof UserError) {
+     reply.status(err.statusCode).send({ error: err.message, code: err.code, details: {} });
+     return;
+   }
+   throw err;
+ }
+ 
++async function twoFactorAdminReset(app: FastifyInstance, actorId: string, targetId: string) {
++  const svc = new TwoFactorService(app.prisma, app.redis, new AuditLogService(app.prisma, app.log));
++  await svc.adminReset(actorId, targetId);
++}
++
+ export async function userRoutes(app: FastifyInstance) {
+   const auditLog = new AuditLogService(app.prisma, app.log);
+   const service = new UserService(app.prisma, auditLog);
+ 
+   // GET /api/users/me/usage — any authenticated user, their own quota/usage
+   // breakdown (the "Your Plan" dashboard widget).
+   app.get("/me/usage", { preHandler: [app.requireAuth] }, async (request) => {
+     return service.getUsageSummary(request.userId!);
+   });
+ 
+@@ -57,20 +63,27 @@ export async function userRoutes(app: FastifyInstance) {
+   app.patch("/:id/role", { preHandler: [app.requireRole("ADMIN")] }, async (request, reply) => {
+     try {
+       const { id } = UserIdParamSchema.parse(request.params);
+       const body = UpdateUserRoleSchema.parse(request.body);
+       return await service.updateRole({ id: request.userId!, role: request.userRole! }, id, body);
+     } catch (err) {
+       handleUserError(err, reply);
+     }
+   });
+ 
++  // POST /api/users/:id/2fa/reset — ADMIN only (F5.17)
++  app.post("/:id/2fa/reset", { preHandler: [app.requireRole("ADMIN")] }, async (request) => {
++    const { id } = UserIdParamSchema.parse(request.params);
++    await twoFactorAdminReset(app, request.userId!, id);
++    return { message: "Two-factor authentication reset" };
++  });
++
+   // PATCH /api/users/:id/quotas — ADMIN (any user) or RESELLER (own sub-accounts only)
+   app.patch("/:id/quotas", { preHandler: [app.requireRole("ADMIN", "RESELLER")] }, async (request, reply) => {
+     try {
+       const { id } = UserIdParamSchema.parse(request.params);
+       const body = UpdateUserQuotasSchema.parse(request.body);
+       return await service.updateQuotas({ id: request.userId!, role: request.userRole! }, id, body);
+     } catch (err) {
+       handleUserError(err, reply);
+     }
+   });

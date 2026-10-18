@@ -17,6 +17,8 @@ F5.3 adds a `/backups` page to the Vexlyx dashboard that:
 
 Out of scope for this pass: S3/MinIO remote storage (local disk only, under `BACKUPS_DIR`), and certificates/vacation responders/SFTP accounts/env vars (not included in the manifest).
 
+Project restore stops the project's Compose stack before extracting files. The stop command verifies every container (including sidecars) is stopped; Docker listing or inspection failures abort the restore with `RESTORE_STOP_FAILED`. No files are extracted and no successful restore audit event is recorded on this path. Resolve the Docker error and retry. Projects without a recorded container can restore directly. Operators must avoid concurrent starts or deployments during restore; this check does not lock external Docker operations.
+
 ---
 
 ## Architecture
@@ -85,12 +87,15 @@ Database dumps and restores stream through Python's built-in `gzip` module (not 
 
 | Direction | Event | Payload |
 |-----------|-------|---------|
-| Client → Server | `subscribe:backups` | — |
+| Client → Server | `subscribe:backups` | — (ADMIN or the `canManageBackups` permission, same as the REST routes) |
+| Server → Client | `backups:forbidden` | `{ error, code: "FORBIDDEN_ROLE", details }` — sent instead of joining the room when the caller lacks access (#65) |
 | Server → Client | `backup:progress` | `{ snapshotId, message }` |
 | Server → Client | `backup:completed` | `{ snapshotId, status, error? }` |
 | Server → Client | `restore:progress` | `{ snapshotId, itemType, itemId, message }` |
 | Server → Client | `restore:completed` | `{ snapshotId, itemType, itemId, status, error? }` |
 | Client → Server | `unsubscribe:backups` | — |
+
+The `backups` room carries snapshot/item IDs and error messages for **every** snapshot, so joining it is authorized exactly like the HTTP API: the role/permission is read fresh from the database on each subscribe (`createSocketAuthorizer` in `apps/api/src/plugins/socket-auth.ts`), and a denied, unknown or unauthenticated socket never joins. Tests: `apps/api/src/modules/backups/socket.test.ts`.
 
 ---
 
@@ -153,6 +158,13 @@ await backupQueue.upsertJobScheduler(
 
 ## How to Test
 
+Automated safety regressions (no running database or Docker required):
+
+```bash
+pnpm --filter @vexlyx/api test -- src/modules/backups/service.test.ts
+python -m unittest discover -s tests -p test_restore_stop_safety.py
+```
+
 1. Start the dev stack: `pnpm dev`
 2. Visit `http://localhost:3000/backups`
 3. Click **Backup Now** → watch the snapshot go `PENDING` → `RUNNING` (with live progress lines) → `COMPLETED`
@@ -197,6 +209,8 @@ As of F5.14, the rejected `BackupError` includes the captured stderr when presen
 ### PYTHON_BIN
 
 The API spawns `system/python/*.py` scripts using `env.PYTHON_BIN` if set, otherwise `python` on Windows / `python3` elsewhere (see `apps/api/.env.example`). Only set `PYTHON_BIN` if that default isn't the right interpreter on your host — e.g. a virtualenv, or a distro that ships neither `python` nor `python3` under those exact names.
+
+This applies to **every** module that runs a Python script (build, deploy, git, databases, dockerfile, logs, sftp, wordpress, backups, cleanup, firewall, services, monitoring, mail, SSL). They all resolve the interpreter through `getPythonBin()` in `apps/api/src/utils/pythonBin.ts`; never hardcode `"python"` or read `process.env.PYTHON_BIN` directly (a hardcoded `python` fails with `ENOENT` on hosts where only `python3` exists, #53). `apps/api/src/utils/pythonBin.test.ts` fails if a module bypasses the helper. The mail and SSL managers additionally honor a `PYTHON_PATH` override and a Windows development-interpreter search before falling back to `getPythonBin()`.
 
 ### Startup health check
 

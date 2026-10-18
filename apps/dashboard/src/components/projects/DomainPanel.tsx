@@ -33,6 +33,7 @@ import {
 import { useDomains } from "@/hooks/useDomains";
 import { DomainConnectInstructions } from "@/components/domains/DomainConnectInstructions";
 import { cn } from "@/lib/utils";
+import { fetchAPI, ApiRequestError } from "@/lib/api";
 import { refreshIconClassName } from "@/hooks/useRefreshAnimation";
 import type { DomainResponse, DomainStatus, Project } from "@vexlyx/shared";
 
@@ -69,6 +70,7 @@ export function DomainPanel({ project }: DomainPanelProps) {
     isRefreshing,
     refresh,
     createDomain,
+    updateDomain,
     verifyDomain,
     deleteDomain,
   } = useDomains({ projectId: project.id });
@@ -77,6 +79,7 @@ export function DomainPanel({ project }: DomainPanelProps) {
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [newHostname, setNewHostname] = useState("");
   const [isAdding, setIsAdding] = useState(false);
+  const [attachTarget, setAttachTarget] = useState<DomainResponse | null>(null);
 
   // Verification instructions modal state
   const [instructionsDomain, setInstructionsDomain] = useState<DomainResponse | null>(null);
@@ -116,9 +119,41 @@ export function DomainPanel({ project }: DomainPanelProps) {
         setInstructionsModalOpen(true);
       }
     } catch (err: unknown) {
-
+      if (err instanceof ApiRequestError && err.code === "DOMAIN_ALREADY_EXISTS") {
+        try {
+          const existing = await fetchAPI<DomainResponse[]>(`/api/domains?search=${encodeURIComponent(cleanHostname)}&limit=100`);
+          const owned = existing.find((domain) => domain.hostname === cleanHostname);
+          if (owned && owned.projectId !== project.id) {
+            setAttachTarget(owned);
+            setAddModalOpen(false);
+            return;
+          }
+        } catch (lookupError) {
+          toast.error(lookupError instanceof Error ? lookupError.message : "Failed to find existing domain");
+          return;
+        }
+      }
       const msg = err instanceof Error ? err.message : "Failed to add domain";
       toast.error(msg);
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const handleAttach = async () => {
+    if (!attachTarget) return;
+    setIsAdding(true);
+    try {
+      const attached = await updateDomain(attachTarget.id, { projectId: project.id });
+      toast.success(`Domain "${attached.hostname}" attached`);
+      setAttachTarget(null);
+      setNewHostname("");
+      if (attached.status !== "ACTIVE") {
+        setInstructionsDomain(attached);
+        setInstructionsModalOpen(true);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to attach domain");
     } finally {
       setIsAdding(false);
     }
@@ -338,6 +373,23 @@ export function DomainPanel({ project }: DomainPanelProps) {
       </CardContent>
 
       {/* ── Add Domain Modal ──────────────────────────────────────────────── */}
+      <Dialog open={Boolean(attachTarget)} onOpenChange={(open) => !isAdding && !open && setAttachTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{attachTarget?.projectId ? "Move existing domain" : "Attach existing domain"}</DialogTitle>
+            <DialogDescription>
+              {attachTarget?.projectId
+                ? `Move ${attachTarget.hostname} from ${attachTarget.project?.name ?? "its current project"} to ${project.name}? Web traffic will route to this project.`
+                : `Attach ${attachTarget?.hostname} to ${project.name}?`}
+              {" "}DNS records, verification, certificates, and mail are preserved.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={isAdding} onClick={() => setAttachTarget(null)}>Cancel</Button>
+            <Button disabled={isAdding} onClick={() => void handleAttach()}>{isAdding ? "Attaching..." : attachTarget?.projectId ? "Move domain" : "Attach domain"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={addModalOpen} onOpenChange={setAddModalOpen}>
         <DialogContent className="sm:max-w-md">
           <form onSubmit={handleAddDomain}>

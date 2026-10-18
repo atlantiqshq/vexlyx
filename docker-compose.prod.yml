@@ -33,10 +33,24 @@ services:
     ports: !reset []
 
   adminer:
-    # Unauthenticated raw DB browser — never started by a plain
-    # `docker compose up -d` in production. Bring it up deliberately with
-    # `--profile debug` for one-off troubleshooting only.
-    profiles: ["debug"]
+    # Raw DB browser — never started by a plain `docker compose up -d` in
+    # production. Opt in with system/scripts/enable-adminer.sh, which sets
+    # ADMINER_BASIC_AUTH + ADMINER_URL in the secrets file and starts it with
+    # `--profile adminer`. It is served only through Traefik over HTTPS behind
+    # basic auth (never on a published host port), so it is not reachable
+    # unauthenticated. An empty ADMINER_BASIC_AUTH leaves the middleware with
+    # no valid users, so requests are rejected rather than let through.
+    profiles: ["adminer"]
+    ports: !reset []
+    labels: !override
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-net"
+      - "traefik.http.routers.adminer.rule=Host(`adminer.${VEXLYX_DOMAIN}`)"
+      - "traefik.http.routers.adminer.entrypoints=websecure"
+      - "traefik.http.routers.adminer.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.adminer.middlewares=adminer-auth"
+      - "traefik.http.middlewares.adminer-auth.basicauth.users=${ADMINER_BASIC_AUTH:-}"
+      - "traefik.http.services.adminer.loadbalancer.server.port=8080"
 
   traefik:
     ports: !override
@@ -71,15 +85,26 @@ services:
       MYDOMAIN: ${VEXLYX_MAIL_DOMAIN}
       # Never seed the known-password dev test mailboxes in production.
       VEXLYX_SEED_DEV_FIXTURES: "false"
+    volumes:
+      - ./docker/mail-data/certs:/etc/postfix/certs:ro
 
   dovecot:
     environment:
       VEXLYX_SEED_DEV_FIXTURES: "false"
+    volumes:
+      - ./docker/mail-data/certs:/etc/dovecot/certs:ro
 
   # The base file routes Roundcube on the dev hostname over plain HTTP, which
   # 404s in production — serve it at webmail.${VEXLYX_DOMAIN} over HTTPS
   # (the same host the API advertises as WEBMAIL_URL).
   roundcube:
+    environment:
+      # Strict TLS to Dovecot/Postfix: verify the trusted mail certificate
+      # (synced from Traefik) against the public mail hostname, since Roundcube
+      # connects via the internal service names. Set explicitly so the prod
+      # overlay can never inherit the relaxed development setting.
+      ROUNDCUBE_MAIL_TLS_VERIFY: "true"
+      ROUNDCUBE_MAIL_TLS_PEER_NAME: ${VEXLYX_MAIL_HOSTNAME}
     labels: !override
       - "traefik.enable=true"
       - "traefik.http.routers.webmail.rule=Host(`webmail.${VEXLYX_DOMAIN}`)"
@@ -97,6 +122,7 @@ services:
       dockerfile: apps/dashboard/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: https://api.${VEXLYX_DOMAIN}
+        NEXT_PUBLIC_MAIL_HOSTNAME: ${VEXLYX_MAIL_HOSTNAME}
     image: vexlyx-dashboard:latest
     container_name: vexlyx-dashboard
     restart: unless-stopped
@@ -116,10 +142,17 @@ services:
       - traefik-net
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=traefik-net"
       - "traefik.http.routers.vexlyx-dashboard.rule=Host(`${VEXLYX_DOMAIN}`)"
       - "traefik.http.routers.vexlyx-dashboard.entrypoints=websecure"
       - "traefik.http.routers.vexlyx-dashboard.tls.certresolver=letsencrypt"
       - "traefik.http.services.vexlyx-dashboard.loadbalancer.server.port=3000"
+      # This router exists so Traefik obtains and renews the certificate used
+      # by SMTP/IMAP. Mail protocols themselves still connect directly.
+      - "traefik.http.routers.vexlyx-mail-cert.rule=Host(`${VEXLYX_MAIL_HOSTNAME}`)"
+      - "traefik.http.routers.vexlyx-mail-cert.entrypoints=websecure"
+      - "traefik.http.routers.vexlyx-mail-cert.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.vexlyx-mail-cert.service=vexlyx-dashboard"
 
   api:
     build:
@@ -152,12 +185,15 @@ services:
       REDIS_URL: redis://redis:6379
       SESSION_SECRET: ${SESSION_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      ENCRYPTION_KEY_LEGACY_FALLBACK: ${ENCRYPTION_KEY_LEGACY_FALLBACK:-false}
       ALLOW_REGISTRATION: "false"
       API_BASE_URL: https://api.${VEXLYX_DOMAIN}
       BASE_DOMAIN: ${VEXLYX_BASE_DOMAIN}
       # DNS Records & Public IP Onboarding (F5.9)
       PANEL_DOMAIN: ${VEXLYX_DOMAIN}
       PUBLIC_IP: ${VEXLYX_PUBLIC_IP:-}
+      HOSTED_MAIL_HOSTNAME: ${VEXLYX_MAIL_HOSTNAME}
+      HOSTED_MAIL_DOMAIN: ${VEXLYX_MAIL_DOMAIN}
       # Nameservers users delegate to for hosted DNS (F5.25/F5.27)
       DNS_NAMESERVERS: ${DNS_NAMESERVERS:-ns1.vexlyx.com,ns2.vexlyx.com}
       POSTGRES_HOST: postgres
@@ -165,7 +201,17 @@ services:
       MYSQL_HOST: mysql
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       IMAP_HOST: dovecot
+      # System email (F5.23): panel mail is relayed through the bundled Postfix
+      # over the internal network, sent as notifications@${VEXLYX_DOMAIN}. The
+      # panel (sub)domain keeps this mail's reputation separate from the apex
+      # domain, and replies go to the admin.
+      BUNDLED_SMTP_HOST: postfix
+      MAIL_DOMAIN: ${VEXLYX_DOMAIN}
+      MAIL_REPLY_TO: ${VEXLYX_ADMIN_EMAIL:-}
       WEBMAIL_URL: https://webmail.${VEXLYX_DOMAIN}
+      # Adminer stays disabled in production unless this is set to a protected
+      # HTTPS URL in the secrets file (see docs/dev/database-provisioning.md).
+      ADMINER_URL: ${ADMINER_URL:-}
       PROJECTS_DIR: ${VEXLYX_HOME:-/opt/vexlyx}/apps/api/workspaces/projects
       SSH_KEYS_DIR: ${VEXLYX_HOME:-/opt/vexlyx}/apps/api/workspaces/keys
     depends_on:
@@ -176,6 +222,7 @@ services:
       - traefik-net
     labels:
       - "traefik.enable=true"
+      - "traefik.docker.network=traefik-net"
       - "traefik.http.routers.vexlyx-api.rule=Host(`api.${VEXLYX_DOMAIN}`)"
       - "traefik.http.routers.vexlyx-api.entrypoints=websecure"
       - "traefik.http.routers.vexlyx-api.tls.certresolver=letsencrypt"

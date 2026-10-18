@@ -6,6 +6,7 @@ import { useRefreshAnimation } from "@/hooks/useRefreshAnimation";
 import type {
   DomainResponse,
   CreateDomainInput,
+  UpdateDomainInput,
   DomainVerificationResult,
 } from "@vexlyx/shared";
 
@@ -69,6 +70,15 @@ export function useDomains(options: UseDomainsOptions = {}) {
     return created;
   };
 
+  const updateDomain = async (id: string, input: UpdateDomainInput): Promise<DomainResponse> => {
+    const updated = await fetchAPI<DomainResponse>(`/api/domains/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+    await fetchDomains(true);
+    return updated;
+  };
+
   const verifyDomain = async (
     id: string,
     mockRecord?: string,
@@ -106,6 +116,7 @@ export function useDomains(options: UseDomainsOptions = {}) {
     refetch: () => fetchDomains(),
     refresh,
     createDomain,
+    updateDomain,
     verifyDomain,
     deleteDomain,
     fetchSubdomains,

@@ -132,6 +132,7 @@ export default function DomainsPage() {
     isRefreshing,
     refresh,
     createDomain,
+    updateDomain,
     verifyDomain,
     deleteDomain,
   } = useDomains();
@@ -169,6 +170,27 @@ export default function DomainsPage() {
   // Delete modal state
   const [deleteTarget, setDeleteTarget] = useState<DomainResponse | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  const [assignmentTarget, setAssignmentTarget] = useState<DomainResponse | null>(null);
+  const [assignmentProjectId, setAssignmentProjectId] = useState("none");
+  const [isAssigning, setIsAssigning] = useState(false);
+  const openAssignment = (domain: DomainResponse) => {
+    setAssignmentTarget(domain);
+    setAssignmentProjectId(domain.projectId ?? "none");
+  };
+  const handleAssignment = async () => {
+    if (!assignmentTarget) return;
+    setIsAssigning(true);
+    try {
+      await updateDomain(assignmentTarget.id, { projectId: assignmentProjectId === "none" ? null : assignmentProjectId });
+      toast.success("Domain project updated");
+      setAssignmentTarget(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update domain project");
+    } finally {
+      setIsAssigning(false);
+    }
+  };
 
   const toggleExpand = (domainId: string) => {
     setExpandedDomainIds((prev) => ({
@@ -546,6 +568,9 @@ export default function DomainsPage() {
                       <span className="italic text-muted-foreground">Unassigned</span>
                     )}
                   </CardDescription>
+                  <Button variant="outline" size="sm" onClick={() => openAssignment(domain)}>
+                    {domain.projectId ? "Change project" : "Assign to project"}
+                  </Button>
                 </CardHeader>
 
                 <CardContent className="space-y-3 pt-0">
@@ -553,7 +578,7 @@ export default function DomainsPage() {
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Traefik Routing:</span>
                       <span className="font-medium text-foreground">
-                        {domain.status === "ACTIVE"
+                        {domain.status === "ACTIVE" && domain.projectId
                           ? isWildcard
                             ? "Wildcard Priority 10"
                             : "Direct Priority 100"
@@ -617,6 +642,9 @@ export default function DomainsPage() {
                                       {sub.project.name}
                                     </span>
                                   )}
+                                  <Button variant="ghost" size="sm" onClick={() => openAssignment(sub)}>
+                                    {sub.projectId ? "Change project" : "Assign"}
+                                  </Button>
                                   <Button
                                     variant="ghost"
                                     size="icon"
@@ -717,6 +745,29 @@ export default function DomainsPage() {
       />
 
       {/* ── Add Domain Modal ──────────────────────────────────────────────── */}
+      <Dialog open={Boolean(assignmentTarget)} onOpenChange={(open) => !isAssigning && !open && setAssignmentTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{assignmentTarget?.projectId ? "Change project" : "Assign to project"}</DialogTitle>
+            <DialogDescription>
+              Update the project for {assignmentTarget?.hostname}. Saving changes web traffic routing.
+              DNS records, verification, certificates, and mail stay attached to this domain.
+              {assignmentTarget?.projectId && ` Current project: ${assignmentTarget.project?.name ?? assignmentTarget.projectId}.`}
+            </DialogDescription>
+          </DialogHeader>
+          <Label htmlFor="assignment-project">Project</Label>
+          <select id="assignment-project" className="h-10 rounded-md border border-input bg-background px-3 text-sm" value={assignmentProjectId} onChange={(e) => setAssignmentProjectId(e.target.value)} disabled={isAssigning}>
+            <option value="none">None (Unassigned)</option>
+            {projects.filter((p) => p.status !== "DELETED").map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <DialogFooter>
+            <Button variant="outline" disabled={isAssigning} onClick={() => setAssignmentTarget(null)}>Cancel</Button>
+            <Button disabled={isAssigning || assignmentProjectId === (assignmentTarget?.projectId ?? "none")} onClick={() => void handleAssignment()}>
+              {isAssigning ? "Saving..." : "Save project assignment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={addModalOpen} onOpenChange={setAddModalOpen}>
         <DialogContent className="sm:max-w-md">
           <form onSubmit={handleAddDomain}>

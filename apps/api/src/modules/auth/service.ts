@@ -1,5 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
+import { randomBytes } from "node:crypto";
 import * as argon2 from "argon2";
+import { notifyUser } from "../system-email/notifier.js";
 import type { RegisterInput, LoginInput, ChangePasswordInput } from "./schema.js";
 
 const PUBLIC_USER_SELECT = {
@@ -14,8 +16,36 @@ const PUBLIC_USER_SELECT = {
   maxMailboxes: true,
   maxSubAccounts: true,
   permissions: true,
+  totpEnabled: true,
   createdAt: true,
 } as const;
+
+// Security: an unknown email must cost as much as a wrong password, otherwise
+// response time reveals which emails are registered. The decoy is hashed with
+// the same options as real passwords (register/changePassword use the argon2
+// defaults with argon2id) so verify() does equivalent work. Its plaintext is
+// random and discarded, so no login can ever match it. Memoised so the hash is
+// computed once per process rather than on every failed login.
+let decoyHash: Promise<string> | null = null;
+
+function getDecoyHash(): Promise<string> {
+  decoyHash ??= argon2
+    .hash(randomBytes(32).toString("hex"), { type: argon2.argon2id })
+    .catch((err: unknown) => {
+      decoyHash = null;
+      throw err;
+    });
+  return decoyHash;
+}
+
+/**
+ * Computes the decoy hash ahead of time. Called once at startup, before the
+ * auth routes accept requests, so even the very first failed login does the
+ * same work whether or not the email exists.
+ */
+export async function prepareLoginDecoy(): Promise<void> {
+  await getDecoyHash();
+}
 
 export class AuthService {
   constructor(private prisma: PrismaClient) {}
@@ -56,6 +86,7 @@ export class AuthService {
     });
 
     if (!user) {
+      await argon2.verify(await getDecoyHash(), data.password);
       throw new AuthError("Invalid email or password", "INVALID_CREDENTIALS", 401);
     }
 
@@ -65,8 +96,7 @@ export class AuthService {
       throw new AuthError("Invalid email or password", "INVALID_CREDENTIALS", 401);
     }
 
-    const { password: _password, ...publicUser } = user;
-    return publicUser;
+    return this.getCurrentUser(user.id);
   }
 
   // F5.11 — self-service password change. The current session stays valid;
@@ -93,6 +123,8 @@ export class AuthService {
       where: { id: userId },
       data: { password: hashedPassword },
     });
+
+    notifyUser("password_changed", user.email, { name: user.name });
   }
 
   async getCurrentUser(userId: string) {

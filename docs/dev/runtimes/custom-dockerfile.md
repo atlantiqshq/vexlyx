@@ -108,12 +108,6 @@ services:
       resources:
         limits:
           memory: "{{memory_limit}}"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:{{container_port}}/health || wget -qO- http://localhost:{{container_port}}/ || curl -fs http://localhost:{{container_port}}/ || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.{{service_name}}.rule=Host(`{{hostname}}`)"
@@ -125,6 +119,12 @@ networks:
     external: true
     name: traefik-net
 ```
+
+Vexlyx does not inject a health check into custom Dockerfile deployments.
+Custom images are not guaranteed to contain `wget`, `curl`, Node.js, Python, or
+another probing tool. If the Dockerfile defines `HEALTHCHECK`, Docker preserves
+and uses that image-level check; otherwise Traefik routes to the running
+container without an invented dependency.
 
 ---
 

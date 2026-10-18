@@ -138,6 +138,8 @@ def test_nextjs_docker_template():
     assert "NEXT_TELEMETRY_DISABLED: \"1\"" in template_content, "NEXT_TELEMETRY_DISABLED missing"
     assert "PORT: \"{{container_port}}\"" in template_content, "PORT variable missing"
     assert "traefik.enable=true" in template_content, "Traefik labels missing"
+    assert 'test: ["CMD", "node", "-e"' in template_content, "Node health check missing"
+    assert "wget" not in template_content, "Next.js health check must not require wget"
 
     # Test template picking in docker_manager.py logic
     sys.path.insert(0, str(REPO_ROOT / "system" / "python"))
@@ -169,6 +171,8 @@ def test_nextjs_docker_template():
         assert "NEXT_PUBLIC_API" in compose_text
         assert "DATABASE_URL" in compose_text
         assert "test.vexlyx.localhost" in compose_text
+        assert "connect(3000,'127.0.0.1'" in compose_text
+        assert "wget" not in compose_text
         print("  [PASS] next.yml rendered correctly with all variables & labels")
 
 

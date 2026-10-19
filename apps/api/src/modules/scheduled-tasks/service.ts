@@ -202,6 +202,7 @@ interface ScheduledTaskWithProject {
     userId: string;
     containerId: string | null;
     containerStatus: string | null;
+    deletedAt: Date | null;
   };
 }
 
@@ -219,7 +220,7 @@ export class ScheduledTaskService {
 
   async list(projectId: string, userId: string, role: string) {
     const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project) throw new ScheduledTaskError("Project not found", "PROJECT_NOT_FOUND", 404);
+    if (!project || project.deletedAt) throw new ScheduledTaskError("Project not found", "PROJECT_NOT_FOUND", 404);
     await this.assertAccess(userId, role, project.userId);
 
     return this.prisma.scheduledTask.findMany({
@@ -235,7 +236,7 @@ export class ScheduledTaskService {
     data: { name: string; command: string; schedule: string; timeoutSeconds: number; enabled: boolean; notifyOnFailure: boolean },
   ) {
     const project = await this.prisma.project.findUnique({ where: { id: projectId } });
-    if (!project) throw new ScheduledTaskError("Project not found", "PROJECT_NOT_FOUND", 404);
+    if (!project || project.deletedAt) throw new ScheduledTaskError("Project not found", "PROJECT_NOT_FOUND", 404);
     await this.assertAccess(userId, role, project.userId);
     await assertUnderQuota(
       this.prisma,
@@ -282,6 +283,21 @@ export class ScheduledTaskService {
     return updated;
   }
 
+  /**
+   * Fetches a task together with its project and verifies the caller may
+   * manage it. Used before side effects (e.g. disarming a scheduler) so that a
+   * 403/404 can never leave the task in a half-modified state.
+   */
+  async getForManage(taskId: string, userId: string, role: string) {
+    const task = await this.prisma.scheduledTask.findUnique({
+      where: { id: taskId },
+      include: { project: true },
+    });
+    if (!task) throw new ScheduledTaskError("Task not found", "TASK_NOT_FOUND", 404);
+    await this.assertAccess(userId, role, task.project.userId);
+    return task;
+  }
+
   async delete(taskId: string, userId: string, role: string) {
     const task = await this.prisma.scheduledTask.findUnique({
       where: { id: taskId },
@@ -304,6 +320,7 @@ export class ScheduledTaskService {
     });
     if (!task) throw new ScheduledTaskError("Task not found", "TASK_NOT_FOUND", 404);
     await this.assertAccess(userId, role, task.project.userId);
+    if (task.project.deletedAt) throw new ScheduledTaskError("Project not found", "PROJECT_NOT_FOUND", 404);
 
     await this.auditLog.log(userId, "scheduled_task.run_now", { type: "ScheduledTask", id: taskId }, {
       after: { name: task.name },
@@ -351,6 +368,12 @@ export class ScheduledTaskService {
 
     try {
       const project = task.project;
+      // Defence in depth: the worker disables a deleted project's tasks, but a
+      // manual run can still race a deletion — never exec into a removed
+      // workspace.
+      if (project.deletedAt) {
+        return await this.recordRun(task.id, trigger, "SKIPPED", null, "Project deleted");
+      }
       if (!project.containerId || project.containerStatus !== "running") {
         return await this.recordRun(task.id, trigger, "SKIPPED", null, "Project not running");
       }
@@ -382,7 +405,13 @@ export class ScheduledTaskService {
         throw err;
       }
     } finally {
-      await this.redis.eval(RELEASE_LOCK_SCRIPT, 1, lockKey, lockValue).catch(() => undefined);
+      try {
+        await this.redis.eval(RELEASE_LOCK_SCRIPT, 1, lockKey, lockValue);
+      } catch (err) {
+        // Never swallow: an unreleased lock only expires with its TTL, which
+        // silently delays the next run.
+        this.logger.error({ err, taskId: task.id }, "Failed to release scheduled task overlap lock");
+      }
     }
   }
 
@@ -428,12 +457,15 @@ export class ScheduledTaskService {
 
   /** Keeps only the latest RUN_HISTORY_LIMIT runs per task (spec: 50). */
   private async trimRunHistory(taskId: string) {
-    const stale = await this.prisma.scheduledTaskRun.findMany({
+    const candidates = await this.prisma.scheduledTaskRun.findMany({
       where: { taskId },
       orderBy: { startedAt: "desc" },
       skip: RUN_HISTORY_LIMIT,
-      select: { id: true },
+      select: { id: true, status: true },
     });
+    // A long-running task can be pushed past the limit by newer SKIPPED rows;
+    // never delete the run that is still executing (its finish would 404).
+    const stale = candidates.filter((run) => run.status !== "RUNNING");
     if (stale.length > 0) {
       await this.prisma.scheduledTaskRun.deleteMany({
         where: { id: { in: stale.map((r) => r.id) } },

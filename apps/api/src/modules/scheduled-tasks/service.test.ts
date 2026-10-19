@@ -69,7 +69,7 @@ function createPrisma() {
       count: vi.fn(async () => 0),
     },
     scheduledTaskRun: {
-      findMany: vi.fn(async (): Promise<{ id: string }[]> => []),
+      findMany: vi.fn(async (): Promise<{ id: string; status?: string }[]> => []),
       create: vi.fn(),
       update: vi.fn(),
       deleteMany: vi.fn(async () => ({ count: 0 })),
@@ -255,6 +255,41 @@ describe("ScheduledTaskService.executeTask", () => {
     expect(prisma.scheduledTaskRun.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: ["old-1", "old-2"] } },
     });
+  });
+
+  it("never trims a run that is still executing", async () => {
+    const prisma = createPrisma();
+    const redis = createRedis();
+    prisma.scheduledTaskRun.create.mockResolvedValue(RUNNING_ROW);
+    prisma.scheduledTaskRun.update.mockResolvedValue(finishedRow("SUCCESS", 0, ""));
+    prisma.scheduledTaskRun.findMany.mockResolvedValue([
+      { id: "active-1", status: "RUNNING" },
+      { id: "old-1", status: "FAILED" },
+    ]);
+    spawnMock.mockReturnValue(execResult() as never);
+
+    const service = new ScheduledTaskService(prisma as never, logger, auditLog, redis);
+    await service.executeTask(baseTask() as never, "MANUAL");
+
+    expect(prisma.scheduledTaskRun.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["old-1"] } },
+    });
+  });
+
+  it("does not exec into a deleted project's workspace", async () => {
+    const prisma = createPrisma();
+    const redis = createRedis();
+    prisma.scheduledTaskRun.create.mockResolvedValue({ ...RUNNING_ROW, status: "SKIPPED" });
+
+    const service = new ScheduledTaskService(prisma as never, logger, auditLog, redis);
+    const task = baseTask({ project: { ...baseTask().project, deletedAt: new Date() } });
+    const run = await service.executeTask(task as never, "SCHEDULED");
+
+    expect(run.status).toBe("SKIPPED");
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(prisma.scheduledTaskRun.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ output: "Project deleted" }) }),
+    );
   });
 });
 

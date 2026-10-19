@@ -18,17 +18,76 @@ export const ScheduledTaskRunTriggerSchema = z.enum(["SCHEDULED", "MANUAL"]);
 // Input Schemas
 // ---------------------------------------------------------------------------
 
-// 5-field cron regex (no seconds field)
-const CRON_5_FIELD_REGEX = new RegExp(
-  "^(\\*|[0-9,\\/-]+)\\s+(\\*|[0-9,\\/-]+)\\s+(\\*|[0-9,\\/-]+)\\s+(\\*|[0-9,\\/-]+)\\s+(\\*|[0-9,\\/-]+)$",
-);
+// ---------------------------------------------------------------------------
+// Cron validation — 5 fields (no seconds), every field range-checked with the
+// same rules BullMQ (cron-parser) uses to arm a repeatable job. The previous
+// regex only checked the character class: it rejected valid `*/5` steps and
+// accepted out-of-range junk like `99 99 99 99 99`, which BullMQ then refused
+// at arm time — after the row had already been saved.
+// ---------------------------------------------------------------------------
+
+/** [min, max] per field: minute, hour, day-of-month, month, day-of-week. */
+const CRON_FIELD_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0, 59],
+  [0, 23],
+  [1, 31],
+  [1, 12],
+  [0, 7], // 0 and 7 are both Sunday
+];
+
+const NUMERIC = /^[0-9]+$/;
+const STEP = /^[1-9][0-9]*$/;
+
+function isValidCronField(field: string, min: number, max: number): boolean {
+  if (field.length === 0) return false;
+
+  for (const term of field.split(",")) {
+    const segments = term.split("/");
+    const range = segments[0] ?? "";
+    const step = segments[1];
+    if (segments.length > 2) return false; // only one "/step" per term
+    if (step !== undefined && !STEP.test(step)) return false; // "*\/0" and "*\/01" are invalid
+
+    if (range === "*") continue;
+    if (range.length === 0) return false;
+
+    const bounds = range.split("-");
+    const from = bounds[0] ?? "";
+    const to = bounds[1];
+    if (bounds.length > 2) return false; // only one "-" range per term
+    if (!NUMERIC.test(from)) return false;
+    const fromN = Number(from);
+    if (fromN < min || fromN > max) return false;
+
+    if (to !== undefined) {
+      if (!NUMERIC.test(to)) return false;
+      const toN = Number(to);
+      if (toN < min || toN > max || toN < fromN) return false;
+    }
+  }
+
+  return true;
+}
+
+/** True when `expression` is a cron string BullMQ can arm (5 fields, in range). */
+export function isValidCronExpression(expression: string): boolean {
+  const fields = expression.trim().split(/\s+/);
+  if (fields.length !== CRON_FIELD_RANGES.length) return false;
+  return fields.every((field, index) => {
+    const [min, max] = CRON_FIELD_RANGES[index]!;
+    return isValidCronField(field, min, max);
+  });
+}
 
 export const CreateScheduledTaskSchema = z.object({
   name: z.string().min(1).max(100),
   command: z.string().min(1).max(2000),
-  schedule: z.string().regex(CRON_5_FIELD_REGEX, {
-    message: "Invalid cron expression (5 fields only, no seconds)",
-  }),
+  schedule: z
+    .string()
+    .max(100)
+    .refine(isValidCronExpression, {
+      message: "Invalid cron expression (5 fields: minute hour day month weekday, no seconds)",
+    }),
   timeoutSeconds: z.number().int().min(1).max(3600).default(300),
   enabled: z.boolean().default(true),
   notifyOnFailure: z.boolean().default(true),

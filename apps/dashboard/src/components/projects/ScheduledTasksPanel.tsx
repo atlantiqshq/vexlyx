@@ -36,7 +36,7 @@ import { Badge } from "@/components/ui/badge";
 import { ApiRequestError } from "@/lib/api";
 import { useRefreshAnimation, refreshIconClassName } from "@/hooks/useRefreshAnimation";
 import { useScheduledTasks, useScheduledTaskRuns } from "@/hooks/useScheduledTasks";
-import type { ScheduledTaskResponse, ScheduledTaskRunResponse } from "@vexlyx/shared";
+import type { ScheduledTaskResponse, ScheduledTaskRunResponse } from "@vexlyx/shared/schemas/scheduledTasks";
 
 // ---------------------------------------------------------------------------
 // Cron presets
@@ -47,7 +47,7 @@ const CRON_PRESETS: { label: string; value: string; description: string }[] = [
   { label: "Every 5 minutes", value: "*/5 * * * *", description: "Runs every 5 minutes (e.g. WP-Cron)" },
   { label: "Hourly", value: "0 * * * *", description: "Runs at minute 0 of every hour" },
   { label: "Daily at midnight", value: "0 0 * * *", description: "Runs daily at 00:00" },
-  { label: "Weekly (Sunday)", value: "0 0 * 0", description: "Runs weekly on Sunday at 00:00" },
+  { label: "Weekly (Sunday)", value: "0 0 * * 0", description: "Runs weekly on Sunday at 00:00" },
   { label: "Custom", value: "custom", description: "Enter your own 5-field cron expression" },
 ];
 
@@ -628,13 +628,18 @@ export function ScheduledTasksPanel({ projectId, timezone }: { projectId: string
         </CardContent>
       )}
 
-      <TaskFormDialog
-        projectId={projectId}
-        open={formOpen}
-        task={formTask}
-        onClose={() => setFormOpen(false)}
-        timezone={timezone}
-      />
+      {/* Remounted on every open (key) so the form state always reflects the
+          selected task instead of whatever was last edited. */}
+      {formOpen && (
+        <TaskFormDialog
+          key={formTask?.id ?? "create-task"}
+          projectId={projectId}
+          open={formOpen}
+          task={formTask}
+          onClose={() => setFormOpen(false)}
+          timezone={timezone}
+        />
+      )}
       <DeleteTaskDialog projectId={projectId} task={deleteTarget} onClose={() => setDeleteTarget(null)} />
       <RunHistoryDialog projectId={projectId} task={historyTask} onClose={() => setHistoryTask(null)} />
     </Card>

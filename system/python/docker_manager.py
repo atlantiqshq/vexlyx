@@ -801,6 +801,17 @@ def cmd_logs_follow(payload: dict) -> None:
                 pass
 
 
+# --- F5.28 exec tuning -------------------------------------------------------
+# Env marker stamped on every task exec; children inherit it, which is how a
+# timed-out command is located and stopped inside the container.
+EXEC_TASK_ENV = "VEXLYX_TASK_ID"
+# Read granularity for exec output — bounded so a noisy command cannot make the
+# host-side Python process buffer unbounded output in memory.
+READ_CHUNK_BYTES = 64 * 1024
+# Seconds the in-container kill gets before the local docker exec is dropped.
+KILL_GRACE_SECONDS = 10
+
+
 def cmd_exec(payload: dict) -> None:
     """
     Execute a command inside a project's running container (F5.28).
@@ -834,69 +845,100 @@ def cmd_exec(payload: dict) -> None:
     if not container_id:
         fail("No running container found for this project", "NO_CONTAINER")
 
-    # Execute with timeout and output cap
+    # Unique marker for this exec's process tree. Children inherit their
+    # environment, so on timeout we can find and stop the command *inside* the
+    # container — killing only the local `docker exec` client would leave the
+    # command running while its run row is already marked TIMEOUT.
+    task_marker = os.urandom(16).hex()
+
     # Use sh -c to support shell features; command is passed as argv[2] (not interpolated)
-    cmd = [docker_bin, "exec", container_id, "sh", "-c", command]
+    cmd = [docker_bin, "exec", "-e", f"{EXEC_TASK_ENV}={task_marker}", container_id, "sh", "-c", command]
 
     try:
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
         )
     except Exception as e:
         fail(f"Failed to start docker exec: {e}", "EXEC_SPAWN_ERROR")
 
-    output_lines = []
-    total_bytes = 0
+    # Captured output, hard-capped at output_limit bytes.
+    output = bytearray()
     timed_out = False
 
-    def kill_proc() -> None:
+    def kill_in_container() -> None:
+        """TERM then KILL every process carrying this exec's env marker."""
+        kill_script = (
+            'pids="";'
+            "for p in /proc/[0-9]*; do "
+            'if tr "\\0" "\\n" < "$p/environ" 2>/dev/null | grep -qx "%s=%s"; then '
+            'pids="$pids ${p#/proc/}"; fi; done; '
+            "for pid in $pids; do kill -TERM $pid 2>/dev/null; done; "
+            "sleep 1; "
+            "for pid in $pids; do kill -KILL $pid 2>/dev/null; done"
+        ) % (EXEC_TASK_ENV, task_marker)
+        try:
+            subprocess.run(
+                [docker_bin, "exec", container_id, "sh", "-c", kill_script],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=KILL_GRACE_SECONDS + 10,
+            )
+        except Exception as e:
+            print(f"docker exec timeout-kill failed: {e}", file=sys.stderr, flush=True)
+
+    def on_deadline() -> None:
         nonlocal timed_out
         timed_out = True
+        # Stop the command inside the container first, then drop the local
+        # client so the read loop below gets EOF (the deadline stays armed
+        # until the command has actually stopped).
+        kill_in_container()
         try:
             proc.terminate()
-            proc.wait(timeout=2)
         except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+            pass
 
-    timer = threading.Timer(timeout, kill_proc)
+    timer = threading.Timer(timeout, on_deadline)
     timer.start()
 
     try:
         if proc.stdout:
-            for line in iter(proc.stdout.readline, ""):
-                if total_bytes >= output_limit:
-                    # Cap reached, stop reading but let process continue
-                    break
-                line_bytes = len(line.encode("utf-8"))
-                if total_bytes + line_bytes > output_limit:
-                    # Truncate this line
-                    remaining = output_limit - total_bytes
-                    if remaining > 0:
-                        output_lines.append(line[:remaining])
-                    break
-                output_lines.append(line.rstrip("\n"))
-                total_bytes += line_bytes
+            while True:
+                try:
+                    # Fixed-size chunked reads: a command like
+                    # `head -c 1000000000 /dev/zero` must never be buffered
+                    # whole, only its first output_limit bytes are kept.
+                    chunk = proc.stdout.read1(READ_CHUNK_BYTES)
+                except (OSError, ValueError):
+                    break  # pipe torn down
+                if not chunk:
+                    break  # EOF — the exec client is gone, the command stopped
+                room = output_limit - len(output)
+                if room > 0:
+                    output.extend(chunk[: min(room, len(chunk))])
+                # Beyond the cap the stream keeps being drained and dropped,
+                # so the deadline still fires for a loud command that sleeps.
     finally:
         timer.cancel()
         try:
-            proc.wait(timeout=5)
+            proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            pass
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                pass
 
     exit_code = proc.returncode
 
     respond({
         "exitCode": exit_code,
-        "output": "\n".join(output_lines),
+        "output": output.decode("utf-8", errors="replace").rstrip("\n"),
         "timedOut": timed_out,
         "containerId": container_id,
     })

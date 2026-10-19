@@ -50,7 +50,7 @@ export async function systemRoutes(app: FastifyInstance) {
 
     // Same for every enabled user scheduled task (F5.28) — its BullMQ
     // schedulers carry the same `tz`, and nextRunAt is refreshed alongside.
-    await rescheduleAllTasks(app.prisma, timezone);
+    await rescheduleAllTasks(app.prisma, timezone, app.log);
 
     return updated;
   });

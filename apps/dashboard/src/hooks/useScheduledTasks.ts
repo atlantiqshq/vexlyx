@@ -5,7 +5,7 @@ import type {
   CreateScheduledTaskInput,
   UpdateScheduledTaskInput,
   ScheduledTaskRunResponse,
-} from "@vexlyx/shared";
+} from "@vexlyx/shared/schemas/scheduledTasks";
 
 export function useScheduledTasks(projectId: string) {
   const queryClient = useQueryClient();

@@ -161,6 +161,31 @@ describe("scheduled task routes — validation", () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it("accepts stepped and ranged cron fields (BullMQ-compatible)", async () => {
+    for (const schedule of ["*/5 * * * *", "0-30/10 * * * *", "0 0 * * 0", "*/15 9-17 * 1,7 1-5"]) {
+      const app = await buildApp({ userId: "owner-1", role: "USER" });
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/projects/cproject000000000000000001/scheduled-tasks",
+        payload: { name: "t", command: "echo hi", schedule },
+      });
+      expect(res.statusCode, schedule).toBe(201);
+    }
+  });
+
+  it("rejects out-of-range and short cron fields before saving", async () => {
+    for (const schedule of ["99 99 99 99 99", "0 0 * 0", "*/0 * * * *", "61 * * * *", "0 25 * * *"]) {
+      const app = await buildApp({ userId: "owner-1", role: "USER" });
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/projects/cproject000000000000000001/scheduled-tasks",
+        payload: { name: "t", command: "echo hi", schedule },
+      });
+      expect(res.statusCode, schedule).toBe(400);
+      expect(res.json().code, schedule).toBe("VALIDATION_ERROR");
+    }
+  });
+
   it("accepts a valid task and audits the creation", async () => {
     const prisma = createPrisma();
     const app = await buildApp({ userId: "owner-1", role: "USER" }, prisma);

@@ -16,6 +16,7 @@ import {
   SCHEDULED_TASK_QUEUE_NAME,
   registerScheduledTaskQueue,
   applyTaskSchedule,
+  refreshNextRunAt,
   rescheduleAllTasks,
   unscheduleTaskJob,
 } from "./scheduler.js";
@@ -36,6 +37,24 @@ function handleScheduledTaskError(err: unknown, reply: FastifyReply): void {
   throw err;
 }
 
+// cron-parser (what BullMQ arms with) rejects patterns with these fixed error
+// prefixes; anything else while arming is an infrastructure failure (Redis …).
+const CRON_PATTERN_ERROR =
+  /(constraint error|invalid characters|invalid range|validation error|missing fields|invalid cron)/i;
+
+/**
+ * Classifies an arming failure. Callers use it to keep create/update atomic:
+ * the row is rolled back/reverted so the saved state always matches what is
+ * actually armed in BullMQ.
+ */
+function scheduleArmFailure(err: unknown): ScheduledTaskError {
+  const detail = err instanceof Error ? err.message : String(err);
+  if (CRON_PATTERN_ERROR.test(detail)) {
+    return new ScheduledTaskError(`Invalid cron schedule: ${detail}`, "INVALID_SCHEDULE", 400);
+  }
+  return new ScheduledTaskError(`Could not arm schedule: ${detail}`, "SCHEDULE_ARM_FAILED", 500);
+}
+
 export async function scheduledTaskRoutes(app: FastifyInstance) {
   const auditLog = new AuditLogService(app.prisma, app.log);
   const service = new ScheduledTaskService(app.prisma, app.log, auditLog, app.redis);
@@ -45,7 +64,12 @@ export async function scheduledTaskRoutes(app: FastifyInstance) {
   // BullMQ — one queue for both scheduled triggers and worker-side execution
   // ---------------------------------------------------------------------------
 
-  const taskQueue = createQueue(SCHEDULED_TASK_QUEUE_NAME);
+  // Bounded job retention: every firing leaves a job behind, and the run
+  // history already lives in PostgreSQL — Redis must not grow without limit.
+  const taskQueue = createQueue(SCHEDULED_TASK_QUEUE_NAME, {
+    removeOnComplete: { count: 100 },
+    removeOnFail: { count: 100 },
+  });
   registerScheduledTaskQueue(taskQueue);
 
   const taskWorker = createWorker<{ taskId: string; trigger: "SCHEDULED" | "MANUAL" }>(
@@ -56,13 +80,37 @@ export async function scheduledTaskRoutes(app: FastifyInstance) {
         where: { id: taskId },
         include: { project: true },
       });
-      if (!task || !task.enabled) return;
+      if (!task) return;
+
+      // A deleted project keeps its DB row but loses its workspace; its tasks
+      // must stop firing instead of recording failures and emailing the owner.
+      if (task.project.deletedAt !== null) {
+        app.log.warn({ taskId }, "Scheduled task belongs to a deleted project — disabling it");
+        await app.prisma.scheduledTask.updateMany({
+          where: { id: taskId, enabled: true },
+          data: { enabled: false, nextRunAt: null },
+        });
+        try {
+          await unscheduleTaskJob(taskQueue, taskId, app.log);
+        } catch {
+          // Already logged by unscheduleTaskJob; the task is disabled either way.
+        }
+        return;
+      }
+
+      if (!task.enabled) return;
       try {
         await service.executeTask(task as ScheduledTaskWithProject, trigger);
       } catch (err) {
         // executeTask already recorded the FAILED run; a scheduled trigger
         // must not retry the job (that would double-count the streak).
         app.log.error({ err, taskId }, "Scheduled task execution failed");
+      } finally {
+        // BullMQ has already queued the next firing by now — persist it so the
+        // dashboard never keeps showing the run that just happened.
+        if (trigger === "SCHEDULED") {
+          await refreshNextRunAt(app.prisma, taskQueue, taskId, app.log);
+        }
       }
     },
     app,
@@ -74,7 +122,7 @@ export async function scheduledTaskRoutes(app: FastifyInstance) {
   // Re-arm every enabled task on boot and refresh its persisted nextRunAt.
   // Missed runs while the API was down are not back-filled (documented).
   const { timezone } = await systemService.getSettings();
-  const armedCount = await rescheduleAllTasks(app.prisma, timezone);
+  const armedCount = await rescheduleAllTasks(app.prisma, timezone, app.log);
   app.log.info({ count: armedCount, timezone }, "Scheduled tasks armed");
 
   // ---------------------------------------------------------------------------
@@ -103,7 +151,21 @@ export async function scheduledTaskRoutes(app: FastifyInstance) {
 
       if (task.enabled) {
         const { timezone: tz } = await systemService.getSettings();
-        const nextRunAt = await applyTaskSchedule(taskQueue, app.prisma, task, tz);
+        let nextRunAt: Date | null = null;
+        try {
+          nextRunAt = await applyTaskSchedule(taskQueue, app.prisma, task, tz, app.log);
+        } catch (err) {
+          // BullMQ refused the schedule — never leave a saved task behind that
+          // can never fire (it would be re-armed on every boot).
+          app.log.error(
+            { err, taskId: task.id, schedule: task.schedule },
+            "Failed to arm new scheduled task — rolling back",
+          );
+          await app.prisma.scheduledTask
+            .delete({ where: { id: task.id } })
+            .catch((delErr) => app.log.error({ err: delErr, taskId: task.id }, "Failed to roll back unschedulable task"));
+          throw scheduleArmFailure(err);
+        }
         reply.status(201);
         return { ...task, nextRunAt };
       }
@@ -155,8 +217,28 @@ export async function scheduledTaskRoutes(app: FastifyInstance) {
       // Re-arm the scheduler whenever the schedule or enabled state changed
       if (body.schedule !== undefined || body.enabled !== undefined) {
         const { timezone: tz } = await systemService.getSettings();
-        const nextRunAt = await applyTaskSchedule(taskQueue, app.prisma, updated, tz);
-        return { ...updated, nextRunAt };
+        try {
+          const nextRunAt = await applyTaskSchedule(taskQueue, app.prisma, updated, tz, app.log);
+          return { ...updated, nextRunAt };
+        } catch (err) {
+          // Roll the schedule change back so the saved row always matches what
+          // BullMQ is actually armed with.
+          app.log.error(
+            { err, taskId, schedule: updated.schedule },
+            "Failed to arm updated schedule — reverting change",
+          );
+          await app.prisma.scheduledTask
+            .update({
+              where: { id: taskId },
+              data: {
+                schedule: currentTask.schedule,
+                enabled: currentTask.enabled,
+                nextRunAt: currentTask.nextRunAt,
+              },
+            })
+            .catch((revertErr) => app.log.error({ err: revertErr, taskId }, "Failed to revert schedule change"));
+          throw scheduleArmFailure(err);
+        }
       }
 
       return updated;
@@ -172,13 +254,16 @@ export async function scheduledTaskRoutes(app: FastifyInstance) {
   app.delete("/:id/scheduled-tasks/:taskId", { preHandler: [app.requireAuth] }, async (request, reply) => {
     try {
       const { id, taskId } = ScheduledTaskIdParamSchema.parse(request.params);
-      const task = await app.prisma.scheduledTask.findUnique({ where: { id: taskId } });
-      if (!task || task.projectId !== id) {
+      // Authorize first: a 403/404 must never leave the schedule disarmed.
+      const task = await service.getForManage(taskId, request.userId!, request.userRole!);
+      if (task.projectId !== id) {
         reply.status(404).send({ error: "Task not found", code: "TASK_NOT_FOUND", details: {} });
         return;
       }
+      // Disarm first: if BullMQ refuses, the request fails while the task and
+      // its scheduler are still in sync (never "deleted but still firing").
+      await unscheduleTaskJob(taskQueue, taskId, app.log);
       await service.delete(taskId, request.userId!, request.userRole!);
-      await unscheduleTaskJob(taskQueue, taskId);
       reply.status(204);
       return null;
     } catch (err) {

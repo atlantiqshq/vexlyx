@@ -11,7 +11,7 @@ import {
   ScheduledTaskResponseSchema,
   ScheduledTaskRunResponseSchema,
   ScheduledTaskListQuerySchema,
-} from "@vexlyx/shared";
+} from "@vexlyx/shared/schemas/scheduledTasks";
 
 export {
   ScheduledTaskRunStatusSchema,

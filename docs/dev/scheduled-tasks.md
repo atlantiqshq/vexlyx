@@ -7,7 +7,7 @@ Users can run a command inside a project's container on a cron schedule — Lara
 One migration (`20261010000000_add_scheduled_tasks`):
 
 - **`ScheduledTask`** — `projectId`/`userId` (both cascade on delete), `name`, `command`, `schedule` (5-field cron), `timeoutSeconds` (default 300, max 3600), `enabled`, `notifyOnFailure` (default true), `consecutiveFailures`, `lastRunAt`, `nextRunAt`.
-- **`ScheduledTaskRun`** — `taskId` (cascade), `trigger` (`SCHEDULED` | `MANUAL`), `status` (`RUNNING` | `SUCCESS` | `FAILED` | `TIMEOUT` | `SKIPPED`), `exitCode`, `output` (capped at 64 KB), `startedAt`, `finishedAt`. Only the latest **50 runs per task** are kept; older rows are deleted after each new run.
+- **`ScheduledTaskRun`** — `taskId` (cascade), `trigger` (`SCHEDULED` | `MANUAL`), `status` (`RUNNING` | `SUCCESS` | `FAILED` | `TIMEOUT` | `SKIPPED`), `exitCode`, `output` (capped at 64 KB), `startedAt`, `finishedAt`. Only the latest **50 runs per task** are kept; older rows are deleted after each new run — runs that are still `RUNNING` are never trimmed, so a long job cannot be deleted from under its own completion update.
 - **`User.maxScheduledTasks`** — nullable quota, enforced through the same F5.20 machinery as every other quota (`assertUnderQuota` in `utils/quota.ts`, including the reseller pool/oversell checks) with F5.23 warning emails at 80% and 100% (`notifyQuotaThreshold`). It participates in reseller pooling exactly like projects/domains/databases/mailboxes.
 
 ## How scheduling works
@@ -15,8 +15,10 @@ One migration (`20261010000000_add_scheduled_tasks`):
 `scheduler.ts` keeps a module-level reference to the `scheduled-task-runner` BullMQ queue (mirroring `backups/scheduler.ts`) so other modules can re-arm schedules without a circular import:
 
 - One BullMQ **job scheduler** per task, id `scheduled-task:<taskId>`, with the task's cron pattern and the F5.13 server timezone as `tz`.
-- On API boot every enabled task is re-armed and its `nextRunAt` is refreshed from BullMQ's own computed next run (`getJobSchedulers()[...].next`), so what the dashboard shows is what will actually fire — DST quirks included.
-- Create/update/disable/delete re-arm or remove the scheduler immediately; **changing the server timezone** (`PUT /api/system/settings`) re-arms everything via `rescheduleAllTasks()`.
+- On API boot every enabled task is re-armed and its `nextRunAt` is refreshed from BullMQ's own computed next run (`getJobSchedulers()[...].next`), so what the dashboard shows is what will actually fire — DST quirks included. Arming is **per task and failure-isolated**: one unschedulable row is logged and skipped (its `nextRunAt` cleared) instead of aborting API boot.
+- The worker also refreshes `nextRunAt` from BullMQ **after every scheduled firing**, so the dashboard never keeps showing the run that just happened.
+- Create/update/delete re-arm or remove the scheduler immediately, before the row is committed to that state: if BullMQ refuses a create/update the row is rolled back/reverted (400 `INVALID_SCHEDULE`), and delete disarms first — a failure surfaces as an error instead of leaving a deleted-but-still-firing task. **Changing the server timezone** (`PUT /api/system/settings`) re-arms everything via `rescheduleAllTasks()`.
+- Finished jobs are capped in Redis (`removeOnComplete`/`removeOnFail`, 100 each) — PostgreSQL already holds the run history.
 - Missed runs while the API was down are **not back-filled** (documented behavior).
 
 ## How execution works
@@ -24,8 +26,8 @@ One migration (`20261010000000_add_scheduled_tasks`):
 The worker (and "Run now") call `ScheduledTaskService.executeTask()`:
 
 1. A **Redis lock** (`SET NX EX`, TTL = timeout + 30s) prevents overlapping runs; an overlapping run is recorded as `SKIPPED`, never as a failure. The lock is released with a compare-and-delete Lua script, so only the holder releases its own lock.
-2. If the project has no running container the run is recorded as `SKIPPED` ("Project not running") — the task itself stays enabled and resumes on its next tick.
-3. The command runs through the Python system layer: `docker_manager.py`'s `exec` action runs `docker exec <container> sh -c "<command>"`. The command is passed as an argv element (never interpolated into a host shell), the container is resolved **at run time** from the project (so a redeploy that replaces the container doesn't break the task), and both a hard timeout and a 64 KB output cap are enforced in Python (a `threading.Timer` kills the process on timeout).
+2. If the project has no running container the run is recorded as `SKIPPED` ("Project not running") — the task itself stays enabled and resumes on its next tick. A **deleted** project is handled the same way (`SKIPPED`, "Project deleted"): its tasks are disabled and unscheduled when the project is soft-deleted, the worker disables any straggler it still fires, and "Run now" returns 404.
+3. The command runs through the Python system layer: `docker_manager.py`'s `exec` action runs `docker exec <container> sh -c "<command>"`. The command is passed as an argv element (never interpolated into a host shell), the container is resolved **at run time** from the project (so a redeploy that replaces the container doesn't break the task). Output is read in fixed 64 KB chunks — everything past the 64 KB cap is drained and discarded, never buffered — and the deadline stays armed until the command has actually stopped. On timeout the process tree is located **inside the container** by an exec-unique `VEXLYX_TASK_ID` environment marker (inherited by every child) and TERM/KILLed, then the local `docker exec` client is dropped; killing only the local client would mark the run TIMEOUT while the command kept running.
 4. The run row is created as `RUNNING` and **updated in place** with the final status/exit code/output, so history never accumulates orphaned RUNNING entries. Manual ("Run now") execution is synchronous — the API responds with the finished run.
 
 Failure streaks: `consecutiveFailures` increments on `FAILED`/`TIMEOUT` (including spawn/infrastructure errors) and resets to 0 on `SUCCESS`. At exactly 3 consecutive failures one email (`scheduled_task_failed`, F5.23) goes to the **task's owner**, unless the task has `notifyOnFailure` off — once per streak, not per run.
@@ -35,6 +37,7 @@ Failure streaks: `consecutiveFailures` increments on `FAILED`/`TIMEOUT` (includi
 Enforced in `packages/shared/src/schemas/scheduledTasks.ts` (rejected with `VALIDATION_ERROR` / 400):
 
 - 5-field cron only — a 6-field (seconds) expression is rejected; minimum interval is one minute.
+- Every field is range-checked with BullMQ's own rules (minute 0–59, hour 0–23, day 1–31, month 1–12, weekday 0–7), including `*`, steps (`*/5`) and ranges/lists (`0-30/10 9-17 * 1,7 1-5`). `99 99 99 99 99` is rejected *before* anything is written, so an invalid schedule can never be saved and then fail to arm.
 - Command ≤ 2,000 characters; timeout 1–3,600 seconds; name ≤ 100 characters.
 
 Authorization (in the service, not the routes): owners manage tasks of their own projects, admins everything, resellers the tasks of their **sub-accounts** — checked via the *owner's* `resellerId`, since a RESELLER's own `resellerId` is always null. Unauthenticated calls get 401 (`requireAuth` on every route); other users' tasks get 403. Create/update/delete/run-now are written to the audit log (`scheduled_task.*` actions, F5.18).
@@ -63,8 +66,8 @@ A "Scheduled Tasks" panel on the project detail page (`ScheduledTasksPanel.tsx`)
 
 Unit/integration (Vitest, colocated):
 
-- `service.test.ts` — execution happy path, overlap lock (SKIPPED), project-not-running (SKIPPED), failure-streak email at exactly 3 (and silence below it / with notify off), streak reset on success, TIMEOUT counting as a failure, run-history trimming, reseller/sub-account access, `QUOTA_EXCEEDED`.
-- `routes.test.ts` — 401 on every endpoint when signed out, 403 for another user's project, owner and reseller access, cron/command validation (6-field and over-long command rejected), audited creation, quota enforcement, cross-project task 404.
+- `service.test.ts` — execution happy path, overlap lock (SKIPPED), project-not-running (SKIPPED) and deleted-project (SKIPPED, no exec), failure-streak email at exactly 3 (and silence below it / with notify off), streak reset on success, TIMEOUT counting as a failure, run-history trimming (including never trimming a `RUNNING` row), reseller/sub-account access, `QUOTA_EXCEEDED`.
+- `routes.test.ts` — 401 on every endpoint when signed out, 403 for another user's project, owner and reseller access, cron/command validation (6-field, out-of-range and 4-field expressions rejected; stepped/ranged expressions accepted), audited creation, quota enforcement, cross-project task 404.
 - `utils/quota.test.ts` — the `scheduledTask` quota participates in the F5.20 nominal-pool cap.
 
 Manual (needs Docker + the dev stack): create `echo hello` on the every-minute preset for a running project → a SUCCESS run with output `hello` appears within a minute; a command that outlives its timeout → TIMEOUT; three failing runs → exactly one email to the owner; stop the project → SKIPPED, start it → resumes; restart the API → schedules and `nextRunAt` restored; change the server timezone → next-run times shift.

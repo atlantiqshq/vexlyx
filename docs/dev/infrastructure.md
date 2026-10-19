@@ -42,7 +42,7 @@ docker-compose down -v
 | Property | Value |
 |----------|-------|
 | Image | `postgres:16-alpine` |
-| Port | `5432` |
+| Port | `5432` (bound to `127.0.0.1` only) |
 | User | `vexlyx` |
 | Password | `vexlyx_dev` |
 | Database | `vexlyx_dev` |
@@ -50,12 +50,14 @@ docker-compose down -v
 
 **Connection string:** `postgresql://vexlyx:vexlyx_dev@localhost:5432/vexlyx_dev`
 
+The Postgres, MySQL and Redis dev ports are published on loopback only (`127.0.0.1`), because their dev credentials are well known and must not be reachable from the LAN (#56). The Postgres and MySQL passwords default to the dev values but can be overridden with `POSTGRES_PASSWORD`, `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD` in a root `.env`; keep `apps/api/.env` in sync. MySQL is pinned to `mysql:8.0`, where `--default-authentication-plugin=mysql_native_password` is still required for older client drivers; it must be revisited before moving to 8.4+.
+
 ### Redis 7
 
 | Property | Value |
 |----------|-------|
 | Image | `redis:7-alpine` |
-| Port | `6379` |
+| Port | `6379` (bound to `127.0.0.1` only) |
 | Max memory | `256mb` |
 | Eviction | `allkeys-lru` |
 | Persistence | AOF (`appendonly yes`) |
@@ -158,6 +160,31 @@ app.post("/deploy", async (request, reply) => {
   return { status: "queued" };
 });
 ```
+
+## System Script Time Limits (#52)
+
+Every external command run by `system/python/*.py` is time-limited, so a hung `docker compose`, `nixpacks`, `git`, `mysqldump` or `chpasswd` cannot wedge a build/deploy request or a BullMQ job (and leak an orphaned process) forever. There are two layers:
+
+| Layer | Where | Behaviour |
+|-------|-------|-----------|
+| Script (the real limit) | `run_bounded()` and `stream_with_deadline()` in `docker_manager.py` / `build_manager.py`; `timeout=` on the calls in `git`, `backup`, `postfix`, `sftp` and `service_status` managers | Kills the actual child process and reports `COMMAND_TIMEOUT` as a normal script error |
+| API backstop | `watchChildTimeout()` + `PYTHON_SCRIPT_TIMEOUT_MS` in `apps/api/src/utils/processWatchdog.ts`, armed at every direct `spawn(getPythonBin(), …)` | Rejects with `SCRIPT_TIMEOUT` (504) and `SIGKILL`s the script if it is still running a little after its own limit |
+
+Why both: killing only the Python script would orphan the `docker`/`nixpacks` grandchild, so the script has to enforce its own limits; the API backstop covers a script that is itself stuck (e.g. blocked reading a pipe).
+
+**Killing the whole tree.** A deadline that only kills the direct child is not enough: a grandchild (what `nixpacks` or `docker` start) can survive and keep the output pipe open, so the reader would still block. Every bounded command and every streamed build/compose run therefore starts in its own process group (`start_new_session`, or `CREATE_NEW_PROCESS_GROUP` on Windows) and the deadline kills the group (`kill_process_tree`: `killpg`, or `taskkill /T /F` on Windows). `database_manager.py` applies the same rule to `docker exec` (120 s). Managers that call `subprocess.run(..., timeout=)` directly (`sftp`, `backup`, `service_status`, `postfix`, `git`) turn a `TimeoutExpired` into a normal `COMMAND_TIMEOUT` error instead of a traceback.
+
+**Coverage.** The backstop is armed at every launch of a Python manager script: the build, deploy, database, dockerfile, git, sftp and wordpress services, and also backups (2 h), cleanup (22 min), firewall (3 min), monitoring (90 s), service status (5 min), SSL (15 min) and the postfix/dovecot/webmail managers (5 min). A guard test (`processWatchdog.test.ts`) recognises a launch whether the interpreter is written inline or held in a variable (`pythonBin`, `pythonExe`), so a new launcher without a watchdog fails the suite. The only unbounded stream is `logs/service.ts` (`docker compose logs --follow`), which has its own kill on client disconnect.
+
+**Cleanup steps are best-effort.** Commands that clean up after a build (`docker rm`, `docker rmi` during static extraction) use `run_bounded(..., fatal=False)`: a timeout is logged and the next step still runs, instead of ending the script and skipping image removal.
+
+**Backstop sizing.** The API backstop for a script must cover the *sum* of the commands that script runs sequentially, not just one command's limit: static output extraction runs `docker create`, up to four `docker cp` attempts and two cleanups (120 s each), so its backstop (`staticExtract`) is 900 s. A script-side limit still applies to each command individually.
+
+Limits (seconds, script side): quick docker inspect/ps/network 30, one-shot logs 60, `docker system df` 120, prune 600, `docker compose up/start/stop/down` 1800, `nixpacks plan` 120, docker create/cp/rm 120, `docker build`/`nixpacks build` 3600, mysqldump/import 1800, git clone/fetch 900, sftp user commands 60, service status 30. The API backstops are each slightly higher (`PYTHON_SCRIPT_TIMEOUT_MS`).
+
+Intentionally unbounded: `docker compose logs --follow` (`logs_follow` / `logs/service.ts`) is a live stream that ends when the client disconnects.
+
+Raise a limit only in code (the constants are at the top of each manager and in `processWatchdog.ts`) — there are no env vars for them on purpose. Tests: `tests/test_subprocess_timeouts.py`, `apps/api/src/utils/processWatchdog.test.ts`.
 
 ## Environment Variables
 

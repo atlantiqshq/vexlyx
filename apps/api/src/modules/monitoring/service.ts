@@ -6,6 +6,8 @@ import type { PrismaClient } from "@prisma/client";
 import type { FastifyBaseLogger } from "fastify";
 import type { ServerMetrics, ContainerMetric, MetricsRange } from "@vexlyx/shared";
 import { ServerMetricsSchema, ContainerMetricSchema } from "@vexlyx/shared";
+import { getPythonBin } from "../../utils/pythonBin.js";
+import { PYTHON_SCRIPT_TIMEOUT_MS, watchChildTimeout } from "../../utils/processWatchdog.js";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -53,13 +55,20 @@ function runMonitorCommand<T>(command: string, logger: FastifyBaseLogger): Promi
     const scriptPath = getSystemMonitorScriptPath();
     const payload = JSON.stringify({ command });
 
-    const pythonBin =
-      process.env.PYTHON_BIN ??
-      (process.platform === "win32" ? "python" : "python3");
+    const pythonBin = getPythonBin();
 
     const child = spawn(pythonBin, [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.status, (ms) =>
+      reject(
+        new MonitoringError(
+          `System monitor timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";

@@ -98,6 +98,13 @@ services:
   # 404s in production — serve it at webmail.${VEXLYX_DOMAIN} over HTTPS
   # (the same host the API advertises as WEBMAIL_URL).
   roundcube:
+    environment:
+      # Strict TLS to Dovecot/Postfix: verify the trusted mail certificate
+      # (synced from Traefik) against the public mail hostname, since Roundcube
+      # connects via the internal service names. Set explicitly so the prod
+      # overlay can never inherit the relaxed development setting.
+      ROUNDCUBE_MAIL_TLS_VERIFY: "true"
+      ROUNDCUBE_MAIL_TLS_PEER_NAME: ${VEXLYX_MAIL_HOSTNAME}
     labels: !override
       - "traefik.enable=true"
       - "traefik.http.routers.webmail.rule=Host(`webmail.${VEXLYX_DOMAIN}`)"
@@ -178,12 +185,20 @@ services:
       REDIS_URL: redis://redis:6379
       SESSION_SECRET: ${SESSION_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      ENCRYPTION_KEY_LEGACY_FALLBACK: ${ENCRYPTION_KEY_LEGACY_FALLBACK:-false}
       ALLOW_REGISTRATION: "false"
+      # Traefik reaches the API from a private Docker address. Without trusting
+      # it, every request appears to come from Traefik's IP and the per-IP auth
+      # rate limit becomes one shared bucket for all users (#63). Only private
+      # peers are trusted, so a public client can't forge X-Forwarded-For.
+      TRUST_PROXY: loopback,linklocal,uniquelocal
       API_BASE_URL: https://api.${VEXLYX_DOMAIN}
       BASE_DOMAIN: ${VEXLYX_BASE_DOMAIN}
       # DNS Records & Public IP Onboarding (F5.9)
       PANEL_DOMAIN: ${VEXLYX_DOMAIN}
       PUBLIC_IP: ${VEXLYX_PUBLIC_IP:-}
+      HOSTED_MAIL_HOSTNAME: ${VEXLYX_MAIL_HOSTNAME}
+      HOSTED_MAIL_DOMAIN: ${VEXLYX_MAIL_DOMAIN}
       # Nameservers users delegate to for hosted DNS (F5.25/F5.27)
       DNS_NAMESERVERS: ${DNS_NAMESERVERS:-ns1.vexlyx.com,ns2.vexlyx.com}
       POSTGRES_HOST: postgres

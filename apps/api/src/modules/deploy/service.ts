@@ -4,8 +4,10 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PrismaClient } from "@prisma/client";
 import { env } from "../../config/env.js";
-import { EnvService } from "../env/service.js";
+import { EnvService, EnvError } from "../env/service.js";
 import type { DeployBody } from "./schema.js";
+import { getPythonBin } from "../../utils/pythonBin.js";
+import { PYTHON_SCRIPT_TIMEOUT_MS, watchChildTimeout } from "../../utils/processWatchdog.js";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -93,9 +95,18 @@ export function runDockerDeploy(
       ...payload,
     });
 
-    const child = spawn("python", [scriptPath], {
+    const child = spawn(getPythonBin(), [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.compose, (ms) =>
+      rejectP(
+        new DeployError(
+          `Docker deploy timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let buffer = "";
     let stderrBuffer = "";
@@ -199,13 +210,38 @@ export function runDockerAction(
   projectDir: string,
   onLog?: (line: string) => Promise<void> | void,
 ): Promise<void> {
+  return runDockerManagerCommand({ command: action, projectDir }, onLog);
+}
+
+/**
+ * Stops (and verifies stopped) every container of a project by its identity,
+ * for when its workspace directory, and so its compose file, is gone.
+ */
+export function runDockerStopByProject(projectId: string): Promise<void> {
+  return runDockerManagerCommand({ command: "stop_by_project", projectId });
+}
+
+function runDockerManagerCommand(
+  request: Record<string, unknown>,
+  onLog?: (line: string) => Promise<void> | void,
+): Promise<void> {
+  const action = String(request.command);
   return new Promise((resolveP, rejectP) => {
     const scriptPath = getDockerManagerScriptPath();
-    const payload = JSON.stringify({ command: action, projectDir });
+    const payload = JSON.stringify(request);
 
-    const child = spawn("python", [scriptPath], {
+    const child = spawn(getPythonBin(), [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.compose, (ms) =>
+      rejectP(
+        new DeployError(
+          `Docker container action timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let buffer = "";
     let stderrBuffer = "";
@@ -284,9 +320,18 @@ export function runDockerStatus(
     const scriptPath = getDockerManagerScriptPath();
     const payload = JSON.stringify({ command: "status", projectDir, projectType });
 
-    const child = spawn("python", [scriptPath], {
+    const child = spawn(getPythonBin(), [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.status, (ms) =>
+      rejectP(
+        new DeployError(
+          `Docker status check timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";
@@ -360,9 +405,18 @@ export function runDockerLogs(
     const scriptPath = getDockerManagerScriptPath();
     const payload = JSON.stringify({ command: "logs", projectDir, projectType, tail });
 
-    const child = spawn("python", [scriptPath], {
+    const child = spawn(getPythonBin(), [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.logs, (ms) =>
+      rejectP(
+        new DeployError(
+          `Docker logs fetch timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";
@@ -470,15 +524,25 @@ export class DeployService {
       staticRoot = projectDir;
     }
 
+    // Fetch and decrypt project environment variables. Done before the status
+    // flips to CREATING so an undecryptable secret fails the request cleanly
+    // instead of leaving the project stuck mid-deploy.
+    const envService = new EnvService(this.prisma);
+    let envVars: Record<string, string>;
+    try {
+      envVars = await envService.getDecryptedMap(projectId);
+    } catch (err) {
+      if (err instanceof EnvError) {
+        throw new DeployError(err.message, err.code, err.statusCode);
+      }
+      throw err;
+    }
+
     // Update project status to CREATING / DEPLOYING
     await this.prisma.project.update({
       where: { id: projectId },
       data: { status: "CREATING" },
     });
-
-    // Fetch and decrypt project environment variables
-    const envService = new EnvService(this.prisma);
-    const envVars = await envService.getDecryptedMap(projectId);
 
     const result = await runDockerDeploy({
       projectId,

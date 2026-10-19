@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import type { PrismaClient, ScheduledTaskRunStatus } from "@prisma/client";
 import type { FastifyBaseLogger } from "fastify";
 import { env } from "../../config/env.js";
+import { getPythonBin } from "../../utils/pythonBin.js";
+import { PYTHON_SCRIPT_TIMEOUT_MS, watchChildTimeout } from "../../utils/processWatchdog.js";
 import type { AuditLogService } from "../audit-log/service.js";
 import { notifyUser } from "../system-email/notifier.js";
 import { assertUnderQuota, notifyQuotaThreshold } from "../../utils/quota.js";
@@ -84,9 +86,21 @@ function runDockerManager<T>(
     const scriptPath = getDockerManagerPath();
     const body = JSON.stringify(payload);
 
-    const pythonBin = env.PYTHON_BIN ?? (process.platform === "win32" ? "python" : "python3");
+    const pythonBin = getPythonBin();
 
     const child = spawn(pythonBin, [scriptPath], { stdio: ["pipe", "pipe", "pipe"] });
+    // Backstop only: docker_manager.py enforces the task's own timeout (max
+    // 3600s) and kills the container-side process tree — this catches a
+    // wedged script that never answers at all.
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.exec, (ms) =>
+      reject(
+        new ScheduledTaskError(
+          `Scheduled task script timed out after ${Math.round(ms / 1000)}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";

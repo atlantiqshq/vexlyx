@@ -25,11 +25,34 @@ import type {
 import { env } from "../../config/env.js";
 import { DnsService } from "../domains/dns-service.js";
 import { getServerIp } from "../domains/resolvers.js";
+import { getPythonBin } from "../../utils/pythonBin.js";
+import type { FastifyBaseLogger } from "fastify";
+import { PYTHON_SCRIPT_TIMEOUT_MS, watchChildTimeout } from "../../utils/processWatchdog.js";
 import {
   buildRequiredMailRecords,
   isRecordLive,
   lookupLiveMailRecords,
 } from "./required-records.js";
+
+/** Shape of the sync_virtual_* results, including the error payload form. */
+interface PostfixSyncResult {
+  success: boolean;
+  syncedCount: number;
+  error?: string;
+  code?: string;
+}
+
+/**
+ * runPostfixManager resolves whatever JSON the script printed, including
+ * `{ error, code }` with a non-zero exit. For the map syncs that must not look
+ * like success: a failed postmap rebuild leaves Postfix on a stale map.
+ */
+function assertPostfixSyncSucceeded<T extends PostfixSyncResult>(result: T): T {
+  if (result.error) {
+    throw new MailError(result.error, result.code ?? "POSTFIX_SYNC_FAILED", 502);
+  }
+  return result;
+}
 
 export class MailError extends Error {
   constructor(
@@ -114,7 +137,7 @@ function getPythonExe(): string {
       }
     }
   }
-  return process.platform === "win32" ? "python" : "python3";
+  return getPythonBin();
 }
 
 export async function runPostfixManager<T = Record<string, unknown>>(
@@ -132,6 +155,15 @@ export async function runPostfixManager<T = Record<string, unknown>>(
         PYTHONIOENCODING: "utf-8",
       },
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.mail, (ms) =>
+      rej(
+        new MailError(
+          `Mail manager timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";
@@ -182,6 +214,15 @@ export async function runDovecotManager<T = Record<string, unknown>>(
         PYTHONIOENCODING: "utf-8",
       },
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.mail, (ms) =>
+      rej(
+        new MailError(
+          `Mail manager timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";
@@ -232,6 +273,15 @@ async function runWebmailManager<T = Record<string, unknown>>(
         PYTHONIOENCODING: "utf-8",
       },
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.mail, (ms) =>
+      rej(
+        new MailError(
+          `Mail manager timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";
@@ -270,8 +320,11 @@ async function runWebmailManager<T = Record<string, unknown>>(
 export class MailService {
   private readonly dnsService: DnsService;
 
-  constructor(private readonly prisma: PrismaClient) {
-    this.dnsService = new DnsService(prisma);
+  constructor(
+    private readonly prisma: PrismaClient,
+    logger?: Pick<FastifyBaseLogger, "error" | "warn">,
+  ) {
+    this.dnsService = new DnsService(prisma, logger);
   }
 
   /**
@@ -566,10 +619,10 @@ export class MailService {
     );
 
     const [syncRes, dovecotRes] = await Promise.all([
-      runPostfixManager<{ success: boolean; syncedCount: number; domains: string[] }>(
+      runPostfixManager<PostfixSyncResult & { domains: string[] }>(
         "sync_virtual_domains",
         { domains: hostnames, mailboxes: mailboxes.map((m) => m.address) },
-      ),
+      ).then(assertPostfixSyncSucceeded),
       runDovecotManager<{ success: boolean; syncedCount: number }>("sync_mailboxes", {
         domains: hostnames,
         mailboxes,
@@ -590,9 +643,10 @@ export class MailService {
       select: { source: true, destinations: true },
     });
 
-    return runPostfixManager<{ success: boolean; syncedCount: number }>("sync_virtual_aliases", {
+    const result = await runPostfixManager<PostfixSyncResult>("sync_virtual_aliases", {
       aliases: aliases.map((a) => ({ source: a.source, destinations: a.destinations })),
     });
+    return assertPostfixSyncSucceeded(result);
   }
 
   /**

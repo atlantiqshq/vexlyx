@@ -8,7 +8,7 @@
 
 ## How it works
 
-Each CI job installs with `pnpm install --frozen-lockfile` (Node 22, pnpm version from `packageManager`), then runs the matching root script (`pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`), which Turborepo maps to the workspaces. Typecheck, test and build run `prisma generate` first with a placeholder `DATABASE_URL` (generation never connects), the same trick as `system/scripts/install/steps/09-build.sh`. `@vexlyx/shared` is built by Turborepo's `^build` dependency. The API tests are mocked unit tests and need no Postgres or Redis; the Python suites under `tests/` need live Docker services and are not run in CI.
+Each CI job installs with `pnpm install --frozen-lockfile` (Node 22, pnpm version from `packageManager`), then runs the matching root script (`pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`), which Turborepo maps to the workspaces. Typecheck, test and build run `prisma generate` first with a placeholder `DATABASE_URL` (generation never connects), the same trick as `system/scripts/install/steps/09-build.sh`. `@vexlyx/shared` is built by Turborepo's `^build` dependency. The API tests are mocked unit tests and need no Postgres or Redis. The test job also runs two mocked Python suites: `python3 -m unittest discover -s tests -p test_restore_stop_safety.py` (restore stop safety, Docker mocked) and `python3 -m unittest discover -s tests -p test_git_url_policy.py` (isolated Git URL policy). Python integration suites that need live Docker services remain manual.
 
 Release images, published to `ghcr.io/atlantiqshq/`:
 
@@ -21,10 +21,21 @@ Tags: `X.Y.Z`, plus `X.Y` and `latest` for stable tags. A tag containing `-` (fo
 
 ## Cutting a release
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+A release is a version number, a tag and a published release that all say the same thing, so do it in this order:
+
+1. **Prepare the version in a pull request** (`chore(release): prepare vX.Y.Z`). Change every one of these to the new version: `package.json`, `apps/api/package.json`, `apps/dashboard/package.json`, `packages/shared/package.json` and `VEXLYX_VERSION` in `packages/shared/src/index.ts`. `apps/api/src/version.test.ts` fails CI if any of them disagree. Move the entries under `## Unreleased` in `CHANGELOG.md` into a new `## [X.Y.Z] - date` section (the file is kept by hand in the Keep a Changelog format; the GitHub release notes are generated separately by git-cliff from the commit messages).
+2. **Merge it, then tag that exact merge commit** (never an earlier one), starting with a prerelease such as `vX.Y.Z-rc.1`:
+
+   ```bash
+   git checkout main && git pull
+   git tag vX.Y.Z-rc.1
+   git push origin vX.Y.Z-rc.1
+   ```
+
+3. **Test the release candidate** on a fresh server, then tag `vX.Y.Z` the same way. A tag with a `-` creates a prerelease and no `latest` image tag.
+4. **Never move or delete a published tag.** If something is wrong, fix it on `main` and release the next patch version.
+
+Version numbers follow [Semantic Versioning](https://semver.org): `PATCH` for fixes, `MINOR` for new features that break nothing, `MAJOR` for breaking changes. While the major version is `0`, minor releases may still change behaviour.
 
 Keep commit messages in `type(scope): summary` form so they land in the right changelog section. To refresh the committed `CHANGELOG.md`, run `git cliff -o CHANGELOG.md` locally after tagging and commit it.
 

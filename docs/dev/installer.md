@@ -8,7 +8,7 @@ curl -fsSL https://vexlyx.atlantiqs.org/install.sh | bash
 
 ## What it does
 
-1. Installs Docker Engine + Compose, Node.js 22 + pnpm, Python 3 + `cryptography`, and Nixpacks. (Node 22, not 20 — pnpm 11, pinned in `package.json`'s `packageManager` field, uses the `node:sqlite` built-in and fails with `ERR_UNKNOWN_BUILTIN_MODULE` on Node 20.)
+1. Installs Docker Engine + Compose, Node.js 22 + pnpm, and Python 3 + `cryptography`. Nixpacks is not installed on the host: project builds run it inside the API container, whose image ships it, and step 10 checks it there. (Node 22, not 20 — pnpm 11, pinned in `package.json`'s `packageManager` field, uses the `node:sqlite` built-in and fails with `ERR_UNKNOWN_BUILTIN_MODULE` on Node 20.)
 2. Collects the panel domain, admin credentials, and mail hostname (env vars, interactive prompt, or safe generated defaults — see [Configuration](#configuration)).
 3. Generates and persists application secrets exactly once.
 4. Builds the panel on the host (`pnpm install && pnpm build && prisma generate`) and builds the dashboard/api Docker images.
@@ -33,6 +33,20 @@ system/scripts/install/run.sh              — orchestrator
 
 `install.sh` is deliberately thin: it only figures out where the Vexlyx checkout lives and hands off. All real logic is versioned inside the repo under `system/scripts/install/`, so it can be reviewed, tested, and changed like any other code — and a `curl | bash` install always runs whatever the pinned `VEXLYX_REPO_REF` branch/tag actually contains.
 
+### Which version is installed
+
+`VEXLYX_REPO_REF` decides what `install.sh` puts on the server:
+
+| Value | Result |
+| --- | --- |
+| unset or `latest` | The newest stable release tag, `vMAJOR.MINOR.PATCH`. Prerelease tags (`v1.0.0-rc.1`) and non-version tags are never chosen, and versions compare numerically (`v0.10.0` is newer than `v0.9.0`). |
+| a tag such as `v0.2.0` | That exact release. |
+| a branch such as `main` | The tip of that branch, for development. The installer says it is not a tagged release. |
+
+Re-running the installer on an existing checkout moves it to the newest release, says "Already on release vX" when nothing is newer, and never touches a checkout with local changes. An install that follows a branch keeps following it unless `VEXLYX_REPO_REF` is set, so a re-run cannot silently change an operator's channel. If the repository has no release tag yet, the installer warns and falls back to `main`.
+
+Why releases are the default: a public install must run code that was tagged, tested and published, not whatever was merged a minute ago. Tags are created only by maintainers (see [CI/CD](ci-cd.md)), and a published tag is never moved. The logic lives in functions in `install.sh` and is covered by `tests/test_installer_release_channel.py`.
+
 ### Why the API container is different from the dashboard container
 
 The dashboard is a stateless frontend — `apps/dashboard/Dockerfile` is a conventional multi-stage `turbo prune` + Next.js `standalone` build, fully self-contained.
@@ -41,7 +55,7 @@ The API is not. Every deploy/build/mail/DNS/SSL/database feature works by spawni
 
 Containerizing the API without accounting for that coupling would silently break nearly every feature. Instead, `apps/api/Dockerfile` builds a **toolchain-only** image (Node, Python, git, Nixpacks, and a Docker CLI client) with no application code baked in. At runtime, `docker-compose.prod.yml` bind-mounts:
 
-- the entire `/opt/vexlyx` checkout (already built on the host by step 09) at the *same absolute path* inside the container, and
+- the entire `/opt/vexlyx` checkout (already built on the host by step 09) at the _same absolute path_ inside the container, and
 - `/var/run/docker.sock`
 
 This "Docker-outside-of-Docker" setup means every relative path the Python managers resolve (`Path.cwd().parent.parent / "docker" / "traefik" / "certs"`, `script_dir.parent / "templates" / "docker-compose"`, etc.) and every path in a `docker-compose.yml` the API generates for a user project, resolves identically whether read from inside the API container or by the host daemon it's talking to. It also means the API container's Python subprocess model is unchanged from how it already works today — Docker access is still mediated entirely through `system/python/*.py`, just running one layer further down.
@@ -61,19 +75,24 @@ docker compose --env-file /etc/vexlyx/vexlyx.env \
 
 Every value can be set as an environment variable ahead of time (for scripted/CI installs); if unset and a terminal is attached, you're prompted; if unset and non-interactive, a safe default is generated where one exists (never for the domain — see below).
 
-| Variable | Required | Default |
-|---|---|---|
-| `VEXLYX_DOMAIN` | **Yes** | none — the installer exits with instructions if unset and non-interactive |
-| `VEXLYX_BASE_DOMAIN` | No | `$VEXLYX_DOMAIN` — set separately if deployed-project subdomains should live in a different zone than the panel (F5.9) |
-| `VEXLYX_ADMIN_EMAIL` | No | `admin@$VEXLYX_DOMAIN` |
-| `VEXLYX_ADMIN_PASSWORD` | No | randomly generated, printed once at the end |
-| `VEXLYX_MAIL_HOSTNAME` | No | `mail.$VEXLYX_DOMAIN` |
-| `VEXLYX_MAIL_DOMAIN` | No | `$VEXLYX_DOMAIN` |
-| `VEXLYX_ENABLE_PUBLIC_DNS` | No | `false` — leaves port 53 closed in UFW and bound to loopback |
-| `VEXLYX_HOME` | No | `/opt/vexlyx` |
-| `VEXLYX_REPO_URL` / `VEXLYX_REPO_REF` | No | the Vexlyx repo / `main` |
+| Variable                              | Required | Default                                                                                                                |
+| ------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `VEXLYX_DOMAIN`                       | **Yes**  | none — the installer exits with instructions if unset and non-interactive                                              |
+| `VEXLYX_BASE_DOMAIN`                  | No       | `$VEXLYX_DOMAIN` — set separately if deployed-project subdomains should live in a different zone than the panel (F5.9) |
+| `VEXLYX_ADMIN_EMAIL`                  | No       | `admin@$VEXLYX_DOMAIN`                                                                                                 |
+| `VEXLYX_ADMIN_PASSWORD`               | No       | randomly generated, printed once at the end                                                                            |
+| `VEXLYX_MAIL_HOSTNAME`                | No       | `mail.$VEXLYX_DOMAIN`                                                                                                  |
+| `VEXLYX_MAIL_DOMAIN`                  | No       | `$VEXLYX_DOMAIN`                                                                                                       |
+| `VEXLYX_ENABLE_PUBLIC_DNS`            | No       | `false` — leaves port 53 closed in UFW and bound to loopback                                                           |
+| `VEXLYX_HOME`                         | No       | `/opt/vexlyx`                                                                                                          |
+| `VEXLYX_REPO_URL` / `VEXLYX_REPO_REF` | No       | the Vexlyx repo / `latest` (the newest stable release tag; see "Which version is installed")                           |
 
-The API also receives `COOKIE_DOMAIN=$VEXLYX_DOMAIN` (set directly in `docker-compose.prod.yml`, not user-configurable) — see [Cross-subdomain session cookie](#cross-subdomain-session-cookie) below.
+The API receives `HOSTED_MAIL_HOSTNAME=$VEXLYX_MAIL_HOSTNAME` and
+`HOSTED_MAIL_DOMAIN=$VEXLYX_MAIL_DOMAIN` so the dashboard can reproduce the installer's inbound
+mail DNS checklist without assuming `mail.$VEXLYX_DOMAIN`. These are deliberately separate from
+the API's `MAIL_DOMAIN`, which controls the sender domain for panel transactional email. The API
+also receives `COOKIE_DOMAIN=$VEXLYX_DOMAIN` (set directly in `docker-compose.prod.yml`, not
+user-configurable) — see [Cross-subdomain session cookie](#cross-subdomain-session-cookie) below.
 
 `VEXLYX_PUBLIC_IP` is not a config prompt — the installer auto-detects it on every run (external IP-echo services, falling back to the local route's source address) and persists it to `/etc/vexlyx/vexlyx.env`, from where it flows into the api container as `PUBLIC_IP` for DNS-onboarding guidance (F5.9, see `docs/dev/dns-onboarding.md`). Set it manually in that file if detection fails (e.g. an offline install).
 
@@ -119,6 +138,7 @@ Validated by syntax-checking every script (`bash -n`) and by a real end-to-end i
 Every one of these is already fixed in the current scripts/Dockerfiles — listed here so the reasoning isn't lost and so a future regression is recognizable.
 
 **Installer / build pipeline:**
+
 - **Node 20 → 22.** pnpm 11 (pinned in `package.json`) uses the `node:sqlite` built-in, added in Node 22 — failed with `ERR_UNKNOWN_BUILTIN_MODULE` on Node 20. Fixed in step 04 (NodeSource `setup_22.x`), both Dockerfiles' base images, and root `engines.node`.
 - **`config.sh` unbound variable under `set -u`.** The admin-password prompt block referenced `${VEXLYX_ADMIN_PASSWORD}` without a `:-` default on one line; when stdin isn't a TTY (any non-interactive `ssh host 'command'` invocation), the variable is genuinely unset and `set -u` aborts. Fixed by adding the missing `:-`.
 - **`@vexlyx/shared`/`@vexlyx/api` build race.** Turbo's `dependsOn: ["^build"]` didn't reliably serialize a fresh checkout's build graph — `tsc` for `api`/`dashboard` started before `shared` had written `dist/`, failing with `Cannot find module '@vexlyx/shared'`. Fixed by building `packages/shared` explicitly before the full `pnpm build` in step 09.
@@ -128,7 +148,8 @@ Every one of these is already fixed in the current scripts/Dockerfiles — liste
 - **`apps/dashboard/public/` never existed.** The runtime stage's `COPY --from=builder .../public ...` fails hard on a nonexistent source. Fixed by adding the directory (with a `.gitkeep`) to the repo.
 
 **Runtime / networking:**
-- **`ufw show added` vs `ufw status` for the pre-enable SSH check.** `ufw status` only lists rules once the firewall is *active* — checking it before `ufw --force enable` (deliberately, to avoid a lockout) always showed no rules even though they were really added. Fixed by using `ufw show added`, which lists configured rules regardless of active state.
+
+- **`ufw show added` vs `ufw status` for the pre-enable SSH check.** `ufw status` only lists rules once the firewall is _active_ — checking it before `ufw --force enable` (deliberately, to avoid a lockout) always showed no rules even though they were really added. Fixed by using `ufw show added`, which lists configured rules regardless of active state.
 - **Traefik v3.4 incompatible with Docker 29+.** Docker 29 raised its minimum accepted API version; Traefik ≤3.5's Docker provider hardcodes API 1.24 for its client (ignoring `DOCKER_API_VERSION` entirely) and gets rejected outright, so it never syncs container labels and never creates any routers — every request 404s. Fixed by bumping the pinned image to `traefik:v3.6` (which added API auto-negotiation) in `docker-compose.yml`.
 - **`acme.json` auto-created at `644`.** It's gitignored, so a fresh checkout doesn't have it; Docker Compose bind-mounting a missing file auto-creates it as root:root `644`, and Traefik refuses to use an ACME storage file that isn't exactly `600`, silently disabling the `letsencrypt` resolver for every router. Fixed by having step 07 `touch` + `chmod 600` it before services come up.
 - **Missing `python` → `python3` symlink inside the API image.** Several call sites (`apps/api/src/modules/{build,deploy,wordpress,dockerfile,databases}/service.ts`) spawn Python as literally `python`; Debian ships no such binary. Host-side installer already handled this (step 04) but the API container's own image didn't. Fixed by adding the same symlink to `apps/api/Dockerfile`.
@@ -137,9 +158,10 @@ Every one of these is already fixed in the current scripts/Dockerfiles — liste
 - **Stray `apps/api/.env` silently defeating domain verification.** See the security note above — fixed by having step 09 refuse to build if the file exists.
 
 **Pre-existing application bugs, unrelated to F5.1 itself, surfaced by finally running this stack for real:**
+
 - `system/python/build_manager.py` had a JS-style `null` in a type annotation (`str | null` instead of `str | None`) — Python evaluates annotations at function-definition time, so this crashed the script's very first import with `NameError`, breaking every project build and one-click install. Fixed in place.
 - `EnvVarEditor.tsx`'s "Add Variable" form had no `autoComplete` attributes, so Chrome's saved-login heuristics offered to autofill the site's own admin credentials into an unrelated Key/Value pair. Fixed with `autoComplete="off"` / `"new-password"`.
 
 ## Panel email (F5.23)
 
-The installer passes `MAIL_DOMAIN` (the panel domain), `MAIL_REPLY_TO` (the admin email) and `BUNDLED_SMTP_HOST=postfix` to the API container, so password resets and notifications are relayed through the bundled Postfix as `notifications@<panel domain>` with no extra setup. The install summary reminds you to publish SPF/DKIM/DMARC records, which Settings → System Email lists and checks. See [System Transactional Email](system-transactional-email.md).
+The installer passes `MAIL_DOMAIN` (the panel domain), `MAIL_REPLY_TO` (the admin email) and `BUNDLED_SMTP_HOST=postfix` to the API container, so password resets and notifications are relayed through the bundled Postfix as `notifications@<panel domain>` with no extra setup. The install summary keeps this SPF/DKIM/DMARC guidance separate from the mail-host A and mail-domain MX records required for inbound hosted mail. Settings → System Email lists and checks the transactional-email authentication records. See [System Transactional Email](system-transactional-email.md).

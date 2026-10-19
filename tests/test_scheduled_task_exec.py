@@ -11,6 +11,7 @@ Run: python tests/test_scheduled_task_exec.py
 """
 
 import io
+import subprocess as real_subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -45,12 +46,30 @@ services:
 
 
 class FakeProcess:
-    """Stand-in for subprocess.Popen: a finished exec with captured output."""
+    """Stand-in for subprocess.Popen covering both interfaces it is used
+    through: `run_bounded` (context manager + communicate/poll, used by the
+    container lookup) and `cmd_exec`'s own raw Popen (stdout.read1 + wait)."""
 
-    def __init__(self, output: bytes, returncode: int = 0):
-        self.stdout = io.BytesIO(output)
+    def __init__(self, output: str, returncode: int = 0):
+        self.output = output
         self.returncode = returncode
+        self.stdout = io.BytesIO(output.encode("utf-8"))
+        self.pid = 4242
 
+    # run_bounded() interface
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def communicate(self, _input=None, timeout=None):
+        return (self.output, "")
+
+    def poll(self):
+        return self.returncode
+
+    # cmd_exec()'s raw-Popen interface
     def wait(self, timeout=None):
         return self.returncode
 
@@ -61,12 +80,59 @@ class FakeProcess:
         pass
 
 
-def run_exec(compose_text: str, project_type: str, command: str = "php wp-cron.php") -> tuple[dict, list]:
+def fake_subprocess(argvs: list) -> SimpleNamespace:
+    """A subprocess stand-in that records every argv and answers
+    `docker compose ps -q <service>` with "<service>-container", so a test can
+    tell which service an exec landed in. Anything else (the docker exec
+    itself) produces plain output."""
+
+    def fake_popen(cmd, **_kwargs):
+        argvs.append(list(cmd))
+        if len(cmd) > 3 and cmd[1:3] == ["compose", "ps"]:
+            return FakeProcess(f"{cmd[-1]}-container\n")
+        return FakeProcess("ran ok\n")
+
+    def fake_run(cmd, **_kwargs):
+        argvs.append(list(cmd))
+        if len(cmd) > 3 and cmd[1:3] == ["compose", "ps"]:
+            return SimpleNamespace(stdout=f"{cmd[-1]}-container\n", stderr="")
+        return SimpleNamespace(stdout="ran ok\n", stderr="")
+
+    return SimpleNamespace(
+        run=fake_run,
+        Popen=fake_popen,
+        PIPE=-1,
+        DEVNULL=-3,
+        STDOUT=-2,
+        CompletedProcess=real_subprocess.CompletedProcess,
+        # Referenced by _group_popen_kwargs() on Windows hosts.
+        CREATE_NEW_PROCESS_GROUP=0x00000200,
+    )
+
+
+class patched:
+    """Context manager: swap docker_manager's module attributes and restore."""
+
+    def __init__(self, **attrs):
+        self.attrs = attrs
+        self.originals = {}
+
+    def __enter__(self):
+        for name, value in self.attrs.items():
+            self.originals[name] = getattr(docker_manager, name)
+            setattr(docker_manager, name, value)
+        return self
+
+    def __exit__(self, *_exc):
+        for name, value in self.originals.items():
+            setattr(docker_manager, name, value)
+        return False
+
+
+def run_exec(compose_text: str, project_type: str, command: str = "php wp-cron.php") -> tuple:
     """Run cmd_exec against a synthetic deploy dir.
 
     Returns (response payload, list of argvs handed to subprocess).
-    `docker compose ps -q <service>` answers with "<service>-container" so a
-    test can tell which service the exec landed in.
     """
     with tempfile.TemporaryDirectory() as tmp:
         project_dir = Path(tmp)
@@ -74,32 +140,14 @@ def run_exec(compose_text: str, project_type: str, command: str = "php wp-cron.p
         deploy.mkdir()
         (deploy / "docker-compose.yml").write_text(compose_text, encoding="utf-8")
 
-        argvs = []
-        response = {}
+        argvs: list = []
+        response: dict = {}
 
-        def fake_run(cmd, **_kwargs):
-            argvs.append(list(cmd))
-            return SimpleNamespace(stdout=f"{cmd[-1]}-container\n", stderr="")
-
-        def fake_popen(cmd, **_kwargs):
-            argvs.append(list(cmd))
-            return FakeProcess(b"ran ok\n")
-
-        originals = {
-            "subprocess": docker_manager.subprocess,
-            "get_docker_binary": docker_manager.get_docker_binary,
-            "respond": docker_manager.respond,
-        }
-        docker_manager.subprocess = SimpleNamespace(
-            run=fake_run,
-            Popen=fake_popen,
-            PIPE=-1,
-            DEVNULL=-3,
-            STDOUT=-2,
-        )
-        docker_manager.get_docker_binary = lambda: "docker"
-        docker_manager.respond = lambda data: response.update(data)
-        try:
+        with patched(
+            subprocess=fake_subprocess(argvs),
+            get_docker_binary=lambda: "docker",
+            respond=lambda data: response.update(data),
+        ):
             docker_manager.cmd_exec(
                 {
                     "projectDir": str(project_dir),
@@ -108,16 +156,13 @@ def run_exec(compose_text: str, project_type: str, command: str = "php wp-cron.p
                     "timeout": 10,
                 }
             )
-        finally:
-            for name, value in originals.items():
-                setattr(docker_manager, name, value)
 
     return response, argvs
 
 
 def ps_service(argvs) -> str:
     """Service name requested by the single `docker compose ps -q` call."""
-    ps_calls = [a for a in argvs if len(a) > 2 and a[1:3] == ["compose", "ps"]]
+    ps_calls = [a for a in argvs if len(a) > 3 and a[1:3] == ["compose", "ps"]]
     assert len(ps_calls) == 1, f"expected exactly one compose ps call, got: {ps_calls}"
     return ps_calls[0][-1]
 
@@ -135,6 +180,7 @@ def test_exec_targets_application_container_for_wordpress():
     response, argvs = run_exec(WORDPRESS_COMPOSE, "WORDPRESS")
 
     assert response.get("exitCode") == 0, f"unexpected response: {response}"
+    assert response.get("output") == "ran ok", f"unexpected output: {response}"
     assert ps_service(argvs) == "app", "status/logs may use 'web', exec must resolve 'app'"
     assert exec_container(argvs) == "app-container", (
         f"WordPress commands must run in the PHP-FPM 'app' container, got: {exec_container(argvs)}"
@@ -158,25 +204,12 @@ def test_app_container_id_falls_back_without_app_service():
         deploy.mkdir()
         (deploy / "docker-compose.yml").write_text(NO_APP_COMPOSE, encoding="utf-8")
 
-        originals = {
-            "subprocess": docker_manager.subprocess,
-            "get_docker_binary": docker_manager.get_docker_binary,
-        }
-        docker_manager.subprocess = SimpleNamespace(
-            run=lambda cmd, **_kwargs: SimpleNamespace(stdout=f"{cmd[-1]}-container\n", stderr=""),
-            Popen=None,
-            PIPE=-1,
-            DEVNULL=-3,
-            STDOUT=-2,
-        )
-        docker_manager.get_docker_binary = lambda: "docker"
-        try:
+        argvs: list = []
+        with patched(subprocess=fake_subprocess(argvs), get_docker_binary=lambda: "docker"):
             container = docker_manager.app_container_id(str(deploy), "docker", "WORDPRESS")
-        finally:
-            for name, value in originals.items():
-                setattr(docker_manager, name, value)
 
     assert container == "web-container", f"expected the HTTP-facing fallback, got: {container}"
+    assert ps_service(argvs) == "web"
     print("  [PASS] falls back to the HTTP-facing container when no 'app' service exists")
 
 

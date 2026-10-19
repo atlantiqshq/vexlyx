@@ -20,6 +20,14 @@ export default defineConfig({
     ["meta", { name: "theme-color", content: "#4f46e5" }],
     ["meta", { property: "og:site_name", content: "Vexlyx Docs" }],
     ["meta", { property: "og:type", content: "website" }],
+    [
+      "meta",
+      {
+        name: "google-site-verification",
+        content: "US6r9MOMwCukIFCnjBAXAgK5aAF67qNf0nC7bOuKYhA",
+      },
+    ],
+    ["meta", { name: "msvalidate.01", content: "AFA1DA51232AD4245E8BA313C1C8E986" }],
   ],
   markdown: {
     // The reference pages are plain documentation, not Vue. Render raw HTML as text and stop Vue

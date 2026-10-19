@@ -319,4 +319,119 @@ describe("scheduled task routes — scheduling lifecycle", () => {
     expect(firstArm?.[1]).toMatchObject({ pattern: "*/5 * * * *" });
     expect(restoreArm?.[1]).toMatchObject({ pattern: "0 0 * * *" });
   });
+
+  it("does not reset omitted fields on a partial update", async () => {
+    const prisma = createPrisma();
+    const existing = {
+      id: "ctask00000000000000000001",
+      projectId: "cproject000000000000000001",
+      userId: "owner-1",
+      name: "nightly",
+      command: "echo hi",
+      schedule: "0 0 * * *",
+      timeoutSeconds: 900,
+      enabled: true,
+      notifyOnFailure: false,
+      consecutiveFailures: 0,
+      lastRunAt: null,
+      nextRunAt: new Date("2026-10-21T00:00:00.000Z"),
+      project: { userId: "owner-1", deletedAt: null },
+    };
+    prisma.scheduledTask.findUnique.mockResolvedValue(existing);
+    // Prisma's update returns the full row, not just the changed fields.
+    prisma.scheduledTask.update.mockImplementation(
+      async (args: { data: Record<string, unknown> }) => ({ ...existing, ...args.data }),
+    );
+
+    const app = await buildApp({ userId: "owner-1", role: "USER" }, prisma);
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/projects/cproject000000000000000001/scheduled-tasks/ctask00000000000000000001",
+      payload: { enabled: false },
+    });
+
+    expect(res.statusCode).toBe(200);
+    // A pause must carry only what the caller sent: create-time defaults
+    // leaking into the update would reset timeoutSeconds to 300 and
+    // notifyOnFailure to true.
+    const rowUpdate = prisma.scheduledTask.update.mock.calls.find(
+      ([args]) => (args as { data: { enabled?: boolean } }).data?.enabled === false,
+    );
+    expect(rowUpdate, "row should be updated with the pause").toBeTruthy();
+    expect(rowUpdate?.[0]).toMatchObject({ data: { enabled: false } });
+    expect((rowUpdate?.[0] as { data: Record<string, unknown> }).data).not.toHaveProperty("timeoutSeconds");
+    expect((rowUpdate?.[0] as { data: Record<string, unknown> }).data).not.toHaveProperty("notifyOnFailure");
+  });
+
+  it("re-arms the schedule when the delete fails after disarming", async () => {
+    const prisma = createPrisma();
+    const existing = {
+      id: "ctask00000000000000000001",
+      projectId: "cproject000000000000000001",
+      userId: "owner-1",
+      name: "nightly",
+      command: "echo hi",
+      schedule: "0 0 * * *",
+      timeoutSeconds: 300,
+      enabled: true,
+      notifyOnFailure: true,
+      consecutiveFailures: 0,
+      lastRunAt: null,
+      nextRunAt: new Date("2026-10-21T00:00:00.000Z"),
+      project: { userId: "owner-1", deletedAt: null },
+    };
+    prisma.scheduledTask.findUnique.mockResolvedValue(existing);
+    prisma.scheduledTask.delete.mockRejectedValue(new Error("Connection is closed."));
+
+    const app = await buildApp({ userId: "owner-1", role: "USER" }, prisma);
+    // Drop the boot-time re-arm from the assertions. Set after buildApp so
+    // boot cannot consume it.
+    queueMock.removeJobScheduler.mockClear();
+    queueMock.upsertJobScheduler.mockClear();
+
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/api/projects/cproject000000000000000001/scheduled-tasks/ctask00000000000000000001",
+    });
+
+    expect(res.statusCode).toBe(500);
+    // Disarm happened first…
+    expect(queueMock.removeJobScheduler).toHaveBeenCalledWith("scheduled-task:ctask00000000000000000001");
+    expect(prisma.scheduledTask.delete).toHaveBeenCalled();
+    // …so the surviving row must be re-armed instead of being left enabled
+    // with no scheduler (it would silently stop running).
+    const armCalls = queueMock.upsertJobScheduler.mock.calls;
+    const lastArm = armCalls[armCalls.length - 1];
+    expect(lastArm?.[1]).toMatchObject({ pattern: "0 0 * * *" });
+  });
+
+  it("disarms a possibly-armed schedule when rolling back a failed create", async () => {
+    const prisma = createPrisma();
+    const app = await buildApp({ userId: "owner-1", role: "USER" }, prisma);
+
+    // The arm reaches BullMQ, then persisting nextRunAt fails — the rollback
+    // must remove the scheduler as well as the row. Set after buildApp so the
+    // boot-time re-arm cannot consume the one-shot rejection.
+    queueMock.upsertJobScheduler.mockClear();
+    queueMock.removeJobScheduler.mockClear();
+    prisma.scheduledTask.update.mockRejectedValueOnce(new Error("Connection is closed."));
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/projects/cproject000000000000000001/scheduled-tasks",
+      payload: { name: "nightly", command: "echo hi", schedule: "0 0 * * *" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json().code).toBe("SCHEDULE_ARM_FAILED");
+    // BullMQ already had the job armed before the failure…
+    expect(queueMock.upsertJobScheduler).toHaveBeenCalled();
+    // …so the rollback disarms it instead of leaving a repeatable job in
+    // Redis for a task row that no longer exists.
+    expect(queueMock.removeJobScheduler).toHaveBeenCalledWith("scheduled-task:ctask00000000000000000001");
+    expect(prisma.scheduledTask.delete).toHaveBeenCalledWith({
+      where: { id: "ctask00000000000000000001" },
+    });
+  });
 });

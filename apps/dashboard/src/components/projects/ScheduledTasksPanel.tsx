@@ -453,6 +453,7 @@ function RunHistoryDialog({
 export function ScheduledTasksPanel({ projectId, timezone }: { projectId: string; timezone?: string }) {
   const {
     tasks,
+    hasData,
     isLoading,
     error,
     refetch,
@@ -519,7 +520,10 @@ export function ScheduledTasksPanel({ projectId, timezone }: { projectId: string
     );
   }
 
-  if (error) {
+  // Blocking states only when nothing is cached: a background refresh failure
+  // must keep the (cached) list — and any open dialog — mounted instead of
+  // discarding the user's in-progress edits.
+  if (error && !hasData) {
     return (
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
@@ -556,6 +560,21 @@ export function ScheduledTasksPanel({ projectId, timezone }: { projectId: string
           <Button onClick={openCreate}>Create Task</Button>
         </div>
       </CardHeader>
+
+      {/* Stale data with a failed refresh: keep the list visible and show the
+          error inline (repo guide: toast + inline error), never a blank panel. */}
+      {error && (
+        <CardContent className="pb-0">
+          <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3">
+            <p className="text-sm text-destructive">
+              {errorMessage(error, "Failed to load scheduled tasks")}
+            </p>
+            <Button variant="outline" size="sm" onClick={() => void refetch()}>
+              Retry
+            </Button>
+          </div>
+        </CardContent>
+      )}
 
       {tasks.length === 0 ? (
         <CardContent className="py-12 text-center">

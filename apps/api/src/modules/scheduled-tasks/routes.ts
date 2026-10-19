@@ -161,6 +161,15 @@ export async function scheduledTaskRoutes(app: FastifyInstance) {
             { err, taskId: task.id, schedule: task.schedule },
             "Failed to arm new scheduled task — rolling back",
           );
+          // The arm may already have reached BullMQ (upsert succeeded and a
+          // later step failed) — disarm so Redis keeps no job for a task row
+          // that is about to be deleted.
+          await unscheduleTaskJob(taskQueue, task.id, app.log).catch((unscheduleErr) =>
+            app.log.error(
+              { err: unscheduleErr, taskId: task.id },
+              "Failed to disarm schedule while rolling back unschedulable task",
+            ),
+          );
           await app.prisma.scheduledTask
             .delete({ where: { id: task.id } })
             .catch((delErr) => app.log.error({ err: delErr, taskId: task.id }, "Failed to roll back unschedulable task"));
@@ -277,7 +286,23 @@ export async function scheduledTaskRoutes(app: FastifyInstance) {
       // Disarm first: if BullMQ refuses, the request fails while the task and
       // its scheduler are still in sync (never "deleted but still firing").
       await unscheduleTaskJob(taskQueue, taskId, app.log);
-      await service.delete(taskId, request.userId!, request.userRole!);
+      try {
+        await service.delete(taskId, request.userId!, request.userRole!);
+      } catch (err) {
+        // The scheduler is already disarmed — if the row survives, re-arm it
+        // so a rejected delete never leaves an enabled task that silently
+        // stops running.
+        try {
+          const { timezone: tz } = await systemService.getSettings();
+          await applyTaskSchedule(taskQueue, app.prisma, task, tz, app.log);
+        } catch (restoreErr) {
+          app.log.error(
+            { err: restoreErr, taskId, schedule: task.schedule },
+            "Failed to restore schedule after failed delete",
+          );
+        }
+        throw err;
+      }
       reply.status(204);
       return null;
     } catch (err) {

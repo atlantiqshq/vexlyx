@@ -61,6 +61,10 @@ export function useScheduledTasks(projectId: string) {
 
   return {
     tasks: data ?? [],
+    // Distinguishes "nothing loaded yet" from a cached (possibly empty) list,
+    // so a failed background refresh never replaces cached data with an error
+    // state that would unmount open dialogs and discard in-progress edits.
+    hasData: data !== undefined,
     isLoading,
     error,
     refetch,

@@ -291,6 +291,51 @@ describe("ScheduledTaskService.executeTask", () => {
       expect.objectContaining({ data: expect.objectContaining({ output: "Project deleted" }) }),
     );
   });
+
+  it("never rewrites a successful run when saving its result fails", async () => {
+    const prisma = createPrisma();
+    const redis = createRedis();
+    prisma.scheduledTaskRun.create.mockResolvedValue(RUNNING_ROW);
+    // The command exited 0, but persisting the outcome hits a database error.
+    prisma.scheduledTaskRun.update.mockRejectedValue(new Error("Connection is closed."));
+    spawnMock.mockReturnValue(execResult({ exitCode: 0, output: "hello" }) as never);
+
+    const service = new ScheduledTaskService(prisma as never, logger, auditLog, redis);
+
+    await expect(service.executeTask(baseTask() as never, "MANUAL")).rejects.toThrow("Connection is closed.");
+
+    // The single write attempted was the command's real result — the database
+    // error must never be recorded as a command failure…
+    expect(prisma.scheduledTaskRun.update).toHaveBeenCalledTimes(1);
+    expect(prisma.scheduledTaskRun.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "SUCCESS" }) }),
+    );
+    // …and the failure streak stays untouched (no false failure email).
+    expect(prisma.scheduledTask.update).not.toHaveBeenCalled();
+    expect(notifyUserMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the run's real result when only the streak update fails", async () => {
+    const prisma = createPrisma();
+    const redis = createRedis();
+    prisma.scheduledTaskRun.create.mockResolvedValue(RUNNING_ROW);
+    prisma.scheduledTaskRun.update.mockResolvedValue(finishedRow("SUCCESS", 0, "hello"));
+    prisma.scheduledTask.update.mockRejectedValue(new Error("Connection is closed."));
+    spawnMock.mockReturnValue(execResult({ exitCode: 0, output: "hello" }) as never);
+
+    const service = new ScheduledTaskService(prisma as never, logger, auditLog, redis);
+    const run = await service.executeTask(baseTask() as never, "MANUAL");
+
+    expect(run.status).toBe("SUCCESS");
+    expect(prisma.scheduledTaskRun.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "SUCCESS" }) }),
+    );
+    expect(vi.mocked(logger.error)).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: "task-1" }),
+      "Failed to update scheduled task streak",
+    );
+    expect(notifyUserMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("ScheduledTaskService.create — access & quota", () => {

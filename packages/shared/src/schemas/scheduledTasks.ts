@@ -79,7 +79,9 @@ export function isValidCronExpression(expression: string): boolean {
   });
 }
 
-export const CreateScheduledTaskSchema = z.object({
+// Field shapes without defaults. The create schema layers create-time
+// defaults on top; the update schema must stay default-free (see below).
+const scheduledTaskFields = {
   name: z.string().min(1).max(100),
   command: z.string().min(1).max(2000),
   schedule: z
@@ -88,12 +90,24 @@ export const CreateScheduledTaskSchema = z.object({
     .refine(isValidCronExpression, {
       message: "Invalid cron expression (5 fields: minute hour day month weekday, no seconds)",
     }),
-  timeoutSeconds: z.number().int().min(1).max(3600).default(300),
-  enabled: z.boolean().default(true),
-  notifyOnFailure: z.boolean().default(true),
+  timeoutSeconds: z.number().int().min(1).max(3600),
+  enabled: z.boolean(),
+  notifyOnFailure: z.boolean(),
+};
+
+export const CreateScheduledTaskSchema = z.object({
+  ...scheduledTaskFields,
+  timeoutSeconds: scheduledTaskFields.timeoutSeconds.default(300),
+  enabled: scheduledTaskFields.enabled.default(true),
+  notifyOnFailure: scheduledTaskFields.notifyOnFailure.default(true),
 });
 
-export const UpdateScheduledTaskSchema = CreateScheduledTaskSchema.partial();
+// In Zod 4, `.partial()` keeps the wrapped defaults, so a partial of the
+// create schema would still inject `timeoutSeconds: 300`, `enabled: true` and
+// `notifyOnFailure: true` for omitted keys — a pause request would reset the
+// timeout/notify settings, and an update that omits `enabled` would resume a
+// paused task. Build the update shape from the default-free fields instead.
+export const UpdateScheduledTaskSchema = z.object(scheduledTaskFields).partial();
 
 export const ScheduledTaskProjectParamSchema = z.object({
   id: z.string().cuid(),

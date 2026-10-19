@@ -396,8 +396,9 @@ export class ScheduledTaskService {
         data: { taskId: task.id, trigger, status: "RUNNING" },
       });
 
+      let result: { exitCode: number; output: string; timedOut: boolean };
       try {
-        const result = await runDockerManager<{ exitCode: number; output: string; timedOut: boolean }>({
+        result = await runDockerManager<{ exitCode: number; output: string; timedOut: boolean }>({
           command: "exec",
           projectDir: resolve(env.PROJECTS_DIR, project.id),
           projectType: project.type,
@@ -405,19 +406,28 @@ export class ScheduledTaskService {
           timeout: task.timeoutSeconds,
           outputLimit: OUTPUT_CAP_BYTES,
         }, this.logger);
-
-        const status = result.timedOut ? "TIMEOUT" : (result.exitCode === 0 ? "SUCCESS" : "FAILED");
-        const finished = await this.finishRun(run.id, status, result.exitCode, result.output);
-        await this.updateStreak(task, status, finished);
-        return finished;
       } catch (err) {
+        // Spawn/infrastructure failure of the command itself. The caller must
+        // see the original error, not a persistence failure that shadows it.
         const message = err instanceof Error ? err.message : "Execution failed";
-        const finished = await this.finishRun(run.id, "FAILED", null, message);
-        await this.updateStreak(task, "FAILED", finished);
+        try {
+          await this.persistOutcome(task, run.id, "FAILED", null, message);
+        } catch (persistErr) {
+          this.logger.error(
+            { err: persistErr, runId: run.id, taskId: task.id },
+            "Failed to persist scheduled task failure",
+          );
+        }
         // Surface spawn/infrastructure errors to the caller; scheduled runs
         // are logged by the worker, which deliberately does not rethrow.
         throw err;
       }
+
+      // The command finished — its outcome is whatever the container reported.
+      // Errors while saving that outcome (or updating the streak) are handled
+      // inside persistOutcome and never rewrite a successful run as FAILED.
+      const status = result.timedOut ? "TIMEOUT" : (result.exitCode === 0 ? "SUCCESS" : "FAILED");
+      return await this.persistOutcome(task, run.id, status, result.exitCode, result.output);
     } finally {
       try {
         await this.redis.eval(RELEASE_LOCK_SCRIPT, 1, lockKey, lockValue);
@@ -427,6 +437,40 @@ export class ScheduledTaskService {
         this.logger.error({ err, taskId: task.id }, "Failed to release scheduled task overlap lock");
       }
     }
+  }
+
+  /**
+   * Records a finished run and updates the task's failure streak. These are
+   * database writes that happen *after* the command produced its result: a
+   * failure here must never rewrite that result (a successful command would
+   * otherwise show up as FAILED and send a false failure email). A failed
+   * result write is rethrown (the caller cannot return a run it could not
+   * save); a failed streak update is logged and swallowed — the run row
+   * already carries the truth.
+   */
+  private async persistOutcome(
+    task: ScheduledTaskWithProject,
+    runId: string,
+    status: ScheduledTaskRunStatus,
+    exitCode: number | null,
+    output: string | null,
+  ) {
+    let finished: Awaited<ReturnType<typeof this.finishRun>>;
+    try {
+      finished = await this.finishRun(runId, status, exitCode, output);
+    } catch (err) {
+      this.logger.error(
+        { err, runId, taskId: task.id, status },
+        "Failed to persist scheduled task run result",
+      );
+      throw err;
+    }
+    try {
+      await this.updateStreak(task, status, finished);
+    } catch (err) {
+      this.logger.error({ err, taskId: task.id, status }, "Failed to update scheduled task streak");
+    }
+    return finished;
   }
 
   private async finishRun(

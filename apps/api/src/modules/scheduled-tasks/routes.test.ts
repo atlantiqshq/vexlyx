@@ -4,13 +4,21 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 process.env.DATABASE_URL ??= "postgresql://user:pass@localhost:5432/vexlyx_test";
 process.env.SESSION_SECRET ??= "test-session-secret-at-least-32-characters-long";
 
-vi.mock("../../config/queue.js", () => ({
-  createQueue: () => ({
+const queueMock = vi.hoisted(() => {
+  type SchedulerJson = { key: string; name: string; next?: number };
+  return {
     name: "scheduled-task-runner",
-    upsertJobScheduler: vi.fn(async () => undefined),
-    removeJobScheduler: vi.fn(async () => undefined),
+    upsertJobScheduler: vi.fn(async (..._args: unknown[]) => undefined),
+    removeJobScheduler: vi.fn(async (_id?: string) => undefined),
+    getJobScheduler: vi.fn(
+      async (_id?: string): Promise<SchedulerJson | null | undefined> => undefined,
+    ),
     getJobSchedulers: vi.fn(async () => []),
-  }),
+  };
+});
+
+vi.mock("../../config/queue.js", () => ({
+  createQueue: () => queueMock,
   createWorker: () => ({}),
 }));
 vi.mock("../system/service.js", () => ({
@@ -227,5 +235,88 @@ describe("scheduled task routes — task detail scoping", () => {
     const res = await app.inject({ method: "GET", url: "/api/projects/cproject000000000000000001/scheduled-tasks/ctask00000000000000000001" });
     expect(res.statusCode).toBe(404);
     expect(res.json().code).toBe("TASK_NOT_FOUND");
+  });
+});
+
+describe("scheduled task routes — scheduling lifecycle", () => {
+  it("reads nextRunAt back from BullMQ by scheduler id instead of listing every scheduler", async () => {
+    const prisma = createPrisma();
+    const next = new Date("2026-10-21T00:00:00.000Z");
+
+    const app = await buildApp({ userId: "owner-1", role: "USER" }, prisma);
+    // Set after buildApp: boot-time re-arm also reads nextRunAt and would
+    // otherwise consume this one-shot value first.
+    queueMock.getJobScheduler.mockResolvedValueOnce({
+      key: "scheduled-task:ctask00000000000000000001",
+      name: "scheduled-task:ctask00000000000000000001",
+      next: next.getTime(),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/projects/cproject000000000000000001/scheduled-tasks",
+      payload: { name: "nightly", command: "echo hi", schedule: "0 0 * * *" },
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(res.json().nextRunAt).toBe(next.toISOString());
+    expect(queueMock.getJobScheduler).toHaveBeenCalledWith("scheduled-task:ctask00000000000000000001");
+    expect(queueMock.getJobSchedulers).not.toHaveBeenCalled();
+  });
+
+  it("reverts the row AND re-arms the previous schedule in BullMQ when an update cannot be armed", async () => {
+    const prisma = createPrisma();
+    const existing = {
+      id: "ctask00000000000000000001",
+      projectId: "cproject000000000000000001",
+      userId: "owner-1",
+      name: "nightly",
+      command: "echo hi",
+      schedule: "0 0 * * *",
+      timeoutSeconds: 300,
+      enabled: true,
+      notifyOnFailure: true,
+      consecutiveFailures: 0,
+      lastRunAt: null,
+      nextRunAt: new Date("2026-10-21T00:00:00.000Z"),
+      project: { userId: "owner-1", deletedAt: null },
+    };
+    prisma.scheduledTask.findUnique.mockResolvedValue(existing);
+    // Prisma's update returns the full row, not just the changed fields.
+    prisma.scheduledTask.update.mockImplementation(
+      async (args: { data: Record<string, unknown> }) => ({ ...existing, ...args.data }),
+    );
+
+    const app = await buildApp({ userId: "owner-1", role: "USER" }, prisma);
+
+    // Drop the boot-time re-arm from the assertions, then make the next arm
+    // (the new schedule) fail at BullMQ/Redis — the restore arm that follows
+    // must succeed. Set after buildApp so boot cannot consume it.
+    queueMock.upsertJobScheduler.mockClear();
+    queueMock.upsertJobScheduler.mockImplementationOnce(async () => {
+      throw new Error("Connection is closed.");
+    });
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/api/projects/cproject000000000000000001/scheduled-tasks/ctask00000000000000000001",
+      payload: { schedule: "*/5 * * * *" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json().code).toBe("SCHEDULE_ARM_FAILED");
+
+    // The saved row carries the previous schedule again…
+    const revert = prisma.scheduledTask.update.mock.calls.find(
+      ([args]) => (args as { data: { schedule?: string } }).data?.schedule === "0 0 * * *",
+    );
+    expect(revert, "row should be reverted to the previous schedule").toBeTruthy();
+
+    // …and BullMQ was re-armed with it (two arms: failed new, restored old).
+    const armCalls = queueMock.upsertJobScheduler.mock.calls;
+    expect(armCalls).toHaveLength(2);
+    const [firstArm, restoreArm] = armCalls;
+    expect(firstArm?.[1]).toMatchObject({ pattern: "*/5 * * * *" });
+    expect(restoreArm?.[1]).toMatchObject({ pattern: "0 0 * * *" });
   });
 });

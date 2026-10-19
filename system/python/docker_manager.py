@@ -329,13 +329,25 @@ def generate_nginx_conf(
     return dest
 
 
-def get_container_id(compose_dir: str, docker_bin: str, project_type: str = "NODEJS") -> str | None:
-    """Return the short container ID of the primary (Traefik-facing) service, or None."""
+def compose_has_service(compose_dir: str | Path, service: str) -> bool:
+    """True when the project's generated compose file declares `service`."""
+    compose_file = Path(compose_dir) / "docker-compose.yml"
+    if not compose_file.is_file():
+        return False
+    try:
+        content = compose_file.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return re.search(r"(?m)^\s{2}%s:\s*$" % re.escape(service), content) is not None
+
+
+def service_container_id(compose_dir: str, docker_bin: str, service: str) -> str | None:
+    """Return the short container ID of a named Compose service, or None."""
     if not Path(compose_dir).is_dir() or not (Path(compose_dir) / "docker-compose.yml").is_file():
         return None
 
     result = subprocess.run(
-        [docker_bin, "compose", "ps", "-q", primary_service_name(project_type, compose_dir)],
+        [docker_bin, "compose", "ps", "-q", service],
         cwd=compose_dir,
         capture_output=True,
         text=True,
@@ -344,6 +356,34 @@ def get_container_id(compose_dir: str, docker_bin: str, project_type: str = "NOD
     )
     container_id = result.stdout.strip()
     return container_id if container_id else None
+
+
+def get_container_id(compose_dir: str, docker_bin: str, project_type: str = "NODEJS") -> str | None:
+    """Return the short container ID of the primary (Traefik-facing) service, or None."""
+    return service_container_id(
+        compose_dir,
+        docker_bin,
+        primary_service_name(project_type, compose_dir),
+    )
+
+
+# Every compose template names the service that runs application code "app".
+APP_SERVICE_NAME = "app"
+
+
+def app_container_id(compose_dir: str, docker_bin: str, project_type: str = "NODEJS") -> str | None:
+    """
+    Return the short container ID of the *application* service (F5.28).
+
+    Exec must not reuse the HTTP-facing lookup: WORDPRESS and no-build PHP
+    front a PHP-FPM "app" service with an nginx "web" service, so a command
+    like `php wp-cron.php` would otherwise be handed to nginx and fail. Falls
+    back to the HTTP-facing container only for a compose file that declares
+    no "app" service at all.
+    """
+    if compose_has_service(compose_dir, APP_SERVICE_NAME):
+        return service_container_id(compose_dir, docker_bin, APP_SERVICE_NAME)
+    return get_container_id(compose_dir, docker_bin, project_type)
 
 
 # ---------------------------------------------------------------------------
@@ -840,8 +880,10 @@ def cmd_exec(payload: dict) -> None:
     if not Path(compose_dir).is_dir() or not (Path(compose_dir) / "docker-compose.yml").is_file():
         fail("Project not deployed (no compose directory)", "NOT_DEPLOYED")
 
-    # Get the primary container ID (same logic as status/logs)
-    container_id = get_container_id(compose_dir, docker_bin, project_type)
+    # The *application* container, not the HTTP-facing one: WORDPRESS and
+    # no-build PHP front their PHP-FPM service with nginx, which cannot run
+    # the project's commands.
+    container_id = app_container_id(compose_dir, docker_bin, project_type)
     if not container_id:
         fail("No running container found for this project", "NO_CONTAINER")
 

@@ -40,7 +40,10 @@ async function countExisting(prisma: PrismaClient, userId: string, resource: Quo
     case "subAccount":
       return prisma.user.count({ where: { resellerId: userId } });
     case "scheduledTask":
-      return prisma.scheduledTask.count({ where: { userId } });
+      // A soft-deleted project keeps its rows, and its tasks are then
+      // unreachable from the panel (list 404s) — counting them would let a
+      // deleted project block its owner (and the reseller pool) forever.
+      return prisma.scheduledTask.count({ where: { userId, project: { deletedAt: null } } });
   }
 }
 

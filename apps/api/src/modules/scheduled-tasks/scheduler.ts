@@ -26,8 +26,10 @@ function schedulerId(taskId: string): string {
 }
 
 async function nextRunFor(queue: Queue, taskId: string): Promise<Date | null> {
-  const schedulers = await queue.getJobSchedulers(0, -1, true);
-  const scheduler = schedulers.find((s) => s.key === schedulerId(taskId));
+  // Look the scheduler up by its own id — one HGET against `repeat:<id>`
+  // instead of paging the whole scheduler zset on every scheduled run and
+  // once per task at boot/timezone change (which is O(N²) over N tasks).
+  const scheduler = await queue.getJobScheduler(schedulerId(taskId));
   return scheduler?.next ? new Date(scheduler.next) : null;
 }
 

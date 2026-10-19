@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertCircle,
   CheckCircle,
@@ -53,9 +53,9 @@ const CRON_PRESETS: { label: string; value: string; description: string }[] = [
 
 const CUSTOM_PRESET = "custom";
 
-function errorMessage(err: unknown): string {
+function errorMessage(err: unknown, fallback = "Something went wrong"): string {
   if (err instanceof ApiRequestError) return err.message;
-  return "Something went wrong";
+  return fallback;
 }
 
 // ---------------------------------------------------------------------------
@@ -341,10 +341,16 @@ function RunHistoryDialog({
   task: ScheduledTaskResponse | null;
   onClose: () => void;
 }) {
-  const { data: runs, isLoading, refetch } = useScheduledTaskRuns(projectId, task?.id ?? null, {
+  const { data: runs, isLoading, error, refetch } = useScheduledTaskRuns(projectId, task?.id ?? null, {
     enabled: task !== null,
   });
   const { isRefreshing, refresh } = useRefreshAnimation();
+
+  // A failed load must never look like an empty history (CLAUDE.md: surface
+  // errors through a toast *and* inline).
+  useEffect(() => {
+    if (error) toast.error(errorMessage(error, "Failed to load run history"));
+  }, [error]);
 
   return (
     <Dialog open={task !== null} onOpenChange={(open) => !open && onClose()}>
@@ -372,6 +378,14 @@ function RunHistoryDialog({
             {[1, 2, 3].map((i) => (
               <div key={i} className="h-12 w-full animate-pulse rounded bg-muted" />
             ))}
+          </div>
+        ) : error ? (
+          <div className="space-y-3 py-8 text-center">
+            <AlertCircle className="mx-auto h-8 w-8 text-destructive/70" />
+            <p className="text-sm text-destructive">{errorMessage(error, "Failed to load run history")}</p>
+            <Button variant="outline" size="sm" onClick={() => void refetch()}>
+              Retry
+            </Button>
           </div>
         ) : !runs || runs.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">No runs yet</p>
@@ -440,6 +454,7 @@ export function ScheduledTasksPanel({ projectId, timezone }: { projectId: string
   const {
     tasks,
     isLoading,
+    error,
     refetch,
     update,
     runNow,
@@ -447,6 +462,12 @@ export function ScheduledTasksPanel({ projectId, timezone }: { projectId: string
     isUpdating,
   } = useScheduledTasks(projectId);
   const { isRefreshing, refresh } = useRefreshAnimation();
+
+  // Surface a failed list load (toast + the inline state below), never a
+  // silent "No scheduled tasks yet".
+  useEffect(() => {
+    if (error) toast.error(errorMessage(error, "Failed to load scheduled tasks"));
+  }, [error]);
 
   const [formOpen, setFormOpen] = useState(false);
   const [formTask, setFormTask] = useState<ScheduledTaskResponse | null>(null);
@@ -493,6 +514,25 @@ export function ScheduledTasksPanel({ projectId, timezone }: { projectId: string
               <div key={i} className="h-14 w-full animate-pulse rounded bg-muted" />
             ))}
           </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Scheduled Tasks</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-1 py-12 text-center">
+          <AlertCircle className="mx-auto h-10 w-10 text-destructive/70" />
+          <p className="mt-3 text-sm font-medium text-destructive">
+            {errorMessage(error, "Failed to load scheduled tasks")}
+          </p>
+          <Button variant="outline" className="mt-4" onClick={() => void refetch()}>
+            Retry
+          </Button>
         </CardContent>
       </Card>
     );

@@ -237,6 +237,20 @@ export async function scheduledTaskRoutes(app: FastifyInstance) {
               },
             })
             .catch((revertErr) => app.log.error({ err: revertErr, taskId }, "Failed to revert schedule change"));
+          // The failed apply may already have moved BullMQ (the upsert
+          // succeeded and only the nextRunAt write failed, or an unschedule
+          // dropped the scheduler). Re-arm the reverted state so Redis and the
+          // saved row never disagree — otherwise a rejected disable can leave
+          // an enabled task with no scheduler, or a task firing on a schedule
+          // the row no longer shows.
+          try {
+            await applyTaskSchedule(taskQueue, app.prisma, currentTask, tz, app.log);
+          } catch (restoreErr) {
+            app.log.error(
+              { err: restoreErr, taskId, schedule: currentTask.schedule },
+              "Failed to restore previous schedule in BullMQ",
+            );
+          }
           throw scheduleArmFailure(err);
         }
       }

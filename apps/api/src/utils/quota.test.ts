@@ -181,6 +181,22 @@ describe("assertUnderQuota — F5.20 aggregate pool check", () => {
   });
 });
 
+describe("assertUnderQuota — scheduled tasks of deleted projects", () => {
+  it("does not count a task whose project was soft-deleted (it is unreachable and would block the quota forever)", async () => {
+    const prisma = createPrismaMock();
+    prisma.user.findUnique.mockResolvedValueOnce({ role: "USER", resellerId: null, maxScheduledTasks: 1 });
+    prisma.scheduledTask.count.mockResolvedValueOnce(0);
+
+    await expect(
+      assertUnderQuota(prisma as unknown as PrismaClient, "user-1", "scheduledTask", makeError),
+    ).resolves.toBeUndefined();
+
+    expect(prisma.scheduledTask.count).toHaveBeenCalledWith({
+      where: { userId: "user-1", project: { deletedAt: null } },
+    });
+  });
+});
+
 describe("getUsageSummary — F5.20 oversold reporting", () => {
   it("reports oversold: true when a reseller's sub-accounts nominally exceed their limit", async () => {
     const prisma = createPrismaMock();

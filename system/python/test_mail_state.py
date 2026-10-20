@@ -84,6 +84,67 @@ class MailStateTests(unittest.TestCase):
         self.assertEqual(caught.exception.details["rollbackFailed"], [])
         self.assertEqual(before, {name: (self.root / name / "active.conf").read_bytes() for name in before})
 
+    def generation_names(self):
+        return {name: {path.name for path in (self.root / name / "generations").iterdir()}
+                for name in ("postfix", "dovecot")}
+
+    def test_repeated_prepare_failures_do_not_accumulate_generations(self):
+        before = self.generation_names()
+        for unavailable in ("postfix", "dovecot"):
+            def failed(component, action, generation=None):
+                if component == unavailable and action == "prepare":
+                    raise state.MailStateError("MAIL_STATE_SERVICE_UNAVAILABLE", "Service unavailable")
+            with patch.object(state, "run_service", side_effect=failed):
+                for _ in range(4):
+                    with self.assertRaises(state.MailStateError): state.reconcile(snapshot())
+                    self.assertEqual(self.generation_names(), before)
+
+    def test_partial_staging_failure_removes_all_unpublished_files(self):
+        before = self.generation_names()
+        write = state.atomic_write
+        def failed(path, content, mode=0o600):
+            if Path(path).name == "users": raise OSError("Disk full")
+            return write(path, content, mode)
+        with patch.object(state, "atomic_write", side_effect=failed):
+            with self.assertRaises(state.MailStateError): state.reconcile(snapshot())
+        self.assertEqual(self.generation_names(), before)
+
+    def test_confirmed_rollback_discards_failed_generations(self):
+        before = self.generation_names()
+        failed_once = [True]
+        def failed(component, action, generation=None):
+            if component == "postfix" and action == "activate" and failed_once:
+                failed_once.pop()
+                raise state.MailStateError("MAIL_STATE_ACTIVATION_FAILED", "Reload failed")
+        with patch.object(state, "run_service", side_effect=failed):
+            with self.assertRaises(state.MailStateError): state.reconcile(snapshot())
+        self.assertEqual(self.generation_names(), before)
+
+    def test_unconfirmed_rollback_preserves_potentially_live_generations(self):
+        before = self.generation_names()
+        def failed(component, action, generation=None):
+            if component == "postfix" and action == "activate":
+                raise state.MailStateError("MAIL_STATE_ACTIVATION_FAILED", "Reload failed")
+        with patch.object(state, "run_service", side_effect=failed):
+            with self.assertRaises(state.MailStateError) as caught: state.reconcile(snapshot())
+        self.assertEqual(caught.exception.details["rollbackFailed"], ["postfix"])
+        after = self.generation_names()
+        for component in before:
+            self.assertTrue(before[component] < after[component])
+            self.assertEqual(len(after[component]), len(before[component]) + 1)
+
+    def test_discard_never_removes_an_active_generation(self):
+        before = self.generation_names()
+        state.discard_generations({component: state.active_generation(component) for component in before})
+        self.assertEqual(self.generation_names(), before)
+
+    def test_cleanup_failure_preserves_original_sync_error(self):
+        error = state.MailStateError("MAIL_STATE_SERVICE_UNAVAILABLE", "Service unavailable")
+        with patch.object(state, "run_service", side_effect=error), patch.object(state.shutil, "rmtree", side_effect=PermissionError("Denied")):
+            with self.assertRaises(state.MailStateError) as caught: state.reconcile(snapshot())
+        self.assertEqual(caught.exception.code, "MAIL_STATE_SERVICE_UNAVAILABLE")
+        self.assertEqual(set(caught.exception.details["cleanupFailed"]), {"postfix", "dovecot"})
+
     def test_rollback_failure_is_reported(self):
         def failed(component, action, generation=None):
             if action == "activate": raise state.MailStateError("MAIL_STATE_ACTIVATION_FAILED", "Reload failed")

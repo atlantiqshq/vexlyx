@@ -18,6 +18,10 @@
 # installer — see docs/dev/installer.md).
 
 services:
+  mail-state-init:
+    volumes:
+      - ${VEXLYX_MAIL_STATE_DIR:-/var/lib/vexlyx/mail}:/state
+
   postgres:
     ports: !reset []
     environment:

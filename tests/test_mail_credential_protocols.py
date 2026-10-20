@@ -97,7 +97,8 @@ class MailStack:
         return client
 
     def wait_for_imap(self):
-        for _ in range(30):
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
             try:
                 with self.imap():
                     return
@@ -106,7 +107,8 @@ class MailStack:
         raise AssertionError("Isolated IMAPS server did not start")
 
     def wait_for_smtp(self):
-        for _ in range(30):
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
             try:
                 with self.smtp():
                     return

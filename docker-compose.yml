@@ -128,6 +128,18 @@ services:
       - default
       - traefik-net
 
+  mail-state-init:
+    image: alpine:3.20
+    restart: "no"
+    network_mode: none
+    environment:
+      VEXLYX_MAIL_UID: ${VEXLYX_MAIL_UID:-}
+      VEXLYX_MAIL_GID: ${VEXLYX_MAIL_GID:-}
+    volumes:
+      - ${VEXLYX_MAIL_STATE_DIR:-./docker/mail-data/state}:/state
+      - .:/source:ro
+    entrypoint: ["/bin/sh", "-ec", "sed 's/\\r$$//' /source/docker/mail-state-init.sh > /tmp/mail-state-init.sh; exec sh /tmp/mail-state-init.sh"]
+
   postfix:
     build:
       context: ./docker/postfix
@@ -158,6 +170,8 @@ services:
       - default
       - traefik-net
     depends_on:
+      mail-state-init:
+        condition: service_completed_successfully
       dovecot:
         condition: service_healthy
 
@@ -170,6 +184,9 @@ services:
     restart: unless-stopped
     environment:
       VEXLYX_SEED_DEV_FIXTURES: "true"
+    depends_on:
+      mail-state-init:
+        condition: service_completed_successfully
     ports:
       - "${IMAP_PORT:-143}:143"
       - "${IMAPS_PORT:-993}:993"

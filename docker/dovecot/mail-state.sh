@@ -11,6 +11,7 @@ directory="$root/generations/$generation"
 
 case "$action" in
   prepare)
+    writer_uid=$(stat -c %u "$root")
     case "${VEXLYX_SEED_DEV_FIXTURES:-false}" in
       false) /usr/local/bin/users-security.sh check "$directory/users" ;;
       true) ;;
@@ -20,6 +21,7 @@ case "$action" in
     chmod 750 "$root" "$root/generations" "$directory"
     chmod 640 "$directory/users"
     (cd "$directory"; sha256sum users > .sha256)
+    chown "$writer_uid" "$directory" "$directory/users" "$directory/.sha256"
     chgrp dovecot "$directory/.sha256"
     chmod 640 "$directory/.sha256"
     ;;

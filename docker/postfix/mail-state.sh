@@ -11,6 +11,7 @@ directory="$root/generations/$generation"
 
 case "$action" in
   prepare)
+    writer_uid=$(stat -c %u "$root")
     chmod 755 "$root" "$root/generations" "$directory"
     temporary=$(mktemp -d)
     trap 'rm -rf "$temporary"' EXIT HUP INT TERM
@@ -26,6 +27,7 @@ case "$action" in
     done
     chmod 644 "$directory/virtual_domains"
     (cd "$directory"; sha256sum virtual_domains virtual_mailbox_maps virtual_alias_maps virtual_mailbox_maps.lmdb virtual_alias_maps.lmdb > .sha256)
+    chown "$writer_uid" "$directory" "$directory/virtual_domains" "$directory/virtual_mailbox_maps" "$directory/virtual_alias_maps" "$directory/virtual_mailbox_maps.lmdb" "$directory/virtual_alias_maps.lmdb" "$directory/.sha256"
     chmod 644 "$directory/.sha256"
     ;;
   configure|activate)

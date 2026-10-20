@@ -4,6 +4,18 @@ Postfix routing maps, compiled LMDB databases, Dovecot users, and OpenDKIM keys/
 
 Mail messages remain in `docker/mail-data/vhosts`. Migration does not move, delete, or recreate message storage. Back up PostgreSQL, message storage, and the runtime directory together, retaining permissions and private keys.
 
+## Development ownership
+
+Compose runs `mail-state-init` before Postfix or Dovecot. It gives the state
+directories and files to the checkout owner's numeric UID (the host development
+API user), including directories Docker initially created as root. If the API
+runs as another user, set `VEXLYX_MAIL_UID` and `VEXLYX_MAIL_GID` in the Compose
+environment to that user's numeric IDs. Production initializes the same external
+state directory mounted by the API. Dovecot preparation preserves the writer as
+owner, grants its auth group read access, and keeps directories at 0750 and
+password files at 0640. Recreate the mail services to repair existing development
+state; password files are never made world-readable.
+
 ## Upgrading an existing installation
 
 Run the updated public installer **from outside the checkout before pulling the revision that removes tracked maps**. The bootstrap fetches the target migrator, stops the API writer, copies the legacy generated files and DKIM keys into a verified backup, initializes persistent state, and only then restores the backed-up tracked generated files so Git can update. Staged or unrelated source changes stop the upgrade. There is no stash, hard reset, or clean operation.
@@ -40,5 +52,13 @@ docker compose --env-file /etc/vexlyx/vexlyx.env -f docker-compose.yml -f docker
 If `MAIL_STATE_MOUNT_STALE` is reported, recreate the affected container with the current Compose directory mounts, then synchronize. Do not delete the runtime directory, keys, or message storage. If restoring manually, restore a consistent database/state/message backup and rebuild routing/auth state from PostgreSQL before admitting traffic.
 
 ## Regression checks
+
+Failed staging or preparation removes unpublished generations immediately.
+After activation starts, failed generations are removed only when configuration
+restoration and daemon health confirm rollback succeeded for both services. If
+rollback cannot be confirmed, the files are retained because a daemon may still
+need them. A later successful synchronization verifies both services before
+pruning older generations. `cleanupFailed` reports components whose unused files
+could not be removed without hiding the original synchronization error.
 
 `sh tests/mail-state/run.sh` builds isolated mail images and runs Linux unit tests plus live SMTP, authentication, migration, stale map, compilation failure, and container recreation tests. It creates a disposable `vexlyx-issue36-*` volume/network, publishes no host ports, and removes its resources afterward. The CI `mail-state` job runs this suite. API unit tests cover lock/snapshot ordering, tenant preservation, subprocess failures, timeout recovery, authentication, and partial-failure responses.

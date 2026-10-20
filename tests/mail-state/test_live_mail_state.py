@@ -175,6 +175,60 @@ class LiveMailStateTests(unittest.TestCase):
             state.atomic_write(path, "after", 0o644)
             self.assertEqual(self.docker("exec", self.names[component], "cat", location).stdout, "after")
 
+    def test_fresh_development_state_is_writable_by_non_root_api(self):
+        root = self.root / "unprivileged"
+        root.mkdir()
+        backup = root / "dovecot/generations" / ("b" * 32) / "users.before-remediation.fixture"
+        backup.parent.mkdir(parents=True)
+        backup.write_text("private backup fixture\n")
+        backup.chmod(0o600)
+        writer = 20001
+        suffix = "-unprivileged"
+        initializer = self.network + "-init"
+        parent_mode = self.root.stat().st_mode & 0o777
+        self.root.chmod(parent_mode | 0o001)
+        try:
+            self.docker("create", "--name", initializer, "--entrypoint", "sh",
+                        "--mount", f"type=volume,source={self.volume},target=/state,volume-subpath=unprivileged",
+                        "alpine:3.20", "-c",
+                        f"mkdir /source && chown {writer}:{writer} /source && sed 's/\\r$//' /init.sh | sh")
+            self.docker("cp", str(Path(__file__).resolve().parents[2] / "docker/mail-state-init.sh"), initializer + ":/init.sh")
+            self.docker("start", "--attach", initializer)
+            self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+            for component in ("dovecot", "postfix"):
+                self.start(component, prefix="unprivileged/", suffix=suffix)
+                self.assertEqual((root / component / "generations").stat().st_uid, writer)
+            environment = {**os.environ, "VEXLYX_MAIL_STATE_DIR": str(root),
+                           "VEXLYX_DOVECOT_CONTAINER": self.names["dovecot"] + suffix,
+                           "VEXLYX_POSTFIX_CONTAINER": self.names["postfix"] + suffix}
+            def as_writer():
+                os.setgid(writer)
+                os.setuid(writer)
+            code = "import json,sys; from mail_state import state_lock,reconcile\nwith state_lock():\n for _ in range(3): reconcile(json.loads(sys.argv[1]))\n"
+            result = subprocess.run([sys.executable, "-c", code, json.dumps(self.data)],
+                                    cwd=Path(state.__file__).parent, env=environment,
+                                    capture_output=True, text=True, timeout=120, preexec_fn=as_writer)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            generation = (root / "dovecot/active.conf").read_text().splitlines()[0].split(":")[1]
+            users = root / "dovecot/generations" / generation / "users"
+            self.assertEqual(users.stat().st_uid, writer)
+            self.assertEqual(users.stat().st_mode & 0o777, 0o640)
+            self.assertEqual(len(list((root / "dovecot/generations").iterdir())), 2)
+            def as_outsider():
+                os.setgroups([])
+                os.setgid(writer + 1)
+                os.setuid(writer + 1)
+            denied = subprocess.run([sys.executable, "-c", "import sys; open(sys.argv[1]).read()", str(users)],
+                                    capture_output=True, text=True, preexec_fn=as_outsider)
+            self.assertNotEqual(denied.returncode, 0)
+            self.assertEqual(self.docker("exec", self.names["dovecot"] + suffix, "doveadm", "auth", "test",
+                                         "admin@one.example", self.password, check=False).returncode, 0)
+        finally:
+            for component in ("dovecot", "postfix"):
+                self.docker("rm", "-f", self.names[component] + suffix, check=False)
+            self.docker("rm", "-f", initializer, check=False)
+            self.root.chmod(parent_mode)
+
     def test_fresh_development_state_initializes_before_dovecot_reads_config(self):
         (self.root / "fresh/dovecot").mkdir(parents=True)
         name = self.names["dovecot"] + "-fresh"

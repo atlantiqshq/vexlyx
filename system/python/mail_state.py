@@ -149,9 +149,33 @@ def stage(component, files):
     generation = uuid.uuid4().hex
     path = state_root() / component / "generations" / generation
     path.mkdir(parents=True, mode=0o750 if component == "dovecot" else 0o755)
-    for name, content in files.items():
-        atomic_write(path / name, content, 0o640 if component == "dovecot" else 0o644)
+    try:
+        for name, content in files.items():
+            atomic_write(path / name, content, 0o640 if component == "dovecot" else 0o644)
+    except Exception as exc:
+        cleanup_errors = discard_generations({component: generation})
+        raise MailStateError("MAIL_STATE_WRITE_FAILED", "Could not stage mail state.", cleanupFailed=cleanup_errors) from exc
     return generation
+
+
+def discard_generations(updates):
+    failed = []
+    for component, generation in updates.items():
+        try:
+            if component not in ("postfix", "dovecot") or not GENERATION.fullmatch(generation):
+                raise ValueError("Invalid mail generation")
+            if active_generation(component) == generation:
+                continue
+            parent = state_root() / component / "generations"
+            directory = parent / generation
+            if directory.is_symlink():
+                raise ValueError("Refusing symlinked mail generation")
+            directory.resolve().relative_to(parent.resolve())
+            if directory.exists():
+                shutil.rmtree(directory)
+        except (OSError, ValueError, MailStateError):
+            failed.append(component)
+    return failed
 
 
 def cleanup(component, keep):
@@ -165,10 +189,10 @@ def cleanup(component, keep):
 
 
 def publish(updates):
-    previous = {component: (state_root() / component / "active.conf").read_bytes() for component in updates}
-    old_generations = {component: active_generation(component) for component in updates}
     published = False
     try:
+        previous = {component: (state_root() / component / "active.conf").read_bytes() for component in updates}
+        old_generations = {component: active_generation(component) for component in updates}
         for component, generation in updates.items():
             run_service(component, "prepare", generation)
         published = True
@@ -182,10 +206,13 @@ def publish(updates):
     except Exception as exc:
         rollback_errors = []
         if not published:
+            cleanup_errors = discard_generations(updates)
             if isinstance(exc, MailStateError):
                 exc.details["rollbackFailed"] = []
+                if cleanup_errors:
+                    exc.details["cleanupFailed"] = cleanup_errors
                 raise
-            raise MailStateError("MAIL_STATE_WRITE_FAILED", "Could not prepare mail state.") from exc
+            raise MailStateError("MAIL_STATE_WRITE_FAILED", "Could not prepare mail state.", cleanupFailed=cleanup_errors) from exc
         for component, content in previous.items():
             try:
                 atomic_write(state_root() / component / "active.conf", content, 0o644)
@@ -199,10 +226,14 @@ def publish(updates):
                 except MailStateError:
                     if component not in rollback_errors:
                         rollback_errors.append(component)
+        # A daemon can still be using the failed generation until rollback health succeeds.
+        cleanup_errors = discard_generations(updates) if not rollback_errors else []
         if isinstance(exc, MailStateError):
             exc.details["rollbackFailed"] = rollback_errors
+            if cleanup_errors:
+                exc.details["cleanupFailed"] = cleanup_errors
             raise
-        raise MailStateError("MAIL_STATE_WRITE_FAILED", "Could not activate mail state.", rollbackFailed=rollback_errors) from exc
+        raise MailStateError("MAIL_STATE_WRITE_FAILED", "Could not activate mail state.", rollbackFailed=rollback_errors, cleanupFailed=cleanup_errors) from exc
     for component, generation in updates.items():
         cleanup(component, {generation, old_generations[component]})
     return {"success": True, "generations": updates}
@@ -258,5 +289,15 @@ def passwd_lines(mailboxes):
 def reconcile(payload):
     mailboxes = payload.get("mailboxes", [])
     files = postfix_files(payload.get("domains", []), [item["address"] for item in mailboxes], payload.get("aliases", []))
-    updates = {"postfix": stage("postfix", files), "dovecot": stage("dovecot", {"users": passwd_lines(mailboxes)})}
+    component_files = {"postfix": files, "dovecot": {"users": passwd_lines(mailboxes)}}
+    updates = {}
+    try:
+        for component, content in component_files.items():
+            updates[component] = stage(component, content)
+    except Exception as exc:
+        cleanup_errors = discard_generations(updates)
+        if isinstance(exc, MailStateError):
+            exc.details["cleanupFailed"] = list(dict.fromkeys(exc.details.get("cleanupFailed", []) + cleanup_errors))
+            raise
+        raise MailStateError("MAIL_STATE_WRITE_FAILED", "Could not stage mail state.", cleanupFailed=cleanup_errors) from exc
     return publish(updates)

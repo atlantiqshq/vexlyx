@@ -22,7 +22,7 @@ function handleMailError(err: unknown, reply: FastifyReply): void {
     reply.status(err.statusCode).send({
       error: err.message,
       code: err.code,
-      details: err instanceof MailError ? err.details : undefined,
+      details: err instanceof MailError ? err.details : {},
     });
     return;
   }

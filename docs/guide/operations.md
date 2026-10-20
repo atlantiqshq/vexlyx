@@ -99,12 +99,33 @@ person did.
 
 ## Upgrading
 
-To upgrade Vexlyx to the latest version — or to repair a broken install — just re-run the
+To upgrade Vexlyx to the latest release — or to repair a broken install — just re-run the
 installer on the server:
 
 ```bash
 curl -fsSL https://vexlyx.atlantiqs.org/install.sh | bash
 ```
+
+The installer installs the newest **tagged release** (for example `v0.2.0`), not whatever happens
+to be on the development branch, and re-running it moves the install to the next release when one
+is published. To pin a version, or to follow development instead, set `VEXLYX_REPO_REF`:
+
+```bash
+curl -fsSL https://vexlyx.atlantiqs.org/install.sh | sudo VEXLYX_REPO_REF=v0.2.0 bash   # exact release
+curl -fsSL https://vexlyx.atlantiqs.org/install.sh | sudo VEXLYX_REPO_REF=main bash     # development
+```
+
+An install that already follows a branch keeps following it until you set `VEXLYX_REPO_REF=latest`.
+
+::: warning Servers installed before v0.3.0
+Older versions committed a mailbox file (`docker/dovecot/config/users`) containing accounts with a
+publicly known password, and the panel keeps rewriting that file on your server. Git therefore
+refuses to update such a checkout, and the installer leaves a checkout with local changes alone,
+so **re-running the installer does not upgrade it**. Follow the one-time procedure in
+[Remove exposed development mail credentials](/reference/email/mail-credential-remediation)
+first (it takes a backup, updates the checkout, and removes the known credentials; Dovecot refuses
+to start in production while they are present). Servers installed from v0.3.0 on are not affected.
+:::
 
 Every installer step checks real state before acting, so re-running it is always safe: nothing
 that already succeeded is redone, secrets are never regenerated or rotated, and only what actually

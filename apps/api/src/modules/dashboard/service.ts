@@ -22,10 +22,18 @@ export class DashboardService {
   }
 
   async getSummary(userId: string): Promise<DashboardSummaryResponse> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { role: true },
+    });
+    const isAdmin = user?.role === "ADMIN";
+
+    // Host-wide metrics are admin-only (same policy as /api/monitoring/*);
+    // everyone else gets null so the widget is simply not shown.
     const [usage, serverMetrics, sources] = await Promise.all([
       getUsageSummary(this.prisma, userId),
-      this.safeGetServerMetrics(),
-      this.gatherActivitySources(userId),
+      isAdmin ? this.safeGetServerMetrics() : Promise.resolve(null),
+      this.gatherActivitySources(userId, isAdmin),
     ]);
 
     const activity = [...sources.deployments, ...sources.backups, ...sources.sslAlerts]
@@ -57,17 +65,14 @@ export class DashboardService {
     }
   }
 
-  private async gatherActivitySources(userId: string): Promise<{
+  private async gatherActivitySources(
+    userId: string,
+    isAdmin: boolean,
+  ): Promise<{
     deployments: ActivityItem[];
     backups: ActivityItem[];
     sslAlerts: ActivityItem[];
   }> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { role: true },
-    });
-    const isAdmin = user?.role === "ADMIN";
-
     const [deployments, backups, sslAlerts] = await Promise.all([
       this.recentDeployments(userId),
       isAdmin ? this.recentBackups() : Promise.resolve([]),
@@ -114,29 +119,21 @@ export class DashboardService {
   }
 
   private async recentSslAlerts(userId: string): Promise<ActivityItem[]> {
-    const userDomains = await this.prisma.domain.findMany({
-      where: { userId },
-      select: { id: true },
-    });
-    const userDomainIds = new Set(userDomains.map((d) => d.id));
-    if (userDomainIds.size === 0) return [];
-
     // Reuses SslService's existing expiry-audit logic (it also refreshes
     // cert status as a side effect) rather than reimplementing days-remaining math.
-    const { alerts } = await this.sslService.checkExpiryAlerts();
+    // The service scopes the audit to this user's own domains.
+    const { alerts } = await this.sslService.checkExpiryAlerts(userId);
 
-    return alerts
-      .filter((a) => userDomainIds.has(a.domainId))
-      .map((a) => ({
-        id: `ssl-${a.domainId}`,
-        type: "ssl_alert" as const,
-        title: `SSL ${a.status === "EXPIRED" ? "expired" : "expiring soon"}: ${a.hostname}`,
-        description: a.daysRemaining !== null ? `${a.daysRemaining} day(s) remaining` : null,
-        status: a.status,
-        // SSL alerts have no natural "event time" — use now() so an active
-        // alert always surfaces near the top of the feed while it's active.
-        timestamp: new Date().toISOString(),
-        href: `/domains/${a.domainId}/ssl`,
-      }));
+    return alerts.map((a) => ({
+      id: `ssl-${a.domainId}`,
+      type: "ssl_alert" as const,
+      title: `SSL ${a.status === "EXPIRED" ? "expired" : "expiring soon"}: ${a.hostname}`,
+      description: a.daysRemaining !== null ? `${a.daysRemaining} day(s) remaining` : null,
+      status: a.status,
+      // SSL alerts have no natural "event time" — use now() so an active
+      // alert always surfaces near the top of the feed while it's active.
+      timestamp: new Date().toISOString(),
+      href: `/domains/${a.domainId}/ssl`,
+    }));
   }
 }

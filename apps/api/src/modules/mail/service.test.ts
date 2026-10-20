@@ -62,20 +62,47 @@ beforeEach(() => {
 describe("authoritative shared mail snapshot", () => {
   it("audits a saved deletion even when live mail activation fails", async () => {
     const events: string[] = [];
-    const prisma = { mailbox: {
-      findFirst: vi.fn(async () => ({ id: "m1", address: "admin@one.example" })),
-      delete: vi.fn(async () => { events.push("database"); }),
-    } } as unknown as PrismaClient;
-    const audit = { log: vi.fn(async () => { events.push("audit"); }) } as unknown as AuditLogService;
-    const sync = vi.spyOn(MailService.prototype, "syncVirtualDomains").mockImplementation(async () => {
-      events.push("activation");
-      throw new MailStateSyncError("Postfix failed", "MAIL_STATE_ACTIVATION_FAILED");
-    });
+    const prisma = {
+      mailbox: {
+        findFirst: vi.fn(async () => ({
+          id: "m1",
+          address: "admin@one.example",
+        })),
+        delete: vi.fn(async () => {
+          events.push("database");
+        }),
+      },
+    } as unknown as PrismaClient;
+    const audit = {
+      log: vi.fn(async () => {
+        events.push("audit");
+      }),
+    } as unknown as AuditLogService;
+    const sync = vi
+      .spyOn(MailService.prototype, "syncVirtualDomains")
+      .mockImplementation(async () => {
+        events.push("activation");
+        throw new MailStateSyncError(
+          "Postfix failed",
+          "MAIL_STATE_ACTIVATION_FAILED",
+        );
+      });
     try {
-      await expect(new MailboxService(prisma, audit).delete("u1", "m1")).rejects.toThrow("Postfix failed");
+      await expect(
+        new MailboxService(prisma, audit).delete("u1", "m1"),
+      ).resolves.toEqual({
+        warnings: [expect.stringContaining("Postfix failed")],
+      });
       expect(events).toEqual(["database", "audit", "activation"]);
-      expect(audit.log).toHaveBeenCalledWith("u1", "mailbox.deleted", { type: "Mailbox", id: "m1" }, { before: { address: "admin@one.example" } });
-    } finally { sync.mockRestore(); }
+      expect(audit.log).toHaveBeenCalledWith(
+        "u1",
+        "mailbox.deleted",
+        { type: "Mailbox", id: "m1" },
+        { before: { address: "admin@one.example" } },
+      );
+    } finally {
+      sync.mockRestore();
+    }
   });
   it("includes all tenants in one repeatable-read snapshot after acquiring the lock", async () => {
     const { prisma, database } = fixture();

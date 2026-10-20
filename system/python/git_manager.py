@@ -14,6 +14,7 @@ Never run this script as root.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -60,6 +61,13 @@ def cmd_clone(payload: dict) -> None:
     """
     project_id = require_field(payload, "projectId")
     git_url = require_field(payload, "gitUrl")
+    # Enforce the same public-host policy as the shared API schemas before
+    # network access or workspace deletion, including URLs persisted previously.
+    if not re.fullmatch(
+        r"(?:https://(?:github\.com|gitlab\.com|bitbucket\.org)/|git@(?:github\.com|gitlab\.com|bitbucket\.org):)"
+        r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+", git_url,
+    ):
+        fail("Unsupported Git repository URL", "INVALID_GIT_URL")
     branch = payload.get("branch", "main")
     projects_dir = require_field(payload, "projectsDir")
     ssh_key_path = payload.get("sshPrivateKeyPath")
@@ -74,7 +82,7 @@ def cmd_clone(payload: dict) -> None:
             # The URL never contains credentials; setting it before fetch also makes
             # switching a project between repositories deterministic.
             _run(["git", "-C", str(dest), "remote", "set-url", "origin", git_url], env=env)
-            _run(["git", "-C", str(dest), "fetch", "--all"], env=env)
+            _run(["git", "-C", str(dest), "fetch", "origin"], env=env)
             _run(["git", "-C", str(dest), "checkout", branch], env=env)
             _run(["git", "-C", str(dest), "pull", "origin", branch], env=env)
             respond({"success": True, "path": str(dest), "action": "pulled"})
@@ -175,14 +183,31 @@ def _build_env(ssh_key_path: str | None, access_token: str | None = None) -> dic
     return env
 
 
+# Seconds. Generous because large repositories legitimately take a while to
+# clone; the point is that a stalled remote cannot hang the worker forever.
+GIT_COMMAND_TIMEOUT = 900
+
+
 def _run(args: list[str], env: dict | None = None) -> None:
     """Run a subprocess, capturing combined output, failing on non-zero exit."""
-    result = subprocess.run(
-        args,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    if args[0] == "git":
+        # Redirects must not escape the validated host boundary.
+        args = [args[0], "-c", "http.followRedirects=false", *args[1:]]
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=GIT_COMMAND_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        # A stalled remote must not hold the build worker forever (#52).
+        fail(
+            f"Command timed out after {GIT_COMMAND_TIMEOUT}s: {' '.join(args)}",
+            "COMMAND_TIMEOUT",
+        )
+        return
     if result.returncode != 0:
         error_output = (result.stderr or result.stdout or "").strip()
         fail(f"Command failed: {' '.join(args)}\n{error_output}", "COMMAND_FAILED")

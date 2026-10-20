@@ -11,6 +11,11 @@ directory="$root/generations/$generation"
 
 case "$action" in
   prepare)
+    case "${VEXLYX_SEED_DEV_FIXTURES:-false}" in
+      false) /usr/local/bin/users-security.sh check "$directory/users" ;;
+      true) ;;
+      *) echo "Invalid VEXLYX_SEED_DEV_FIXTURES" >&2; exit 1 ;;
+    esac
     chgrp dovecot "$root" "$root/generations" "$directory" "$directory/users"
     chmod 750 "$root" "$root/generations" "$directory"
     chmod 640 "$directory/users"

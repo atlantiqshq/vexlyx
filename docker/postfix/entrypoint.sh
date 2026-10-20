@@ -31,7 +31,7 @@ if [ ! -f "$state/active.conf" ]; then
     directory="$state/generations/$generation"
     mkdir -p "$directory"
     touch "$directory/virtual_domains" "$directory/virtual_mailbox_maps" "$directory/virtual_alias_maps"
-    if [ "${VEXLYX_SEED_DEV_FIXTURES:-true}" = true ]; then
+    if [ "${VEXLYX_SEED_DEV_FIXTURES:-false}" = true ]; then
         echo vexlyx.local > "$directory/virtual_domains"
         printf 'test@vexlyx.local vexlyx.local/test/Maildir/\nadmin@vexlyx.local vexlyx.local/admin/Maildir/\n' > "$directory/virtual_mailbox_maps"
     fi

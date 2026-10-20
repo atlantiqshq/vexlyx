@@ -157,7 +157,7 @@ class MailStateTests(unittest.TestCase):
         previous = {name: (self.root / name / "active.conf").read_bytes() for name in ("postfix", "dovecot")}
         write = state.atomic_write
         def fail_restore(path, content, mode=0o600):
-            if Path(path) == self.root / "postfix/active.conf" and content == previous["postfix"]:
+            if Path(path).resolve() == (self.root / "postfix/active.conf").resolve() and content == previous["postfix"]:
                 raise OSError("forced restore failure")
             write(path, content, mode)
         failures = [True]

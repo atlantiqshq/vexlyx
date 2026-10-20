@@ -3,6 +3,12 @@ set -e
 
 echo "[Vexlyx] Initializing Dovecot IMAP Server..."
 
+# Seeding must be explicitly enabled. A typo must not enable known credentials.
+case "${VEXLYX_SEED_DEV_FIXTURES:-false}" in
+    true|false) ;;
+    *) echo "[Vexlyx] VEXLYX_SEED_DEV_FIXTURES must be true or false." >&2; exit 1 ;;
+esac
+
 # 1. TLS Certificates
 mkdir -p /etc/dovecot/certs
 if [ ! -f /etc/dovecot/certs/cert.pem ] || [ ! -f /etc/dovecot/certs/key.pem ]; then
@@ -32,14 +38,6 @@ if [ ! -f "$state/active.conf" ]; then
     directory="$state/generations/$generation"
     mkdir -p "$directory"
     touch "$directory/users"
-    if [ "${VEXLYX_SEED_DEV_FIXTURES:-true}" = true ]; then
-        HASH=$(doveadm -c /dev/null pw -s ARGON2ID -p "vexlyx-dev")
-        for name in test admin; do
-            mkdir -p "/var/mail/vhosts/vexlyx.local/$name/Maildir/cur" "/var/mail/vhosts/vexlyx.local/$name/Maildir/new" "/var/mail/vhosts/vexlyx.local/$name/Maildir/tmp"
-            echo "$name@vexlyx.local:$HASH:5000:5000::::userdb_quota_rule=*:storage=1024M" >> "$directory/users"
-        done
-        chown -R 5000:5000 /var/mail/vhosts/vexlyx.local
-    fi
     cat > "$state/active.conf" <<EOF
 # generation:$generation
 passdb {
@@ -53,6 +51,24 @@ userdb {
 EOF
 fi
 generation=$(sed -n '1s/^# generation://p' "$state/active.conf")
+case "$generation" in *[!0-9a-f]*|'') echo "Invalid Dovecot generation" >&2; exit 1;; esac
+[ "${#generation}" -eq 32 ]
+users="$state/generations/$generation/users"
+if [ -L "$users" ] || [ ! -f "$users" ]; then
+    echo "[Vexlyx] Refusing non-regular mailbox users file." >&2
+    exit 1
+fi
+# Repair each explicitly enabled development fixture without resetting existing passwords.
+if [ "${VEXLYX_SEED_DEV_FIXTURES:-false}" = true ]; then
+    for name in test admin; do
+        if ! grep -q "^${name}@vexlyx[.]local:" "$users"; then
+            HASH=$(doveadm -c /dev/null pw -s ARGON2ID -p "vexlyx-dev")
+            mkdir -p "/var/mail/vhosts/vexlyx.local/$name/Maildir/cur" "/var/mail/vhosts/vexlyx.local/$name/Maildir/new" "/var/mail/vhosts/vexlyx.local/$name/Maildir/tmp"
+            chown -R 5000:5000 "/var/mail/vhosts/vexlyx.local/$name"
+            printf '\n%s\n' "$name@vexlyx.local:${HASH}:5000:5000::::userdb_quota_rule=*:storage=1024M" >> "$users"
+        fi
+    done
+fi
 /usr/local/bin/mail-state.sh prepare "$generation"
 
 echo "[Vexlyx] Starting Dovecot IMAP on ports 143 and 993 (SASL auth on 12345)..."

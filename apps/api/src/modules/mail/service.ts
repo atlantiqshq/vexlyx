@@ -26,6 +26,12 @@ import type {
 import { env } from "../../config/env.js";
 import { DnsService } from "../domains/dns-service.js";
 import { getServerIp } from "../domains/resolvers.js";
+import { getPythonBin } from "../../utils/pythonBin.js";
+import type { FastifyBaseLogger } from "fastify";
+import {
+  PYTHON_SCRIPT_TIMEOUT_MS,
+  watchChildTimeout,
+} from "../../utils/processWatchdog.js";
 import {
   buildRequiredMailRecords,
   isRecordLive,
@@ -131,7 +137,7 @@ function getPythonExe(): string {
       }
     }
   }
-  return process.platform === "win32" ? "python" : "python3";
+  return getPythonBin();
 }
 
 export async function runPostfixManager<T = Record<string, unknown>>(
@@ -149,6 +155,15 @@ export async function runPostfixManager<T = Record<string, unknown>>(
         PYTHONIOENCODING: "utf-8",
       },
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.mail, (ms) =>
+      rej(
+        new MailError(
+          `Mail manager timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";
@@ -245,6 +260,15 @@ export async function runDovecotManager<T = Record<string, unknown>>(
         PYTHONIOENCODING: "utf-8",
       },
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.mail, (ms) =>
+      rej(
+        new MailError(
+          `Mail manager timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";
@@ -341,6 +365,15 @@ async function runWebmailManager<T = Record<string, unknown>>(
         PYTHONIOENCODING: "utf-8",
       },
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.mail, (ms) =>
+      rej(
+        new MailError(
+          `Mail manager timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";
@@ -483,8 +516,11 @@ export async function synchronizeMailState(prisma: PrismaClient) {
 export class MailService {
   private readonly dnsService: DnsService;
 
-  constructor(private readonly prisma: PrismaClient) {
-    this.dnsService = new DnsService(prisma);
+  constructor(
+    private readonly prisma: PrismaClient,
+    logger?: Pick<FastifyBaseLogger, "error" | "warn">,
+  ) {
+    this.dnsService = new DnsService(prisma, logger);
   }
 
   /**
@@ -822,9 +858,7 @@ export class MailService {
    * map, and their Mailbox rows into Dovecot's passwd-file (passdb + userdb)
    * so IMAP logins and Maildir++ quota rules stay current (F4.2).
    */
-  async syncVirtualDomains(
-    userId: string,
-  ): Promise<{
+  async syncVirtualDomains(userId: string): Promise<{
     success: boolean;
     syncedCount: number;
     domains: string[];

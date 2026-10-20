@@ -49,6 +49,10 @@ docker/postfix/opendkim/KeyTable
 docker/postfix/opendkim/SigningTable
 docker/postfix/opendkim/TrustedHosts
 
+# Runtime mailbox credentials and offline remediation backups
+docker/dovecot/config/*
+!docker/dovecot/config/.gitkeep
+
 # Local workspaces & generated keys (F1.3)
 workspaces/
 apps/api/workspaces/

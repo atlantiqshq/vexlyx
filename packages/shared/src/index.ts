@@ -1,5 +1,5 @@
 /** Current version of the Vexlyx platform */
-export const VEXLYX_VERSION = "0.3.0";
+export const VEXLYX_VERSION = "0.4.0";
 
 /** Application name constant used across both frontend and backend */
 export const APP_NAME = "Vexlyx";
@@ -341,6 +341,10 @@ export type {
   CleanupSettingsResponse,
   UpdateCleanupSettingsInput,
 } from "./schemas/cleanup.js";
+
+// NOTE: scheduled-task schemas are intentionally NOT re-exported here —
+// CLAUDE.md forbids adding barrel exports. Import them from
+// "@vexlyx/shared/schemas/scheduledTasks" instead.
 
 export {
   FirewallProtocolSchema,

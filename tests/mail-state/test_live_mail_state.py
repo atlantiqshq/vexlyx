@@ -198,13 +198,23 @@ class LiveMailStateTests(unittest.TestCase):
             for component in ("dovecot", "postfix"):
                 self.start(component, prefix="unprivileged/", suffix=suffix)
                 self.assertEqual((root / component / "generations").stat().st_uid, writer)
-            environment = {**os.environ, "VEXLYX_MAIL_STATE_DIR": str(root),
+            environment = {**os.environ, "HOME": str(root), "VEXLYX_MAIL_STATE_DIR": str(root),
                            "VEXLYX_DOVECOT_CONTAINER": self.names["dovecot"] + suffix,
                            "VEXLYX_POSTFIX_CONTAINER": self.names["postfix"] + suffix}
+            docker_group = os.stat("/var/run/docker.sock").st_gid
             def as_writer():
+                os.setgroups([docker_group])
                 os.setgid(writer)
                 os.setuid(writer)
-            code = "import json,sys; from mail_state import state_lock,reconcile\nwith state_lock():\n for _ in range(3): reconcile(json.loads(sys.argv[1]))\n"
+            code = """import json,sys
+from mail_state import MailStateError,state_lock,reconcile
+try:
+    with state_lock():
+        for _ in range(3): reconcile(json.loads(sys.argv[1]))
+except MailStateError as error:
+    print(json.dumps({"code": error.code, "details": error.details}), file=sys.stderr)
+    raise
+"""
             result = subprocess.run([sys.executable, "-c", code, json.dumps(self.data)],
                                     cwd=Path(state.__file__).parent, env=environment,
                                     capture_output=True, text=True, timeout=120, preexec_fn=as_writer)

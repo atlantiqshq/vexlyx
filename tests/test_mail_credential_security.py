@@ -29,9 +29,12 @@ PUBLISHED = (
 
 def docker(*args, input=None, check=True, timeout=60):
     result = subprocess.run(
-        ["docker", *args], input=input, capture_output=True,
-        text=True, encoding="utf-8", timeout=timeout,
+        ["docker", *args], input=input.encode("utf-8") if input is not None else None,
+        capture_output=True, timeout=timeout,
     )
+    # Keep fixture files byte-exact: Windows text pipes otherwise turn LF into CRLF.
+    result.stdout = result.stdout.decode("utf-8")
+    result.stderr = result.stderr.decode("utf-8")
     if check and result.returncode:
         # Do not put passwords/hashes from argv or stdin in failure messages.
         raise AssertionError(f"Docker command failed ({result.returncode}): {result.stderr}")

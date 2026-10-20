@@ -36,7 +36,7 @@ class MailUpgradeTests(unittest.TestCase):
         self.runtime = b"real@one.example:{ARGON2ID}$fixture:5000:5000::::\n"
         self.legacy.write_bytes(self.runtime)
         bootstrap = (Path(__file__).resolve().parents[2] / "install.sh").read_text()
-        self.function = bootstrap.split("prepare_mail_upgrade() {", 1)[1].split('\nif is_vexlyx_checkout', 1)[0]
+        self.function = bootstrap.split("prepare_mail_upgrade() {", 1)[1].split('\nensure_git() {', 1)[0]
         self.environment = {**os.environ, "VEXLYX_HOME": str(self.source), "VEXLYX_MAIL_STATE_DIR": str(self.root)}
 
     def git(self, *arguments):

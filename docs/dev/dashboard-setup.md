@@ -187,6 +187,10 @@ run in Node, while `src/**/*.test.tsx` files run in jsdom with React's automatic
 JSX runtime. Both inherit the `@/` source alias. Vitest 5 uses `projects` rather
 than the removed `environmentMatchGlobs` option.
 
+Keep jsdom on the 26.x line: it supports the declared Node 22 minimum. Newer
+major versions require newer Node minor releases; check their engine requirements
+before upgrading the test environment.
+
 Component tests use `@testing-library/react` to render real components and
 `@testing-library/user-event` for typing and clicks. The component setup file
 (`src/test/setup.ts`) unmounts rendered trees after every test; Vitest globals

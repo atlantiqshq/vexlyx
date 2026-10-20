@@ -96,6 +96,50 @@ F1.7 introduces project-scoped environment variables management in Vexlyx.
 
 ---
 
+## Encryption Key Requirements (#69)
+
+Everything encrypted at rest (env vars, database and SFTP passwords, 2FA secrets, TLS private keys, GitHub App secrets) uses `ENCRYPTION_KEY`.
+
+| Environment | `ENCRYPTION_KEY` unset | Placeholder / equal to `SESSION_SECRET` |
+|---|---|---|
+| `development` / `test` | Falls back to `SESSION_SECRET` (zero-config local dev); boot logs a warning | Accepted |
+| `production` | **Boot fails** unless `ENCRYPTION_KEY_LEGACY_FALLBACK=true` | **Boot fails** |
+
+The installer already generates a dedicated key, so installer-based deployments are unaffected.
+
+### Upgrading an install that never set `ENCRYPTION_KEY`
+
+Its data is encrypted under a key derived from `SESSION_SECRET`. Do not just add a key: existing values would become undecryptable.
+
+1. Generate a key: `openssl rand -hex 32`.
+2. Set `ENCRYPTION_KEY=<that key>` **and** `ENCRYPTION_KEY_LEGACY_FALLBACK=true`, then restart the API. Old values stay readable; new writes use the new key. A boot warning reminds you the fallback is on.
+3. Re-encrypt the old values: `pnpm db:reencrypt --dry-run` to preview, then `pnpm db:reencrypt` (from `apps/api`; in production run it in the API container). It is idempotent and never modifies a value it cannot decrypt.
+4. Remove `ENCRYPTION_KEY_LEGACY_FALLBACK` and restart.
+
+Back up the database before step 3. Tests: `utils/encryption-legacy.test.ts`, `config/env.test.ts`.
+
+---
+
+## Undecryptable Variables (`ENV_DECRYPT_FAILED`, #49)
+
+If `ENCRYPTION_KEY` (or `SESSION_SECRET`, when no key is set outside production) changes, or a stored value is corrupted, a variable can no longer be decrypted. The pipeline **fails loudly instead of substituting an empty string**, because a container booted with an empty password or API key fails confusingly at runtime (or connects with an empty credential):
+
+| Surface | Behaviour |
+|---------|-----------|
+| `EnvService.getDecryptedMap()` | Throws `EnvError` `ENV_DECRYPT_FAILED` (HTTP 500) naming **every** affected key |
+| `POST /api/projects/:id/deploy` | Responds `500 ENV_DECRYPT_FAILED` with the message; the project is left in its previous status (the env map is decrypted before the status flips to `CREATING`) |
+| Build job | Deployment is marked `FAILED` and the build log contains `[vexlyx:error] Could not decrypt environment variable "KEY"…` |
+| `GET …/env/:key/reveal` | `500 ENV_DECRYPT_FAILED` for that key |
+| `GET …/env` (list) | Unaffected — values stay masked and are never decrypted |
+
+**Empty values are valid.** A variable intentionally set to an empty string encrypts to a ciphertext with an empty data part (the GCM authentication tag is still present and verified), decrypts back to `""`, and never triggers `ENV_DECRYPT_FAILED`. Only a missing IV or tag, or a ciphertext that fails authentication, is treated as corrupted (`utils/encryption.test.ts`).
+
+**Recovery:** restore the previous `ENCRYPTION_KEY`, or re-enter the named variables (saving re-encrypts them with the current key). Tests: `apps/api/src/modules/env/service.test.ts` and `apps/api/src/modules/deploy/service.test.ts`.
+
+**Not done here:** a dedicated "re-enter this value" prompt in the dashboard UI — the error message names the key and the API returns a stable `code` the UI can key off.
+
+---
+
 ## How to Test
 
 ### 1. Add Environment Variable

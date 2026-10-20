@@ -142,10 +142,10 @@ def generate_dkim_keys(domain: str, selector: str = "default", key_size: int = 2
     if not HAVE_CRYPTO:
         # Fallback to openssl command if cryptography package isn't loaded
         cmd = f'openssl genrsa -out "{priv_file}" {key_size}'
-        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+        subprocess.run(cmd, shell=True, check=True, capture_output=True, timeout=60)
         # Extract public key
         pub_cmd = f'openssl rsa -in "{priv_file}" -pubout -outform DER'
-        proc = subprocess.run(pub_cmd, shell=True, check=True, capture_output=True)
+        proc = subprocess.run(pub_cmd, shell=True, check=True, capture_output=True, timeout=60)
         pub_b64 = base64.b64encode(proc.stdout).decode("ascii")
     else:
         private_key = rsa.generate_private_key(
@@ -159,6 +159,7 @@ def generate_dkim_keys(domain: str, selector: str = "default", key_size: int = 2
             encryption_algorithm=serialization.NoEncryption(),
         )
         priv_file.write_bytes(priv_pem)
+        priv_file.chmod(0o600)
 
         public_key = private_key.public_key()
         pub_der = public_key.public_bytes(
@@ -236,20 +237,32 @@ def update_opendkim_tables(domain: str, selector: str, priv_path: str) -> None:
     reload_opendkim()
 
 
+OPENDKIM_RELOAD_SCRIPT = (
+    "chown -R opendkim:opendkim /etc/opendkim/keys; "
+    "find /etc/opendkim/keys -type d -exec chmod 750 {} +; "
+    "find /etc/opendkim/keys -type f -name '*.private' -exec chmod 600 {} +; "
+    "pkill -USR1 opendkim"
+)
+
+
 def reload_opendkim() -> None:
     """
     OpenDKIM reads KeyTable/SigningTable/TrustedHosts once at startup and
-    keeps them in memory — a plain file write is invisible to it until it
-    gets SIGHUP. Without this, a newly written or corrected KeyTable entry
-    silently has no effect and every signing attempt for that domain keeps
-    failing the milter with a 451 temp-reject.
+    keeps them in memory — a plain file write is invisible to it until it is
+    told to reload with SIGUSR1 (SIGHUP makes it exit, and Postfix, with
+    milter_default_action = accept, then sends every message unsigned).
+
+    Keys are written here as root, but OpenDKIM refuses a private key it does
+    not own or that others can read (RequireSafeKeys) and answers every
+    message for that domain with a 451, so ownership and modes are fixed in
+    the container, as the entrypoint does at start-up, before the reload.
     """
     try:
         subprocess.run(
-            ["docker", "exec", "vexlyx-postfix", "pkill", "-HUP", "opendkim"],
+            ["docker", "exec", "vexlyx-postfix", "sh", "-c", OPENDKIM_RELOAD_SCRIPT],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=15,
         )
     except Exception:
         pass
@@ -523,6 +536,69 @@ def get_delivery_log(domain: str = None, mailbox: str = None, status: str = None
 # ---------------------------------------------------------------------------
 # Virtual Domains & Mailbox Synchronization
 # ---------------------------------------------------------------------------
+
+class PostfixMapError(RuntimeError):
+    """A Postfix lookup table could not be recompiled into its .lmdb file."""
+
+    code = "POSTFIX_MAP_COMPILE_FAILED"
+
+    def __init__(self, map_name: str, detail: str) -> None:
+        super().__init__(
+            f"Failed to rebuild Postfix map '{map_name}' ({detail}). "
+            "Mail routing for recent mailbox/alias changes may be stale or "
+            "unreadable until it is rebuilt."
+        )
+        self.map_name = map_name
+
+
+def _make_world_readable(path: Path) -> None:
+    """Domain/mailbox tables are bind-mounted into the mail containers, whose
+    service users differ from the host user that writes them (created 0640 under
+    the usual host umask). Without read access Postfix cannot see the domain list."""
+    try:
+        os.chmod(path, 0o644)
+    except OSError:
+        pass
+
+
+def _compile_lmdb_map(map_name: str) -> None:
+    """Rebuild /etc/postfix/<map_name>.lmdb inside the Postfix container.
+
+    postmap drops privileges to the owner of the source file, and the bind-mounted
+    source is owned by the (non-root) host user, so it cannot write into the
+    root-owned /etc/postfix. Compiling a root-owned copy and moving the result
+    into place avoids that. The result must stay world-readable: delivery runs in
+    the unprivileged `virtual` service."""
+    # The exit status of the cp/postmap/mv/chmod chain is saved before the
+    # cleanup `rm`, otherwise `rm -f` (which always succeeds) would mask a
+    # failed rebuild and report success.
+    script = (
+        f"cp /etc/postfix/{map_name} /tmp/{map_name} && "
+        f"postmap lmdb:/tmp/{map_name} && "
+        f"mv /tmp/{map_name}.lmdb /etc/postfix/{map_name}.lmdb && "
+        f"chmod 644 /etc/postfix/{map_name}.lmdb; "
+        f"rc=$?; rm -f /tmp/{map_name}; exit $rc"
+    )
+    try:
+        proc = subprocess.run(
+            ["docker", "exec", "vexlyx-postfix", "sh", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # A stale .lmdb silently keeps routing mail to old destinations
+        # (550 for new recipients), so a failed rebuild must be reported.
+        raise PostfixMapError(
+            map_name, f"timed out after {exc.timeout}s waiting for postmap"
+        ) from exc
+    except OSError as exc:
+        raise PostfixMapError(map_name, f"could not run docker: {exc}") from exc
+
+    if proc.returncode != 0:
+        output = (proc.stderr or proc.stdout or "").strip() or "no output"
+        raise PostfixMapError(map_name, f"exit {proc.returncode}: {output}")
+
 
 def sync_virtual_domains(domains: list, mailboxes: list = None) -> dict:
     with state_lock():
@@ -999,7 +1075,7 @@ def main():
         respond({"error": str(exc), "code": exc.code, "details": exc.details})
         sys.exit(1)
     except Exception as e:
-        respond({"error": str(e), "code": "EXECUTION_ERROR"})
+        respond({"error": str(e), "code": getattr(e, "code", "EXECUTION_ERROR")})
         sys.exit(1)
 
 

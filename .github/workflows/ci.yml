@@ -24,6 +24,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sh tests/mail-state/run.sh
+      
+  mail-credential-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t vexlyx-dovecot:credentials-test docker/dovecot
+      - run: docker build -t vexlyx-postfix:credentials-test docker/postfix
+      - run: python3 -m unittest tests.test_mail_credential_security tests.test_mail_credential_protocols -v
+      - run: python3 -m unittest tests.test_roundcube_tls -v
 
   lint:
     runs-on: ubuntu-latest
@@ -63,6 +72,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @vexlyx/api db:generate
       - run: pnpm test
+      - run: python3 -m unittest discover -s tests -p test_restore_stop_safety.py
+      - run: python3 -m unittest discover -s tests -p test_git_url_policy.py
+      - run: python3 -m unittest discover -s tests -p test_installer_release_channel.py
+      - run: python3 -m unittest discover -s tests -p test_installer_nixpacks.py
 
   build:
     runs-on: ubuntu-latest

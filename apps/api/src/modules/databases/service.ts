@@ -9,6 +9,8 @@ import { encrypt, decrypt } from "../../utils/encryption.js";
 import { assertUnderQuota, notifyQuotaThreshold } from "../../utils/quota.js";
 import { EnvService } from "../env/service.js";
 import type { AuditLogService } from "../audit-log/service.js";
+import { getPythonBin } from "../../utils/pythonBin.js";
+import { PYTHON_SCRIPT_TIMEOUT_MS, watchChildTimeout } from "../../utils/processWatchdog.js";
 import type {
   CreateDatabaseInput,
   DatabaseListQuery,
@@ -56,9 +58,18 @@ function getDatabaseManagerScriptPath(): string {
 function runPythonCommand<T>(payload: Record<string, unknown>): Promise<T> {
   return new Promise((resolveP, rejectP) => {
     const scriptPath = getDatabaseManagerScriptPath();
-    const child = spawn("python", [scriptPath], {
+    const child = spawn(getPythonBin(), [scriptPath], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.database, (ms) =>
+      rejectP(
+        new DatabaseError(
+          `Database manager timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";
@@ -461,11 +472,22 @@ export class DatabaseService {
         rootUser,
         rootPassword,
       });
-    } catch {
-      // If container is down or already dropped, proceed with Prisma deletion to avoid stuck records
+    } catch (err) {
+      // The drop statements are idempotent (DROP ... IF EXISTS), so an
+      // already-dropped database is a success, not an error. Anything that
+      // reaches here is a real failure (engine down, bad root credentials,
+      // SQL error). Keep the record and report it: deleting the row anyway
+      // would orphan a live database with data in it, and the audit trail
+      // would claim a deletion that never happened.
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new DatabaseError(
+        `Could not drop database "${record.name}": ${reason}. The record was kept — resolve the problem and try again.`,
+        "DATABASE_DROP_FAILED",
+        502,
+      );
     }
 
-    // Delete from Prisma
+    // Only reached once the engine confirmed the drop. Delete from Prisma
     await this.prisma.database.delete({
       where: { id },
     });

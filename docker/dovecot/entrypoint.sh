@@ -3,6 +3,26 @@ set -e
 
 echo "[Vexlyx] Initializing Dovecot IMAP Server..."
 
+# Seeding must be explicitly enabled. A typo must not enable known credentials.
+case "${VEXLYX_SEED_DEV_FIXTURES:-false}" in
+    true|false) ;;
+    *) echo "[Vexlyx] VEXLYX_SEED_DEV_FIXTURES must be true or false." >&2; exit 1 ;;
+esac
+
+users=/etc/dovecot/virtual/users
+# The auth worker reads the runtime passwd-file through its dovecot group.
+mkdir -p /etc/dovecot/virtual
+if [ -L "$users" ] || { [ -e "$users" ] && [ ! -f "$users" ]; }; then
+    echo "[Vexlyx] Refusing non-regular mailbox users file." >&2
+    exit 1
+fi
+(umask 027; touch "$users")
+chown root:dovecot "$users"
+chmod 640 "$users"
+if [ "${VEXLYX_SEED_DEV_FIXTURES:-false}" = false ]; then
+    /usr/local/bin/users-security.sh check "$users"
+fi
+
 # 1. TLS Certificates
 mkdir -p /etc/dovecot/certs
 if [ ! -f /etc/dovecot/certs/cert.pem ] || [ ! -f /etc/dovecot/certs/key.pem ]; then
@@ -51,6 +71,17 @@ userdb {
   args = username_format=%u $directory/users
 }
 EOF
+# Each fixture is independent so partial development state is repaired safely.
+if [ "${VEXLYX_SEED_DEV_FIXTURES:-false}" = true ]; then
+    for name in test admin; do
+        if ! grep -q "^${name}@vexlyx[.]local:" "$users"; then
+            HASH=$(doveadm -c /dev/null pw -s ARGON2ID -p "vexlyx-dev")
+            mkdir -p "/var/mail/vhosts/vexlyx.local/$name/Maildir/cur" "/var/mail/vhosts/vexlyx.local/$name/Maildir/new" "/var/mail/vhosts/vexlyx.local/$name/Maildir/tmp"
+            chown -R 5000:5000 "/var/mail/vhosts/vexlyx.local/$name"
+            # Append a separator as an existing passwd-file may lack a final LF.
+            printf '\n%s\n' "$name@vexlyx.local:${HASH}:5000:5000::::userdb_quota_rule=*:storage=1024M" >> "$users"
+        fi
+    done
 fi
 generation=$(sed -n '1s/^# generation://p' "$state/active.conf")
 /usr/local/bin/mail-state.sh prepare "$generation"

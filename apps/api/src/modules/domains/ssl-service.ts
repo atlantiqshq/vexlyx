@@ -13,6 +13,8 @@ import type {
 } from "@vexlyx/shared";
 import { DomainError, DomainService } from "./service.js";
 import { encrypt } from "../../utils/encryption.js";
+import { getPythonBin } from "../../utils/pythonBin.js";
+import { PYTHON_SCRIPT_TIMEOUT_MS, watchChildTimeout } from "../../utils/processWatchdog.js";
 
 // ---------------------------------------------------------------------------
 // Python Script Locator
@@ -103,7 +105,7 @@ function getPythonExe(): string {
       }
     }
   }
-  return process.platform === "win32" ? "python" : "python3";
+  return getPythonBin();
 }
 
 async function runSslManager(
@@ -133,6 +135,15 @@ async function runSslManager(
         ...(pythonPath ? { PYTHONPATH: pythonPath } : {}),
       },
     });
+    watchChildTimeout(child, PYTHON_SCRIPT_TIMEOUT_MS.ssl, (ms) =>
+      rej(
+        new DomainError(
+          `SSL manager timed out after ${ms / 1000}s`,
+          "SCRIPT_TIMEOUT",
+          504,
+        ),
+      ),
+    );
 
     let stdout = "";
     let stderr = "";
@@ -732,15 +743,18 @@ export class SslService {
   }
 
   /**
-   * Batch audits all certificates for upcoming expiration (<= 7 days alert threshold).
+   * Audits the caller's own certificates for upcoming expiration (<= 7 days alert threshold).
+   * Scoped to `userId` like every other SSL operation, so one tenant can never
+   * see (or trigger status refreshes for) another tenant's certificates.
    */
-  public async checkExpiryAlerts(): Promise<{
+  public async checkExpiryAlerts(userId: string): Promise<{
     totalChecked: number;
     expiringSoon: number;
     expired: number;
     alerts: Array<{ domainId: string; hostname: string; daysRemaining: number | null; status: CertStatus }>;
   }> {
     const certificates = await this.prisma.certificate.findMany({
+      where: { domain: { userId } },
       include: { domain: true },
     });
 

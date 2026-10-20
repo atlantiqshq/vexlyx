@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { MailService, MailError } from "./service.js";
+import { DomainError } from "../domains/service.js";
 import {
   SendTestEmailSchema,
   MailDomainParamSchema,
@@ -31,7 +32,7 @@ function handleMailError(err: unknown, reply: FastifyReply): void {
 }
 
 export async function mailRoutes(app: FastifyInstance) {
-  const service = new MailService(app.prisma);
+  const service = new MailService(app.prisma, app.log);
 
   // ---------------------------------------------------------------------------
   // GET /api/mail/status — SMTP Server & Port Diagnostics

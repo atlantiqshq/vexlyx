@@ -15,7 +15,19 @@ const envSchema = z
     DATABASE_URL: z.string().url(),
     REDIS_URL: z.string().default("redis://localhost:6379"),
     SESSION_SECRET: z.string().min(32),
+    // Key for everything encrypted at rest (#69). Required in production so a
+    // SESSION_SECRET leak cannot also decrypt stored credentials, and so
+    // rotating SESSION_SECRET cannot silently orphan them. Outside production
+    // it still falls back to SESSION_SECRET for zero-config local dev.
     ENCRYPTION_KEY: z.string().min(32).optional(),
+    // Migration aid for installs that ran without ENCRYPTION_KEY: data was
+    // encrypted under a key derived from SESSION_SECRET. With this on, that
+    // key is accepted for *decryption* only (and, in production, a missing
+    // ENCRYPTION_KEY does not stop boot). Run `pnpm db:reencrypt`, then unset.
+    ENCRYPTION_KEY_LEGACY_FALLBACK: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
     // Session cookie Domain attribute (F5.1). Needed whenever the dashboard
     // and API are served from different subdomains (e.g. panel.example.com /
     // api.panel.example.com) — without it, the cookie defaults to a host-only
@@ -30,6 +42,20 @@ const envSchema = z
       .enum(["true", "false"])
       .default("false")
       .transform((v) => v === "true"),
+    // Comma-separated IPs/CIDRs/keywords (loopback, linklocal, uniquelocal) of
+    // the reverse proxies allowed to set X-Forwarded-For. Fastify walks that
+    // header from the right while each hop is trusted and takes the first
+    // untrusted address as the client, so forged leading entries are ignored.
+    // Empty = no proxy: use the TCP peer address (local dev).
+    TRUST_PROXY: z
+      .string()
+      .default("")
+      .transform((v) =>
+        v
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      ),
     REQUIRE_ADMIN_2FA: z
       .enum(["true", "false"])
       .default("false")
@@ -136,6 +162,15 @@ const envSchema = z
     // set this to override that default (e.g. a venv interpreter, or a
     // non-standard binary name/path on the host).
     PYTHON_BIN: z.string().min(1).optional(),
+    // File Manager archive limits (F5.24) — zip-bomb / disk-fill guards for
+    // extract and compress. Applied to the uncompressed size and entry count.
+    FILE_ARCHIVE_MAX_BYTES: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .default(2 * 1024 * 1024 * 1024),
+    FILE_ARCHIVE_MAX_ENTRIES: z.coerce.number().int().min(1).default(50_000),
+    FILE_ARCHIVE_MAX_RATIO: z.coerce.number().min(1).default(100),
     // System transactional email (F5.23). With nothing set, panel mail is
     // sent as notifications@<MAIL_DOMAIN> through the bundled Postfix — no operator
     // configuration. EMAIL_SMTP_* point the same client at any external SMTP
@@ -184,6 +219,31 @@ const envSchema = z
         message:
           "EMAIL_TRANSPORT=log prints mail (including reset links) to the log and is not allowed in production",
       });
+    }
+    if (value.NODE_ENV === "production") {
+      if (!value.ENCRYPTION_KEY) {
+        if (!value.ENCRYPTION_KEY_LEGACY_FALLBACK) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["ENCRYPTION_KEY"],
+            message:
+              "ENCRYPTION_KEY is required in production (generate one with `openssl rand -hex 32`). " +
+              "Upgrading an install that never set it? Set ENCRYPTION_KEY_LEGACY_FALLBACK=true temporarily and run `pnpm db:reencrypt`",
+          });
+        }
+      } else if (/change-?me/i.test(value.ENCRYPTION_KEY)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["ENCRYPTION_KEY"],
+          message: "ENCRYPTION_KEY is still the .env.example placeholder; generate a random value",
+        });
+      } else if (value.ENCRYPTION_KEY === value.SESSION_SECRET) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["ENCRYPTION_KEY"],
+          message: "ENCRYPTION_KEY must differ from SESSION_SECRET",
+        });
+      }
     }
     if (Boolean(value.EMAIL_SMTP_USER) !== Boolean(value.EMAIL_SMTP_PASS)) {
       ctx.addIssue({

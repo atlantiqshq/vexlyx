@@ -84,6 +84,10 @@ export type {
   DatabaseConnectionTestResult,
 } from "./schemas/databases.js";
 
+// NOTE: Redis-instance schemas are intentionally NOT re-exported here —
+// CLAUDE.md forbids adding barrel exports. Import them from
+// "@vexlyx/shared/schemas/redisInstances" instead.
+
 export {
   GitHubCommitAuthorSchema,
   GitHubCommitSchema,

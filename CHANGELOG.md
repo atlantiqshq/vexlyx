@@ -7,6 +7,7 @@ All notable changes to Vexlyx are documented here. The format follows [Keep a Ch
 ### Fixed
 
 - Connecting or updating a git project no longer deletes files git does not track. A failed fetch, checkout or pull (network, authentication, local changes) now fails with its error and leaves the workspace untouched; previously it re-cloned the project and lost uploads and other untracked files. Switching a project to another repository, or connecting git to a workspace that already has files, keeps the old workspace next to the project as `<id>.replaced-<timestamp>` (reported as `previousWorkspace`) and restores it if the clone fails.
+- Switching a project to a branch that was created after the first clone no longer fails with `pathspec ... did not match`: the sync now fetches the branch into its remote-tracking ref before checking it out, and a failed update reports one clear error instead of a stale document the API cannot parse (#153).
 
 ## [0.4.2] - 2026-10-26
 

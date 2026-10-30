@@ -31,10 +31,10 @@ This document is the **single source of truth** for all Vexlyx features.
 | Phase 2: Multi-Runtime Support | 🟢 COMPLETED | 100% (8/8) |
 | Phase 3: Domain & DNS | 🟢 COMPLETED | 100% (5/5) |
 | Phase 4: Email Server | 🟢 COMPLETED | 100% (8/8) |
-| Phase 5: System & Administration | 🟡 IN PROGRESS | 88% (28/32) |
+| Phase 5: System & Administration | 🟡 IN PROGRESS | 88% (29/33) |
 | Phase 6: Ecosystem & Launch | 🟡 IN PROGRESS | 67% (2/3) |
 
-**Overall Completion:** 93% (66/71 features)
+**Overall Completion:** 93% (67/72 features)
 
 ---
 
@@ -2712,6 +2712,37 @@ Vexlyx is self-hosted, so the maintainers have no way to know how many installs 
 - `apps/api/prisma/migrations/<timestamp>_add_telemetry_settings/migration.sql`
 - `apps/dashboard/src/components/settings/TelemetryCard.tsx`, `src/hooks/useTelemetry.ts`
 - `docs/dev/telemetry.md` and a public privacy page
+
+---
+
+### F5.33 — In-Panel Update Notifications
+**Status:** 🟢 COMPLETED
+
+**Description:**
+An administrator should not have to re-run the installer on a hunch to learn that a fix exists. The API compares `VEXLYX_VERSION` with the newest stable GitHub release, caches the result in Redis, and the dashboard shows admins a dismissible banner with links to the release notes and the upgrade guide. It is display-only — nothing is downloaded or installed automatically — and is deliberately separate from opt-in telemetry (F5.32), which stays off until an admin enables it.
+
+**Acceptance Criteria:**
+- [x] `GET /api/system/update` returns the current and latest versions, update availability, release URL, publish time, and whether the check ran or failed (ADMIN only; 401/403 otherwise)
+- [x] A successful check is cached for 6 hours, a failed one for 1 hour, and a GitHub outage never fails the request
+- [x] `UPDATE_CHECK_ENABLED=false` performs no outbound call; `UPDATE_CHECK_REPO` changes the source repository for forks
+- [x] Prerelease and draft releases are never offered; comparison handles the `v` prefix, build metadata and prerelease ordering
+- [x] The dashboard shows the banner to admins only, remembers dismissal per version, and links to the release notes and upgrade guide
+
+**Test Plan:**
+1. Publish a newer tag → an admin sees the banner within the cache window; a non-admin never does
+2. Dismiss the banner → it stays hidden for that version and reappears for the next release
+3. Block outbound access to `api.github.com` → the panel keeps working, the notice stays hidden, one warning is logged
+4. Set `UPDATE_CHECK_ENABLED=false` → no request to GitHub; the endpoint reports `checkEnabled: false`
+
+**Developer Docs:**
+- **Location:** `docs/dev/system-updates.md`
+- **Contents:** flow, caching/failure behaviour, version comparison rules, operator controls, how to test
+
+**Files:**
+- `apps/api/src/modules/system/update-service.ts` (and `update-service.test.ts`), `routes.ts`
+- `apps/api/src/utils/version.ts` (and `version.test.ts`)
+- `packages/shared/src/schemas/systemUpdate.ts`
+- `apps/dashboard/src/hooks/useSystemUpdate.ts`, `src/components/layout/UpdateBanner.tsx`
 
 ---
 

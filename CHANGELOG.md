@@ -4,9 +4,21 @@ All notable changes to Vexlyx are documented here. The format follows [Keep a Ch
 
 ## Unreleased
 
+## [0.4.3] - 2026-10-30
+
+### Added
+
+- Administrators now see an in-panel notice when a newer stable release is published, linking to its release notes and the upgrade guide. The API compares the running version with the newest GitHub release and caches the answer in Redis for six hours (a failed check for one), so the dashboard never calls GitHub itself. The check is display-only: nothing is downloaded or installed, and it stays separate from anonymous telemetry (F5.32). Set `UPDATE_CHECK_ENABLED=false` on an air-gapped server, or `UPDATE_CHECK_REPO` to publish from a different repository.
+
 ### Fixed
 
-- Connecting or updating a git project no longer deletes files git does not track. A failed fetch, checkout or pull (network, authentication, local changes) now fails with its error and leaves the workspace untouched; previously it re-cloned the project and lost uploads and other untracked files. Switching a project to another repository, or connecting git to a workspace that already has files, keeps the old workspace next to the project as `<id>.replaced-<timestamp>` (reported as `previousWorkspace`) and restores it if the clone fails.
+- WordPress plugin and theme uploads accept real archives again: the panel streams them as `multipart/form-data` instead of base64 inside a JSON body, so a several-megabyte theme no longer fails with `413 Request body is too large`. Temporary archives are removed on every exit path, concurrent uploads of the same filename no longer collide, and client filenames are sanitized before they reach the disk (#154).
+- Connecting or updating a git project no longer deletes files git does not track. A failed fetch, checkout or pull (network, authentication, local changes) now fails with its error and leaves the workspace untouched; previously it re-cloned the project and lost uploads and other untracked files. Switching a project to another repository, or connecting git to a workspace that already has files, keeps the old workspace next to the project as `<id>.replaced-<timestamp>` (reported as `previousWorkspace`) and restores it if the clone fails (#182).
+
+### Upgrade notes
+
+- Re-run the installer. There is no schema or configuration change: it rebuilds the API and dashboard containers, and the update notice appears for administrators on the next sign-in.
+- If the panel cannot reach `api.github.com`, the notice stays hidden and nothing else is affected; `UPDATE_CHECK_ENABLED=false` skips the lookup entirely.
 
 ## [0.4.2] - 2026-10-26
 

@@ -4,6 +4,8 @@ All notable changes to Vexlyx are documented here. The format follows [Keep a Ch
 
 ## Unreleased
 
+## [0.4.4] - 2026-11-01
+
 ### Added
 
 - A project now has **Build Settings** on its Deploy tab: install, build and start commands plus the container port, each left blank to keep auto-detection in charge. **Detect** runs Nixpacks' plan over the current source and shows what each blank field would use, **Save & Deploy** deploys with what you typed, and **Auto** clears every override at once. `buildCmd`, `startCmd` and `port` already existed on the project and were shown read-only, with no panel to edit them, and an install command was accepted by the build script but never sent to it by the API — so `nixpacks build --install-cmd` had no effect on any deploy (#200, F5.34).

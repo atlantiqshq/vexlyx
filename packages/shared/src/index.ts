@@ -282,6 +282,7 @@ export type {
   Deployment,
   DeploymentStatus,
   PaginatedDeployments,
+  BuildPlan,
   EnvVar,
   DecryptedEnvVar,
 } from "./types/index.js";

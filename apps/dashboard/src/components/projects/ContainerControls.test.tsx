@@ -31,7 +31,7 @@ const project: Project = {
   type: "NODEJS",
   status: "ACTIVE",
   gitUrl: null,
-  branch: null,
+  branch: "main",
   installCmd: null,
   buildCmd: null,
   startCmd: null,

@@ -1,5 +1,5 @@
 /** Current version of the Vexlyx platform */
-export const VEXLYX_VERSION = "0.4.3";
+export const VEXLYX_VERSION = "0.4.4";
 
 /** Application name constant used across both frontend and backend */
 export const APP_NAME = "Vexlyx";

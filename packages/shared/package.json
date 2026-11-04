@@ -14,6 +14,10 @@
       "types": "./dist/schemas/scheduledTasks.d.ts",
       "default": "./dist/schemas/scheduledTasks.js"
     },
+    "./schemas/redisInstances": {
+      "types": "./dist/schemas/redisInstances.d.ts",
+      "default": "./dist/schemas/redisInstances.js"
+    },
     "./schemas/systemUpdate": {
       "types": "./dist/schemas/systemUpdate.d.ts",
       "default": "./dist/schemas/systemUpdate.js"

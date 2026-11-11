@@ -915,7 +915,7 @@ def cmd_deploy(payload: dict) -> None:
         )
         extra_placeholders["nginx_conf_path"] = nginx_conf_path.resolve().as_posix()
 
-    for handed_over in hand_docroot_to_php(Path(project_dir), project_type_upper, php_no_build):
+    for handed_over in hand_docroot_to_php(Path(payload.get("staticRoot") or project_dir) if php_no_build else Path(project_dir), project_type_upper, php_no_build):
         log_line(f"[vexlyx] {handed_over.name} is now writable by PHP-FPM (uid {PHP_FPM_UID})")
 
     log_line(f"[vexlyx] Generating docker-compose.yml in {compose_dir}")

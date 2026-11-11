@@ -4,6 +4,10 @@ All notable changes to Vexlyx are documented here. The format follows [Keep a Ch
 
 ## Unreleased
 
+### Added
+
+- Advanced project build settings expose Node/Python/PHP runtime overrides, a source base directory, container memory limits and cache toggle/reset controls (#200). Existing projects retain repository-root builds, server-default memory and caching.
+
 ### Security
 
 - An uploaded custom SSL private key is passed to `ssl_manager.py` on stdin instead of its command line, so it is no longer readable through `ps` or `/proc/<pid>/cmdline` (#190).

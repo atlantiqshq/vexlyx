@@ -4,6 +4,10 @@ All notable changes to Vexlyx are documented here. The format follows [Keep a Ch
 
 ## Unreleased
 
+### Added
+
+- Docker project settings now support private named volumes and separate container removal from explicit data deletion (#157). Existing anonymous image volumes keep their redeploy behaviour; back up data before changing mounts.
+
 ### Security
 
 - An uploaded custom SSL private key is passed to `ssl_manager.py` on stdin instead of its command line, so it is no longer readable through `ps` or `/proc/<pid>/cmdline` (#190).

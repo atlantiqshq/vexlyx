@@ -438,6 +438,7 @@ export function createBuildProcessor(
           name: true,
           type: true,
           port: true,
+          volumePaths: true,
           installCmd: true,
           startCmd: true,
           gitUrl: true,
@@ -534,6 +535,8 @@ export function createBuildProcessor(
           ? "Static Site"
           : planResult.framework.charAt(0).toUpperCase() + planResult.framework.slice(1);
       await appendLog(`[vexlyx] Detected framework: ${displayFramework}`);
+
+      if (project.volumePaths?.length && planResult.detectedType && planResult.detectedType !== "DOCKER") throw new Error("This project has persistent Docker mounts. Keep the Docker runtime or remove the volume paths before changing runtimes.");
 
       // Auto-align project type if framework is detected and differs from current setting
       let effectiveProjectType = project.type;
@@ -646,6 +649,7 @@ export function createBuildProcessor(
           imageName: deployImageName,
           projectType: effectiveProjectType,
           baseDomain: env.BASE_DOMAIN,
+          volumePaths: project.volumePaths,
           memoryLimit: env.DEPLOY_MEMORY_LIMIT,
           portRangeStart: env.DEPLOY_PORT_RANGE_START,
           portRangeEnd: env.DEPLOY_PORT_RANGE_END,

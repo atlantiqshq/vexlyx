@@ -30,6 +30,8 @@ Never run this script as root.
 Requires Docker CLI (docker compose v2) to be installed and available in PATH.
 """
 
+from contextlib import contextmanager
+
 import hashlib
 import json
 import os
@@ -125,19 +127,53 @@ def assert_deploy_dir_is_not_a_symlink(compose_dir: Path) -> None:
 # needs, `/` included so a value cannot read as a path either. `apps/api`
 # validates the shape (DeployBodySchema) before this is reached; this is the
 # check that stands on its own, because this is the process writing the file.
+ROUTE_HOSTNAME_RE = re.compile(
+    r"^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+)
+
+
+def validate_route_hostname(hostname: str) -> str:
+    """The Traefik labels are built by string substitution, so a hostname that
+    contains rule syntax (backticks, parentheses, pipes) would close the
+    Host(...) matcher and append rules that match other tenants' requests."""
+    if not isinstance(hostname, str):
+        fail("Hostname must be a string", "INVALID_HOSTNAME")
+    value = hostname.lower()
+    if len(value) > 253 or not ROUTE_HOSTNAME_RE.fullmatch(value):
+        fail(f"Invalid hostname for the Traefik route: {hostname!r}", "INVALID_HOSTNAME")
+    return value
+
+
+
 _SAFE_HOSTNAME = re.compile(r"[A-Za-z0-9._*-]{1,253}")
 
 
 def assert_hostname_is_rule_safe(hostname: str) -> None:
-    """Refuse a hostname that cannot be written into the proxy rule as data."""
-    if not isinstance(hostname, str) or not _SAFE_HOSTNAME.fullmatch(hostname):
-        fail(
-            "Hostname must be a DNS name or an IP address; refusing to write it into the proxy rule",
-            "INVALID_HOSTNAME",
-        )
+    validate_route_hostname(hostname)
 
 
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
+_PINNED_DEPLOY_DIRS: dict[str, int] = {}
+
+
+@contextmanager
+def pinned_deploy_directory(directory: Path):
+    directory.mkdir(parents=True, exist_ok=True)
+    assert_deploy_dir_is_not_a_symlink(directory)
+    if not sys.platform.startswith("linux"):
+        yield
+        return
+    key = os.path.abspath(directory)
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | _O_NOFOLLOW)
+    _PINNED_DEPLOY_DIRS[key] = fd
+    try:
+        yield
+    finally:
+        _PINNED_DEPLOY_DIRS.pop(key, None)
+        os.close(fd)
 
 
 def write_generated_file(dest: Path, content: str) -> None:
@@ -152,16 +188,53 @@ def write_generated_file(dest: Path, content: str) -> None:
             f"{dest} is a symbolic link; refusing to write the generated file through it",
             "UNSAFE_DEPLOY_FILE",
         )
+    parent_fd = None
     try:
-        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _O_NOFOLLOW, 0o644)
+        if os.name == "posix":
+            pinned = _PINNED_DEPLOY_DIRS.get(os.path.abspath(dest.parent))
+            parent_fd = os.dup(pinned) if pinned is not None else os.open(dest.parent, os.O_RDONLY | os.O_DIRECTORY | _O_NOFOLLOW)
+            fd = os.open(dest.name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _O_NOFOLLOW,
+                         0o644, dir_fd=parent_fd)
+        else:
+            assert_deploy_dir_is_not_a_symlink(dest.parent)
+            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _O_NOFOLLOW, 0o644)
     except OSError as exc:
         # Also covers a link swapped in between the check and the open.
         fail(
             f"Cannot open {dest} for writing without following links: {exc.strerror}",
             "UNSAFE_DEPLOY_FILE",
         )
+    finally:
+        if parent_fd is not None:
+            os.close(parent_fd)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(content)
+
+
+def spawn_with_safe_cwd(*args, **kwargs):
+    """Pin Compose's working directory before spawning, rather than letting
+    a directory exchange redirect the client to an untrusted compose file.
+    The child inherits the descriptor used by its /proc/self/fd cwd path.
+    """
+    cwd = kwargs.get("cwd")
+    launcher = kwargs.pop("_launcher", None) or subprocess.Popen
+    directory_fd = None
+    try:
+        if cwd is not None and Path(cwd).name == "deploy":
+            if sys.platform.startswith("linux"):
+                try:
+                    pinned = _PINNED_DEPLOY_DIRS.get(os.path.abspath(cwd))
+                    directory_fd = os.dup(pinned) if pinned is not None else os.open(cwd, os.O_RDONLY | os.O_DIRECTORY | _O_NOFOLLOW)
+                except OSError as exc:
+                    fail(f"Cannot open Compose directory safely: {exc}", "UNSAFE_DEPLOY_DIR")
+                kwargs["cwd"] = f"/proc/self/fd/{directory_fd}"
+                kwargs["pass_fds"] = (*kwargs.get("pass_fds", ()), directory_fd)
+            else:
+                assert_deploy_dir_is_not_a_symlink(Path(cwd))
+        return launcher(*args, **kwargs)
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
 
 
 def _chown_directory_no_follow(path: Path, uid: int, gid: int) -> None:
@@ -282,7 +355,7 @@ def run_bounded(
     if input_data is not None:
         kwargs["stdin"] = subprocess.PIPE
 
-    with subprocess.Popen(cmd, **_group_popen_kwargs(), **kwargs) as proc:
+    with spawn_with_safe_cwd(cmd, **_group_popen_kwargs(), **kwargs) as proc:
         try:
             stdout, stderr = proc.communicate(input_data, timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -395,7 +468,7 @@ def run_compose(
             errors="replace",
         )
 
-    proc = subprocess.Popen(
+    proc = spawn_with_safe_cwd(
         cmd,
         **_group_popen_kwargs(),
         cwd=compose_dir,
@@ -800,6 +873,12 @@ def routable_check_log(
 
 
 def cmd_deploy(payload: dict) -> None:
+    directory = Path(require_field(payload, "projectDir")) / "deploy"
+    with pinned_deploy_directory(directory):
+        _cmd_deploy(payload)
+
+
+def _cmd_deploy(payload: dict) -> None:
     """
     Generate a docker-compose.yml for the project and start the container.
 
@@ -977,8 +1056,9 @@ def cmd_stop(payload: dict) -> None:
     run_compose(compose_dir, ["stop"], docker_bin)
     # Verify every service, including sidecars, before a caller can overwrite files.
     try:
-        containers = subprocess.run(
+        containers = spawn_with_safe_cwd(
             [docker_bin, "compose", "ps", "--all", "--quiet"],
+            _launcher=subprocess.run,
             cwd=compose_dir, capture_output=True, text=True, timeout=30,
         )
         if containers.returncode != 0:
@@ -1333,7 +1413,7 @@ def cmd_logs_follow(payload: dict) -> None:
         fail("No runtime logs available. Container has not been deployed yet.", "DEPLOY_DIR_NOT_FOUND")
         return
 
-    proc = subprocess.Popen(
+    proc = spawn_with_safe_cwd(
         [docker_bin, "compose", "logs", "--follow", f"--tail={tail}", "--no-log-prefix", primary_service_name(project_type, compose_dir)],
         cwd=compose_dir,
         stdout=subprocess.PIPE,

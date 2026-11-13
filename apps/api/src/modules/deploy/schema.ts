@@ -1,4 +1,4 @@
-﻿import { z } from "zod";
+import { z } from "zod";
 import { HostnameSchema, IPV4_REGEX } from "@vexlyx/shared";
 
 // The deploy `domain` override is written into the project's Traefik rule as

@@ -84,7 +84,8 @@ jobs:
       # Runs the real git binary against a local repository, so it needs no
       # network and no docker; git is preinstalled on the runner.
       - run: python3 -m unittest discover -s tests -p test_git_branch_switch.py
-      - run: python3 -m unittest discover -s tests -p test_git_branch_switch_contracts.py
+      - run: python3 -m unittest discover -s tests -p test_deploy_security.py
+      - run: python3 -m unittest discover -s tests -p test_deploy_directory_swap.py
       - run: python3 -m unittest discover -s tests -p test_installer_release_channel.py
       - run: python3 -m unittest discover -s tests -p test_installer_repo_url.py
       # cryptography is what postfix_manager.py generates DKIM keys with (the

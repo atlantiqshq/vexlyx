@@ -78,9 +78,8 @@ def respond(data: dict) -> None:
 # can still read it.
 PRIVATE_KEY_MODE = 0o600
 CERTIFICATE_MODE = 0o644
-# The directory is created with no group or other bits. It is not chmod'd later:
-# an existing install's directory only ever leaks file *names*, and tightening a
-# directory other tooling may already traverse is a wider decision than this fix.
+# The API and Traefik run as root, so new and existing certificate directories
+# can remain private while both services continue to access them.
 CERTS_DIR_MODE = 0o700
 
 
@@ -118,6 +117,7 @@ def get_certs_dir() -> Path:
     ]
     for c in candidates:
         if c.exists():
+            os.chmod(c, CERTS_DIR_MODE)
             return c
     target = Path.cwd() / "docker" / "traefik" / "certs"
     target.mkdir(parents=True, exist_ok=True, mode=CERTS_DIR_MODE)
@@ -377,7 +377,7 @@ def read_acme_storage() -> dict:
 # Save & Delete Custom Certificates
 # ---------------------------------------------------------------------------
 
-def save_custom_certificate(domain_id: str, cert_pem: str, key_pem: str) -> dict:
+def save_custom_certificate(domain_id: str, cert_pem: str, key_pem: str, hostname: str = None) -> dict:
     check = validate_key_pair(cert_pem, key_pem)
     if not check.get("success"):
         return check
@@ -389,6 +389,11 @@ def save_custom_certificate(domain_id: str, cert_pem: str, key_pem: str) -> dict
     try:
         atomic_write(cert_file, cert_pem.strip().encode("utf-8"), CERTIFICATE_MODE)
         atomic_write(key_file, key_pem.strip().encode("utf-8"), PRIVATE_KEY_MODE)
+
+        if hostname:
+            clean_host = convenience_copy_name(hostname)
+            atomic_write(certs_dir / f"{clean_host}.crt", cert_pem.strip().encode("utf-8"), CERTIFICATE_MODE)
+            atomic_write(certs_dir / f"{clean_host}.key", key_pem.strip().encode("utf-8"), PRIVATE_KEY_MODE)
 
         parsed = parse_cert_pem(cert_pem)
         return {
@@ -494,6 +499,7 @@ def main():
             domain_id=payload.get("domainId", ""),
             cert_pem=payload.get("certificate", ""),
             key_pem=payload.get("privateKey", ""),
+            hostname=payload.get("hostname"),
         )
         respond(res)
     elif cmd == "delete_cert":

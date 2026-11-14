@@ -510,6 +510,7 @@ export class SslService {
       domainId: domain.id,
       certificate: input.certificate,
       privateKey: input.privateKey,
+      hostname: domain.hostname,
     });
 
     const parsed = saveRes.certificate ?? {};

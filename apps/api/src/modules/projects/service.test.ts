@@ -8,13 +8,19 @@ import type { PrismaClient } from "@prisma/client";
 import type { FastifyBaseLogger } from "fastify";
 import type { AuditLogService } from "../audit-log/service.js";
 
-vi.mock("../../config/env.js", () => ({ env: {} }));
+vi.mock("../../config/env.js", () => ({
+  env: { PROJECTS_DIR: "/tmp/vexlyx-projects" },
+}));
 vi.mock("../../utils/quota.js", () => ({
   assertUnderQuota: vi.fn(),
   notifyQuotaThreshold: vi.fn(),
 }));
 vi.mock("../deploy/service.js", () => ({ runDockerAction: vi.fn() }));
+vi.mock("node:fs", () => ({ existsSync: vi.fn(() => false) }));
+vi.mock("node:fs/promises", () => ({ default: { rm: vi.fn() } }));
+vi.mock("../domains/service.js", () => ({ removeTraefikRouteFile: vi.fn() }));
 import { ProjectService } from "./service.js";
+import { removeTraefikRouteFile } from "../domains/service.js";
 
 describe("project Git URL policy", () => {
   it.each([
@@ -271,5 +277,91 @@ describe("project build overrides (F5.34)", () => {
         data: expect.objectContaining({ installCmd: "pnpm install" }),
       }),
     );
+  });
+});
+
+describe("project deletion", () => {
+  const project = {
+    id: "p1",
+    userId: "u1",
+    name: "app",
+    type: "NODEJS",
+    deletedAt: null,
+  };
+  const prisma = {
+    project: {
+      findUnique: vi.fn(),
+      update: vi.fn(),
+    },
+    scheduledTask: {
+      findMany: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    domain: {
+      findMany: vi.fn(),
+      updateMany: vi.fn(),
+    },
+  };
+  const auditLog = { log: vi.fn() };
+  const service = new ProjectService(
+    prisma as unknown as PrismaClient,
+    auditLog as unknown as AuditLogService,
+    { error: vi.fn(), warn: vi.fn(), info: vi.fn() } as unknown as FastifyBaseLogger,
+  );
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    prisma.project.findUnique.mockResolvedValue(project);
+    prisma.project.update.mockResolvedValue(project);
+    prisma.scheduledTask.findMany.mockResolvedValue([]);
+    prisma.domain.findMany.mockResolvedValue([{ id: "d1" }, { id: "d2" }]);
+    prisma.domain.updateMany.mockResolvedValue({ count: 2 });
+  });
+
+  it("removes the route files and detaches the domains before the containers go away", async () => {
+    await service.softDelete("u1", "p1");
+
+    expect(removeTraefikRouteFile).toHaveBeenCalledWith("d1", expect.anything());
+    expect(removeTraefikRouteFile).toHaveBeenCalledWith("d2", expect.anything());
+    expect(prisma.domain.updateMany).toHaveBeenCalledWith({
+      where: { projectId: "p1" },
+      data: { projectId: null },
+    });
+  });
+
+  it("keeps the domain rows when the project has no domains", async () => {
+    prisma.domain.findMany.mockResolvedValue([]);
+
+    await service.softDelete("u1", "p1");
+
+    expect(prisma.domain.updateMany).not.toHaveBeenCalled();
+    expect(removeTraefikRouteFile).not.toHaveBeenCalled();
+  });
+
+  it("retries domain detachment after an earlier attempt marked the project deleted", async () => {
+    prisma.domain.updateMany.mockRejectedValueOnce(new Error("database unavailable"));
+    await expect(service.softDelete("u1", "p1")).rejects.toThrow("database unavailable");
+    prisma.project.findUnique.mockResolvedValue({ ...project, deletedAt: new Date() });
+    await expect(service.softDelete("u1", "p1")).resolves.toBeUndefined();
+    expect(prisma.domain.updateMany).toHaveBeenCalledTimes(2);
+    expect(auditLog.log).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps domains attached until route cleanup succeeds and permits retry", async () => {
+    vi.mocked(removeTraefikRouteFile).mockImplementationOnce(() => {
+      throw new Error("route removal denied");
+    });
+    await expect(service.softDelete("u1", "p1")).rejects.toThrow("route removal denied");
+    expect(prisma.domain.updateMany).not.toHaveBeenCalled();
+    prisma.project.findUnique.mockResolvedValue({ ...project, deletedAt: new Date() });
+    await expect(service.softDelete("u1", "p1")).resolves.toBeUndefined();
+    expect(prisma.domain.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let another user retry cleanup of a deleted project", async () => {
+    prisma.project.findUnique.mockResolvedValue({ ...project, deletedAt: new Date() });
+    await expect(service.softDelete("u2", "p1")).rejects.toMatchObject({ code: "FORBIDDEN" });
+    expect(prisma.project.update).not.toHaveBeenCalled();
+    expect(removeTraefikRouteFile).not.toHaveBeenCalled();
   });
 });

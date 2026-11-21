@@ -169,11 +169,13 @@ const envSchema = z
       .optional()
       .transform((v) => (v ? v : undefined)),
     // Nameservers users delegate to when opting into "Managed" DNS (F5.23).
+    // Empty when unset: no nameserver is assumed, and DNS hosting stays
+    // unavailable (#247) rather than advertising servers nobody operates.
     DNS_NAMESERVERS: z
       .string()
-      .default("ns1.vexlyx.com,ns2.vexlyx.com")
+      .optional()
       .transform((v) =>
-        v
+        (v ?? "")
           .split(",")
           .map((s) => s.trim().toLowerCase())
           .filter(Boolean),

@@ -99,97 +99,113 @@ export function DnsHostingOptIn({ domain, onEnabled }: DnsHostingOptInProps) {
             then manage every record from here.
           </p>
 
-          <div className="space-y-2">
-            <h2 className="text-sm font-medium text-foreground">
-              1. Set these nameservers at your registrar
-            </h2>
-            {delegation ? (
-              <div className="flex flex-wrap gap-2">
-                {delegation.expected.map((ns) => (
-                  <Badge key={ns} variant="outline" className="gap-1.5 font-mono text-xs py-1 px-2">
-                    {ns}
-                    <button
-                      type="button"
-                      onClick={() => copyText(ns)}
-                      aria-label={`Copy ${ns}`}
-                      className="text-muted-foreground hover:text-foreground"
-                    >
-                      {copied === ns ? (
-                        <Check className="h-3 w-3 text-emerald-500" />
-                      ) : (
-                        <Copy className="h-3 w-3" />
-                      )}
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            ) : (
-              <Skeleton className="h-7 w-64" />
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <h2 className="text-sm font-medium text-foreground">2. Check that they&rsquo;ve propagated</h2>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void handleCheck()}
-                disabled={isChecking}
-                className="h-8 text-xs gap-1.5"
-              >
-                <RefreshCw className={cn("h-3.5 w-3.5", isChecking && "animate-spin")} />
-                Check nameservers
-              </Button>
-              {delegation && (
-                <span
-                  className={cn(
-                    "text-xs",
-                    delegation.delegated
-                      ? "text-emerald-600 dark:text-emerald-400"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  {delegation.delegated
-                    ? "Delegated to Vexlyx"
-                    : delegation.found.length > 0
-                      ? `Currently: ${delegation.found.join(", ")}`
-                      : "No nameservers detected yet"}
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <h2 className="text-sm font-medium text-foreground">3. Enable DNS hosting</h2>
-            {!isVerified && (
-              <p className="text-xs text-amber-700 dark:text-amber-400">
-                Verify domain ownership on the Domains page first.
+          {delegation?.configured === false ? (
+            <div
+              role="status"
+              className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-xs leading-relaxed text-amber-700 dark:text-amber-400"
+            >
+              <p className="font-medium">DNS hosting is not set up on this server.</p>
+              <p className="mt-1">
+                No nameservers have been configured, so {domain.hostname} cannot be delegated to
+                Vexlyx. Keep DNS at your current provider and add an A record there pointing to this
+                server; your project keeps working as it does now.
               </p>
-            )}
-            <Button
-              size="sm"
-              onClick={() => void handleEnable()}
-              disabled={!canEnable || isSwitching}
-              className="h-8 text-xs"
-            >
-              {isSwitching && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              Enable DNS hosting
-            </Button>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Moving a live site or mail? Prepare the zone first: load and check your records here
-              before you change nameservers, so nothing goes down during the switch.
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void handlePrepare()}
-              disabled={!isVerified || isSwitching}
-              className="h-8 text-xs"
-            >
-              Prepare zone before switching
-            </Button>
-          </div>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <h2 className="text-sm font-medium text-foreground">
+                  1. Set these nameservers at your registrar
+                </h2>
+                {delegation ? (
+                  <div className="flex flex-wrap gap-2">
+                    {delegation.expected.map((ns) => (
+                      <Badge key={ns} variant="outline" className="gap-1.5 font-mono text-xs py-1 px-2">
+                        {ns}
+                        <button
+                          type="button"
+                          onClick={() => copyText(ns)}
+                          aria-label={`Copy ${ns}`}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          {copied === ns ? (
+                            <Check className="h-3 w-3 text-emerald-500" />
+                          ) : (
+                            <Copy className="h-3 w-3" />
+                          )}
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <Skeleton className="h-7 w-64" />
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <h2 className="text-sm font-medium text-foreground">2. Check that they&rsquo;ve propagated</h2>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleCheck()}
+                    disabled={isChecking}
+                    className="h-8 text-xs gap-1.5"
+                  >
+                    <RefreshCw className={cn("h-3.5 w-3.5", isChecking && "animate-spin")} />
+                    Check nameservers
+                  </Button>
+                  {delegation && (
+                    <span
+                      className={cn(
+                        "text-xs",
+                        delegation.delegated
+                          ? "text-emerald-600 dark:text-emerald-400"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {delegation.delegated
+                        ? "Delegated to Vexlyx"
+                        : delegation.found.length > 0
+                          ? `Currently: ${delegation.found.join(", ")}`
+                          : "No nameservers detected yet"}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <h2 className="text-sm font-medium text-foreground">3. Enable DNS hosting</h2>
+                {!isVerified && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    Verify domain ownership on the Domains page first.
+                  </p>
+                )}
+                <Button
+                  size="sm"
+                  onClick={() => void handleEnable()}
+                  disabled={!canEnable || isSwitching}
+                  className="h-8 text-xs"
+                >
+                  {isSwitching && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                  Enable DNS hosting
+                </Button>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Moving a live site or mail? Prepare the zone first: load and check your records here
+                  before you change nameservers, so nothing goes down during the switch.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handlePrepare()}
+                  disabled={!isVerified || isSwitching}
+                  className="h-8 text-xs"
+                >
+                  Prepare zone before switching
+                </Button>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>

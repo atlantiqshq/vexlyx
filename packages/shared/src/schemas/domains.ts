@@ -19,6 +19,7 @@ export const SetDnsModeSchema = z.object({
 export type SetDnsModeInput = z.infer<typeof SetDnsModeSchema>;
 
 export interface DnsDelegationCheckResponse {
+  configured: boolean;
   delegated: boolean;
   found: string[];
   expected: string[];

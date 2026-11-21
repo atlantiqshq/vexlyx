@@ -211,7 +211,7 @@ services:
       HOSTED_MAIL_HOSTNAME: ${VEXLYX_MAIL_HOSTNAME}
       HOSTED_MAIL_DOMAIN: ${VEXLYX_MAIL_DOMAIN}
       # Nameservers users delegate to for hosted DNS (F5.25/F5.27)
-      DNS_NAMESERVERS: ${DNS_NAMESERVERS:-ns1.vexlyx.com,ns2.vexlyx.com}
+      DNS_NAMESERVERS: ${DNS_NAMESERVERS:-}
       POSTGRES_HOST: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       MYSQL_HOST: mysql

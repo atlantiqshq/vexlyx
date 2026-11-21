@@ -42,6 +42,26 @@ function buildPrisma(domain: Record<string, unknown>) {
 
 const ACTIVE_CONNECTED = { id: "d1", hostname: "example.com", status: "ACTIVE", dnsMode: "CONNECTED" };
 
+describe("DnsService.checkDelegation with DNS_NAMESERVERS set", () => {
+  beforeEach(() => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VEXLYX_MOCK_DNS", "false");
+    nsAnswers.ns = ["ns1.example.net", "ns2.example.net"];
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("reports hosting as configured with the configured nameservers", async () => {
+    const { prisma } = buildPrisma(ACTIVE_CONNECTED);
+
+    await expect(new DnsService(prisma).checkDelegation("u1", "d1")).resolves.toEqual({
+      configured: true,
+      delegated: true,
+      found: ["ns1.example.net", "ns2.example.net"],
+      expected: ["ns1.example.net", "ns2.example.net"],
+    });
+  });
+});
+
 describe("DnsService.setDnsMode", () => {
   beforeEach(() => {
     vi.stubEnv("NODE_ENV", "production");

@@ -149,6 +149,12 @@ These belong to the panel itself, not to a project. The installer generates them
 | `REDIS_PASSWORD` | Redis (`--requirepass`), the API via `REDIS_URL` | Generated on first install, or added on upgrade when absent. Production refuses to start without it. Development defaults to `vexlyx_dev` |
 | `REDIS_URL` | API | `redis://:<REDIS_PASSWORD>@redis:6379`; the API rejects a production URL without a password |
 
+## Panel DNS Hosting
+
+| Variable | Used by | Notes |
+|----------|---------|-------|
+| `DNS_NAMESERVERS` | API | Comma-separated nameservers users delegate a domain to for "Host DNS on Vexlyx". Unset by default: the panel then reports DNS hosting as not configured and refuses to enable it (409 `DNS_HOSTING_NOT_CONFIGURED`). Set it to nameservers you actually operate, e.g. `ns1.example.com,ns2.example.com`. See [DNS management](dns-management.md) |
+
 See [Network layout](network-layout.md).
 
 ## How to Test

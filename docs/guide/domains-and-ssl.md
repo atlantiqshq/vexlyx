@@ -80,8 +80,9 @@ If you'd rather manage a domain's entire DNS zone from inside Vexlyx — not jus
 record — open the domain's **Host DNS on Vexlyx** option from `/domains`. This requires:
 
 1. The domain already verified (`ACTIVE`) via the Connect flow above.
-2. Changing the domain's nameservers at your registrar to Vexlyx's (`ns1.vexlyx.com` /
-   `ns2.vexlyx.com`, or your own server's, if it's been set up to serve DNS publicly).
+2. Changing the domain's nameservers at your registrar to the ones this server shows you. The
+   server administrator must first set `DNS_NAMESERVERS` and serve DNS publicly; until then the
+   page says DNS hosting is not set up, and you keep DNS at your current provider with an A record.
 
 Switching this on seeds the zone with sensible defaults (apex A record, `www` CNAME, NS records)
 and gives you a full record editor — A, AAAA, CNAME, MX, TXT, NS, SRV — with zone file

@@ -237,6 +237,17 @@ F5.22 above was labeling only. As of F5.25 each domain has a `dnsMode`:
 - Subdomains inherit the parent's mode on creation. Existing domains were backfilled by the `add_domain_dns_mode` migration: `MANAGED` if they had any record beyond the `_vexlyx-challenge` TXT, else `CONNECTED`.
 - Testing: with `NODE_ENV=test` or `VEXLYX_MOCK_DNS=true` the delegation check reports delegated; verify a domain with `POST /:id/verify?mock=true` first.
 
+### #247: no nameservers are assumed
+
+`DNS_NAMESERVERS` has no default. When it is unset or empty, no nameserver is advertised and DNS hosting is reported as not configured:
+
+- `POST /api/domains/:id/dns-mode/check` answers `{ "configured": false, "delegated": false, "found": [], "expected": [] }`; with it set, `configured` is `true` and the rest is unchanged.
+- `PATCH /api/domains/:id/dns-mode` with `mode: "MANAGED"` (including `skipDelegationCheck: true`, i.e. "Prepare zone") returns 409 `DNS_HOSTING_NOT_CONFIGURED`.
+- The dashboard's opt-in page shows "DNS hosting is not set up on this server" and points the user at adding an A record at their current DNS provider, instead of the nameserver list and the Enable/Prepare actions.
+- Zone files of domains that are already `MANAGED` keep falling back to `ns1.vexlyx.com`/`ns2.vexlyx.com` for the apex NS/SOA when the zone has no NS records (`zone-file.test.ts`); that is unchanged.
+
+The `ns1.vexlyx.com` / `ns2.vexlyx.com` names in the table above are only the zone-file fallback, not something a self-hosted install can delegate to. Set `DNS_NAMESERVERS` as described below to turn hosting on.
+
 ### F5.27: serving DNS publicly and migrating a live domain
 
 To be a real nameserver the server must answer on a public address without becoming an open resolver:

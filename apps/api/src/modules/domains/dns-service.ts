@@ -591,8 +591,12 @@ export class DnsService {
     const domain = await this.getDomainOrThrow(userId, domainId);
     const expected = env.DNS_NAMESERVERS;
 
+    if (expected.length === 0) {
+      return { configured: false, delegated: false, found: [], expected };
+    }
+
     if (process.env.NODE_ENV === "test" || process.env.VEXLYX_MOCK_DNS === "true") {
-      return { delegated: true, found: expected, expected };
+      return { configured: true, delegated: true, found: expected, expected };
     }
 
     const baseTarget = domain.hostname.startsWith("*.") ? domain.hostname.slice(2) : domain.hostname;
@@ -611,7 +615,7 @@ export class DnsService {
       }
     }
 
-    return { delegated, found: [...found], expected };
+    return { configured: true, delegated, found: [...found], expected };
   }
 
   /**
@@ -630,6 +634,13 @@ export class DnsService {
     if (domain.dnsMode === mode) return domain;
 
     if (mode === "MANAGED") {
+      if (env.DNS_NAMESERVERS.length === 0) {
+        throw new DomainError(
+          "DNS hosting is not set up on this server. Ask the server administrator to set DNS_NAMESERVERS",
+          "DNS_HOSTING_NOT_CONFIGURED",
+          409,
+        );
+      }
       if (domain.status !== "ACTIVE") {
         throw new DomainError(
           "Verify domain ownership before hosting its DNS on Vexlyx",
@@ -638,7 +649,7 @@ export class DnsService {
         );
       }
       const delegation = skipDelegationCheck
-        ? { delegated: true, found: [], expected: env.DNS_NAMESERVERS }
+        ? { configured: true, delegated: true, found: [], expected: env.DNS_NAMESERVERS }
         : await this.checkDelegation(userId, domainId);
       if (!delegation.delegated) {
         throw new DomainError(

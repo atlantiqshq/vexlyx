@@ -4,6 +4,8 @@ All notable changes to Vexlyx are documented here. The format follows [Keep a Ch
 
 ## Unreleased
 
+## [0.4.9] - 2026-11-21
+
 ### Changed
 
 - Explicit `any` types and stray `console.log` calls now fail lint and CI (#58). Operational `console.warn`/`console.error` calls remain allowed; CLI regression probes verify both API and dashboard enforcement.
@@ -37,6 +39,8 @@ All notable changes to Vexlyx are documented here. The format follows [Keep a Ch
 - For #190 there is nothing to configure, no schema or file to migrate, and no certificate to re-upload — `system/python/ssl_manager.py` is not part of the change, because its stdin mode already existed. The caller that changed is TypeScript compiled into the API image, so this one, unlike #192 and #193, is **not** delivered by a `git pull`: an installed panel keeps putting the uploaded key in the helper's argv until `vexlyx-api` is next built. The usual API container replacement is all it needs, and the disclosure window for a key already uploaded does not reopen after that — deciding whether such a key should be rotated is the operator's call, and it turns on whether anything untrusted can read process listings on the host.
 - Anyone who runs the helper by hand, or from the system-layer suites, can keep using `[script, command, json-payload]`; the form the API now uses is `[script]` with `{"command", "payload"}` on stdin, and both answer the same.
 - For #226 an installed panel does nothing — no file it reads changes. It changes what a contributor has to do: adding `tests/test_*.py` now means either naming it in the `test` job or adding a line to `tests/ci-excluded-suites.txt` with the reason, because `python3 tests/check_ci_suite_coverage.py` fails the job otherwise. The same check runs locally in `tests/test_ci_suite_coverage.py`, and the guard prints the offending filenames, so the fix is named for you.
+
+- For #247, a server that serves DNS for its users must now set `DNS_NAMESERVERS` (comma-separated, for example `ns1.example.com,ns2.example.com`) in `/etc/vexlyx/vexlyx.env`; until then the panel says DNS hosting is not set up and refuses to switch a domain to it. A server that never set it was advertising `ns1.vexlyx.com` and `ns2.vexlyx.com`, which nobody operates, so there is nothing to keep. Zones that already exist keep their records. Domains that only point an A record at the server are unaffected.
 
 ## [0.4.8] - 2026-11-05
 

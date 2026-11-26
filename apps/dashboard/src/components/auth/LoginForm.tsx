@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { z } from "zod";
 import { useAuth } from "@/hooks/useAuth";
@@ -33,9 +33,14 @@ type FieldErrors = Partial<Record<"email" | "password" | "code" | "root", string
 export function LoginForm() {
   const { login, confirm2FA } = useAuth();
   const { allowRegistration } = useAuthConfig();
+  const [hydrated, setHydrated] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -130,7 +135,12 @@ export function LoginForm() {
       </CardHeader>
       <CardContent>
         {challengeToken ? (
-          <form key="two-factor" onSubmit={handleCodeSubmit} className="space-y-4">
+          <form
+            key="two-factor"
+            method="post"
+            onSubmit={handleCodeSubmit}
+            className="space-y-4"
+          >
             {errors.root && (
               <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {errors.root}
@@ -173,7 +183,12 @@ export function LoginForm() {
           </form>
         ) : (
           <>
-            <form key="password" onSubmit={handleSubmit} className="space-y-4">
+            <form
+              key="password"
+              method="post"
+              onSubmit={handleSubmit}
+              className="space-y-4"
+            >
               {errors.root && (
                 <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                   {errors.root}
@@ -224,7 +239,7 @@ export function LoginForm() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={isLoading}
+                disabled={!hydrated || isLoading}
               >
                 {isLoading ? "Signing in…" : "Sign in"}
               </Button>

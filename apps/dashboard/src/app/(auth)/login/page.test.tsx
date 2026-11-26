@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import userEvent from "@testing-library/user-event";
 import { ApiRequestError } from "@/lib/api";
 import LoginPage from "./page";
@@ -35,6 +36,17 @@ async function submitCredentials() {
 }
 
 describe("LoginPage", () => {
+  it("renders a POST form with sign-in disabled before hydration", () => {
+    const html = new DOMParser().parseFromString(
+      renderToString(<LoginPage />),
+      "text/html",
+    );
+    expect(html.querySelector("form")?.method).toBe("post");
+    expect(
+      html.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled,
+    ).toBe(true);
+  });
+
   it("renders the sign-in form and submits credentials", async () => {
     render(<LoginPage />);
 
